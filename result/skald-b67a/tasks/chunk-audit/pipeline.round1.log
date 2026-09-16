@@ -1,0 +1,40 @@
+----- 2026-09-06 04:01:59Z
+task llbYfP7u7lzO4VDezIqi  [chunk-audit]  status=Validating  repo=2G9D18szl7aNlQIbAKTv submitted=2026-09-06 00:01
+  ciChecks           Automated checks         passed
+  aiCheck            AI check                 passed
+  similarity         Originality              passed
+  oracleNop          Reference verification   running
+  qualityCheck       Quality review           -
+  easinessProbe      Calibration I            -
+  difficultyProbe    Calibration II           -
+  failureValidation  Run audit                -
+  -- floors (patchStats vs your thresholds) --
+----- 2026-09-06 04:05:01Z
+task llbYfP7u7lzO4VDezIqi  [chunk-audit]  status=Validating  repo=2G9D18szl7aNlQIbAKTv submitted=2026-09-06 00:01
+  ciChecks           Automated checks         passed
+  aiCheck            AI check                 passed
+  similarity         Originality              passed
+  oracleNop          Reference verification   passed
+  qualityCheck       Quality review           running
+  easinessProbe      Calibration I            -
+  difficultyProbe    Calibration II           -
+  failureValidation  Run audit                -
+  -- floors (patchStats vs your thresholds) --
+----- 2026-09-06 04:09:36Z
+task llbYfP7u7lzO4VDezIqi  [chunk-audit]  status=Validation Failed  repo=2G9D18szl7aNlQIbAKTv submitted=2026-09-06 00:01
+  ciChecks           Automated checks         passed
+  aiCheck            AI check                 passed
+  similarity         Originality              passed
+  oracleNop          Reference verification   passed
+  qualityCheck       Quality review           failed / fail
+  easinessProbe      Calibration I            -
+  difficultyProbe    Calibration II           -
+  failureValidation  Run audit                -
+  -- floors (patchStats vs your thresholds) --
+----- 2026-09-06 04:09:36Z TERMINAL
+  qualityCheck       Quality review           failed / fail
+   * failedStage=quality_check: Task quality checks failed: behavior in tests.
+   * ciChecks finding [warning] instruction.md is 294 words — aim under 250. Long specs tend to enumerate internals the solver should discover; state the required behavior and stop. (instruction.md)
+   * ciChecks finding [warning] 5 of your new test titles appear nearly verbatim as sentences in instruction.md ("a constant index past the pool is reported", "a dictionary key naming a string is accepted", "a jump counts from the instruction after it"). Write the instruction as a behavioral spec in developer prose — an instruction that restates the test list reads as derived from the tests instead of specifying the task. (instruction.md)
+   * qualityCheck:behavior_in_tests [fail] The tests cover decoding, indices, calls, jumps, ordering, control flow, and representative stack effects, but the instruction promises that every opcode uses its documented stack effect. Several opcode families (for example most binary/comparison operations, DUP, DECREF, DICT_GET/SET, ARRAY_GET, PRINT, and unary operations) are not tested for underflow or resulting depth, so a materially incomple
+   * qualityCheck: fail

@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/reward-recall"
+
+[metadata]
+task_id = "reward-recall"
+display_title = "Take a tournament payout back and pay it again"
+display_description = "ArenaFlow grants prizes and can never withdraw one: RewardRevoked is a declared event nothing appends, and the claim-window check in engine/rewards/claims.ts has no caller, so claimWindowMs decides nothing. Add revocation, a whole-payout recall that refuses once a prize has been claimed, redistribution as a numbered round that leaves earlier rounds intact, claim windows that actually close, and a statement and balance that read the ledger back."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/PENDING_REPO_ID"
+base_commit_hash = "PENDING_BASE_COMMIT"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "PENDING_IMAGE"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

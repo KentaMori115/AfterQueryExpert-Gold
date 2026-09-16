@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="126" failures="0" errors="0" time="0.220099739">
+    <testsuite name="tests/cli/cli.test.ts" timestamp="2026-09-08T04:26:53.015Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.006125747">
+        <testcase classname="tests/cli/cli.test.ts" name="cli &gt; prints help and version" time="0.002953918">
+        </testcase>
+        <testcase classname="tests/cli/cli.test.ts" name="cli &gt; runs a tournament workflow" time="0.002164163">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/core/shared.test.ts" timestamp="2026-09-08T04:26:53.017Z" hostname="ccb74a68f224" tests="4" failures="0" errors="0" skipped="0" time="0.006922474">
+        <testcase classname="tests/core/shared.test.ts" name="shared primitives &gt; describes the engine" time="0.001297865">
+        </testcase>
+        <testcase classname="tests/core/shared.test.ts" name="shared primitives &gt; validates ids and prefixes" time="0.002145098">
+        </testcase>
+        <testcase classname="tests/core/shared.test.ts" name="shared primitives &gt; keeps clocks deterministic" time="0.000561573">
+        </testcase>
+        <testcase classname="tests/core/shared.test.ts" name="shared primitives &gt; composes explanations and error JSON" time="0.0017129">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/domain/matches.test.ts" timestamp="2026-09-08T04:26:53.019Z" hostname="ccb74a68f224" tests="4" failures="0" errors="0" skipped="0" time="0.006789804">
+        <testcase classname="tests/domain/matches.test.ts" name="match domain &gt; creates a pending match and completes a pair result" time="0.002963497">
+        </testcase>
+        <testcase classname="tests/domain/matches.test.ts" name="match domain &gt; rejects matches with fewer than two unique players" time="0.00049135">
+        </testcase>
+        <testcase classname="tests/domain/matches.test.ts" name="match domain &gt; cannot complete a match that has not started" time="0.000526146">
+        </testcase>
+        <testcase classname="tests/domain/matches.test.ts" name="match domain &gt; supports draws, placements, and voiding" time="0.000665138">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/domain/players.test.ts" timestamp="2026-09-08T04:26:53.022Z" hostname="ccb74a68f224" tests="9" failures="0" errors="0" skipped="0" time="0.009155208">
+        <testcase classname="tests/domain/players.test.ts" name="player domain &gt; creates a frozen player with defaults" time="0.001940149">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player domain &gt; rejects invalid display names" time="0.000667182">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player domain &gt; normalizes and sorts tags" time="0.002177138">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player domain &gt; updates skill, level, vip, and tags immutably" time="0.000529702">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player domain &gt; orders players by skill, then level, then id" time="0.000297423">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player domain &gt; builds a readable summary" time="0.000220357">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player registry &gt; registers, lists, and rejects duplicates" time="0.000594886">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player registry &gt; restores from a snapshot" time="0.000224274">
+        </testcase>
+        <testcase classname="tests/domain/players.test.ts" name="player profile &gt; tracks match outcomes and win rate" time="0.000893399">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/domain/rankings.test.ts" timestamp="2026-09-08T04:26:53.024Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.005883329">
+        <testcase classname="tests/domain/rankings.test.ts" name="ranking domain &gt; builds ranks and movement from previous ranks" time="0.00304984">
+        </testcase>
+        <testcase classname="tests/domain/rankings.test.ts" name="ranking domain &gt; breaks ties with the selected strategy" time="0.000908698">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/domain/rewards.test.ts" timestamp="2026-09-08T04:26:53.025Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.005401368">
+        <testcase classname="tests/domain/rewards.test.ts" name="reward domain &gt; grants, claims, and revokes rewards" time="0.002391754">
+        </testcase>
+        <testcase classname="tests/domain/rewards.test.ts" name="reward domain &gt; allocates prize pool by rank tiers" time="0.001840021">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/domain/scores.test.ts" timestamp="2026-09-08T04:26:53.026Z" hostname="ccb74a68f224" tests="4" failures="0" errors="0" skipped="0" time="0.00458903">
+        <testcase classname="tests/domain/scores.test.ts" name="score domain &gt; applies deltas and tracks streaks" time="0.001415086">
+        </testcase>
+        <testcase classname="tests/domain/scores.test.ts" name="score domain &gt; orders by total, wins, streak, then time" time="0.000273708">
+        </testcase>
+        <testcase classname="tests/domain/scores.test.ts" name="score domain &gt; computes default formula pieces" time="0.00043321">
+        </testcase>
+        <testcase classname="tests/domain/scores.test.ts" name="score domain &gt; evaluates a custom formula deterministically" time="0.000469257">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/domain/seasons.test.ts" timestamp="2026-09-08T04:26:53.031Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.003588727">
+        <testcase classname="tests/domain/seasons.test.ts" name="season domain &gt; activates and closes a season" time="0.001704975">
+        </testcase>
+        <testcase classname="tests/domain/seasons.test.ts" name="season domain &gt; maps score totals onto progression titles" time="0.000821794">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/domain/tournaments.test.ts" timestamp="2026-09-08T04:26:53.031Z" hostname="ccb74a68f224" tests="6" failures="0" errors="0" skipped="0" time="0.006309496">
+        <testcase classname="tests/domain/tournaments.test.ts" name="tournament domain &gt; creates a draft tournament with default scoring" time="0.001687452">
+        </testcase>
+        <testcase classname="tests/domain/tournaments.test.ts" name="tournament domain &gt; rejects unsupported formats and tiny names" time="0.00041246">
+        </testcase>
+        <testcase classname="tests/domain/tournaments.test.ts" name="tournament domain &gt; opens registration, registers unique players, and starts" time="0.001461445">
+        </testcase>
+        <testcase classname="tests/domain/tournaments.test.ts" name="tournament domain &gt; cannot start with fewer than two players" time="0.000353308">
+        </testcase>
+        <testcase classname="tests/domain/tournaments.test.ts" name="tournament domain &gt; unregisters during registration only" time="0.000836362">
+        </testcase>
+        <testcase classname="tests/domain/tournaments.test.ts" name="tournament domain &gt; ends and cancels through legal transitions" time="0.000416267">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/events/journal.test.ts" timestamp="2026-09-08T04:26:53.033Z" hostname="ccb74a68f224" tests="3" failures="0" errors="0" skipped="0" time="0.005604171">
+        <testcase classname="tests/events/journal.test.ts" name="memory event journal &gt; appends events with monotonic sequences" time="0.003128498">
+        </testcase>
+        <testcase classname="tests/events/journal.test.ts" name="memory event journal &gt; rejects duplicate ids and restores a snapshot of events" time="0.000712427">
+        </testcase>
+        <testcase classname="tests/events/journal.test.ts" name="memory event journal &gt; appends batches and can clear the journal" time="0.000293324">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/events/replay.test.ts" timestamp="2026-09-08T04:26:53.035Z" hostname="ccb74a68f224" tests="3" failures="0" errors="0" skipped="0" time="0.010237585">
+        <testcase classname="tests/events/replay.test.ts" name="event replay &gt; rebuilds players, tournaments, and scores from the journal" time="0.00570432">
+        </testcase>
+        <testcase classname="tests/events/replay.test.ts" name="event replay &gt; can stop at an earlier sequence" time="0.000618319">
+        </testcase>
+        <testcase classname="tests/events/replay.test.ts" name="snapshots &gt; restores projected state and continues replay" time="0.002282688">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/anti-cheat.test.ts" timestamp="2026-09-08T04:26:53.036Z" hostname="ccb74a68f224" tests="3" failures="0" errors="0" skipped="0" time="0.004322206">
+        <testcase classname="tests/engine/anti-cheat.test.ts" name="anti-cheat engine &gt; blocks impossible scores, duplicates, and invalid sequences" time="0.002116964">
+        </testcase>
+        <testcase classname="tests/engine/anti-cheat.test.ts" name="anti-cheat engine &gt; warns on abnormal win rates without blocking" time="0.000368147">
+        </testcase>
+        <testcase classname="tests/engine/anti-cheat.test.ts" name="anti-cheat engine &gt; blocks duplicate event ids and zero-time completions" time="0.000600385">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/catalog.test.ts" timestamp="2026-09-08T04:26:53.037Z" hostname="ccb74a68f224" tests="10" failures="0" errors="0" skipped="0" time="0.006014918">
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; lists presets" time="0.001566493">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; preview wins for standard" time="0.000556062">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; preview wins for conservative" time="0.000115399">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; preview wins for aggressive" time="0.000117312">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; preview wins for casual" time="0.000194137">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; falls back to standard for unknown presets" time="0.00012684">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; computes penalty helpers" time="0.000345494">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="scoring presets and catalog &gt; sums bonuses" time="0.00031214">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="tournament helpers &gt; tracks remaining slots" time="0.001007076">
+        </testcase>
+        <testcase classname="tests/engine/catalog.test.ts" name="tournament helpers &gt; labels rank movement" time="0.000281943">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/matchmaking.test.ts" timestamp="2026-09-08T04:26:53.039Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.00508087">
+        <testcase classname="tests/engine/matchmaking.test.ts" name="matchmaking engine &gt; pairs closest skill ratings and drafts balanced teams" time="0.003580984">
+        </testcase>
+        <testcase classname="tests/engine/matchmaking.test.ts" name="matchmaking engine &gt; uses a deterministic rating update" time="0.000378467">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/matrix.test.ts" timestamp="2026-09-08T04:26:53.039Z" hostname="ccb74a68f224" tests="25" failures="0" errors="0" skipped="0" time="0.007297644">
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; aggressive win is finite for vip and non-vip" time="0.001404496">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; aggressive loss is finite for vip and non-vip" time="0.000157969">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; aggressive draw is finite for vip and non-vip" time="0.000144443">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; aggressive forfeit is finite for vip and non-vip" time="0.000129364">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; casual win is finite for vip and non-vip" time="0.000141467">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; casual loss is finite for vip and non-vip" time="0.000115228">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; casual draw is finite for vip and non-vip" time="0.000152638">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; casual forfeit is finite for vip and non-vip" time="0.000096813">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; conservative win is finite for vip and non-vip" time="0.000096183">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; conservative loss is finite for vip and non-vip" time="0.000107264">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; conservative draw is finite for vip and non-vip" time="0.000134935">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; conservative forfeit is finite for vip and non-vip" time="0.000135056">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; standard win is finite for vip and non-vip" time="0.000072998">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; standard loss is finite for vip and non-vip" time="0.00006347">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; standard draw is finite for vip and non-vip" time="0.000055415">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="scoring matrix &gt; standard forfeit is finite for vip and non-vip" time="0.000080563">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="ranking strategies &gt; orders two scores with score_wins_streak_time_id" time="0.001263399">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="ranking strategies &gt; orders two scores with score_time_id" time="0.000224985">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="ranking strategies &gt; orders two scores with score_id" time="0.000184068">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="format handbook &gt; describes leaderboard" time="0.000447998">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="format handbook &gt; describes round_robin" time="0.000186172">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="format handbook &gt; describes elimination" time="0.000184379">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="format handbook &gt; describes team" time="0.000095941">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="format handbook &gt; describes time_challenge" time="0.000093306">
+        </testcase>
+        <testcase classname="tests/engine/matrix.test.ts" name="format handbook &gt; lists every format summary" time="0.000167637">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/ranking.test.ts" timestamp="2026-09-08T04:26:53.044Z" hostname="ccb74a68f224" tests="3" failures="0" errors="0" skipped="0" time="0.005601276">
+        <testcase classname="tests/engine/ranking.test.ts" name="ranking engine &gt; orders a live leaderboard and records movement" time="0.002782163">
+        </testcase>
+        <testcase classname="tests/engine/ranking.test.ts" name="ranking engine &gt; breaks equal scores with the configured strategy" time="0.00117396">
+        </testcase>
+        <testcase classname="tests/engine/ranking.test.ts" name="ranking engine &gt; tracks rank history and peak rank" time="0.000644749">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/rewards.test.ts" timestamp="2026-09-08T04:26:53.044Z" hostname="ccb74a68f224" tests="1" failures="0" errors="0" skipped="0" time="0.004307107">
+        <testcase classname="tests/engine/rewards.test.ts" name="reward engine &gt; distributes prize tiers and tracks claims" time="0.003371377">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/rules.test.ts" timestamp="2026-09-08T04:26:53.045Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.006245324">
+        <testcase classname="tests/engine/rules.test.ts" name="rule engine &gt; accepts eligible players and explains vip multipliers" time="0.003714497">
+        </testcase>
+        <testcase classname="tests/engine/rules.test.ts" name="rule engine &gt; rejects banned tags, low levels, and vip-only events" time="0.001159854">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/scenarios.test.ts" timestamp="2026-09-08T04:26:53.045Z" hostname="ccb74a68f224" tests="13" failures="0" errors="0" skipped="0" time="0.016084796">
+        <testcase classname="tests/engine/scenarios.test.ts" name="multi-match scenarios &gt; awards a five win streak bonus on the fifth win" time="0.007550052">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="multi-match scenarios &gt; keeps VIP scoring above a non-VIP win" time="0.000578675">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="multi-match scenarios &gt; breaks a two-player tie by earlier update time" time="0.00020642">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="multi-match scenarios &gt; rejects an under-leveled player" time="0.000363969">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="multi-match scenarios &gt; pairs four players into two matches" time="0.001374079">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="multi-match scenarios &gt; records audit entries from journal events" time="0.000690307">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="code catalog &gt; recognizes known explanation families" time="0.000458829">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="scoring preview matrix &gt; previews a win without vip" time="0.000212332">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="scoring preview matrix &gt; previews a loss without vip" time="0.000113064">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="scoring preview matrix &gt; previews a draw without vip" time="0.001013577">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="scoring preview matrix &gt; previews a forfeit without vip" time="0.000518281">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="anti-cheat sequence helpers &gt; allows a started match to complete" time="0.000779344">
+        </testcase>
+        <testcase classname="tests/engine/scenarios.test.ts" name="registration capacity &gt; fills a two-player cup" time="0.000236327">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/scoring.test.ts" timestamp="2026-09-08T04:26:53.048Z" hostname="ccb74a68f224" tests="3" failures="0" errors="0" skipped="0" time="0.006743396">
+        <testcase classname="tests/engine/scoring.test.ts" name="scoring engine &gt; awards default win and loss points" time="0.003398158">
+        </testcase>
+        <testcase classname="tests/engine/scoring.test.ts" name="scoring engine &gt; adds a 5-win streak bonus and vip multiplier" time="0.001361795">
+        </testcase>
+        <testcase classname="tests/engine/scoring.test.ts" name="scoring engine &gt; subtracts extra penalties and supports custom formulas" time="0.000700515">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/seasons.test.ts" timestamp="2026-09-08T04:26:53.049Z" hostname="ccb74a68f224" tests="1" failures="0" errors="0" skipped="0" time="0.003935715">
+        <testcase classname="tests/engine/seasons.test.ts" name="season manager &gt; opens, closes, and resets ranks" time="0.002771101">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/engine/tournament.test.ts" timestamp="2026-09-08T04:26:53.049Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.013779364">
+        <testcase classname="tests/engine/tournament.test.ts" name="tournament service lifecycle &gt; registers players, records a match, ranks, and pays the winner" time="0.009321873">
+        </testcase>
+        <testcase classname="tests/engine/tournament.test.ts" name="tournament formats &gt; builds elimination, round robin, team, and time-challenge artifacts" time="0.001775519">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/examples/recipes.test.ts" timestamp="2026-09-08T04:26:53.050Z" hostname="ccb74a68f224" tests="12" failures="0" errors="0" skipped="0" time="0.01509306">
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; exposes a named catalog" time="0.002678727">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Weekend Cup" time="0.001671812">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create VIP Invitational" time="0.000348409">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Rookie Rumble" time="0.000336386">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Elimination Eight" time="0.000298655">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Round Robin Six" time="0.000290569">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Team Clash" time="0.000251796">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Blitz Hour" time="0.000274239">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Casino Sit and Go" time="0.000427498">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Fantasy Lock" time="0.000404716">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="tournament recipes &gt; can create Mobile Daily" time="0.000703019">
+        </testcase>
+        <testcase classname="tests/examples/recipes.test.ts" name="reports &gt; renders standings narrative" time="0.005222198">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/examples/walkthrough.test.ts" timestamp="2026-09-08T04:26:53.052Z" hostname="ccb74a68f224" tests="1" failures="0" errors="0" skipped="0" time="0.009268953">
+        <testcase classname="tests/examples/walkthrough.test.ts" name="weekend cup walkthrough &gt; produces a deterministic report" time="0.008278801">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/integration/api.test.ts" timestamp="2026-09-08T04:26:53.053Z" hostname="ccb74a68f224" tests="1" failures="0" errors="0" skipped="0" time="0.011415614">
+        <testcase classname="tests/integration/api.test.ts" name="REST API &gt; walks a tournament from registration through rewards" time="0.010272271">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/integration/replay-seasons.test.ts" timestamp="2026-09-08T04:26:53.054Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.008081286">
+        <testcase classname="tests/integration/replay-seasons.test.ts" name="replay and season integration &gt; replays a completed tournament from the journal" time="0.00625422">
+        </testcase>
+        <testcase classname="tests/integration/replay-seasons.test.ts" name="replay and season integration &gt; closes a season and resets scores" time="0.000594274">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/persistence/memory.test.ts" timestamp="2026-09-08T04:26:53.054Z" hostname="ccb74a68f224" tests="2" failures="0" errors="0" skipped="0" time="0.00593652">
+        <testcase classname="tests/persistence/memory.test.ts" name="memory persistence &gt; stores aggregates and lists them deterministically" time="0.004045402">
+        </testcase>
+        <testcase classname="tests/persistence/memory.test.ts" name="memory persistence &gt; reloads state from journal after replace" time="0.000841592">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/persistence/sqlite.test.ts" timestamp="2026-09-08T04:26:53.055Z" hostname="ccb74a68f224" tests="1" failures="0" errors="0" skipped="0" time="0.010644355">
+        <testcase classname="tests/persistence/sqlite.test.ts" name="sqlite persistence &gt; persists events, aggregates, and snapshots" time="0.009564832">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/sdk/client.test.ts" timestamp="2026-09-08T04:26:53.055Z" hostname="ccb74a68f224" tests="1" failures="0" errors="0" skipped="0" time="0.009640396">
+        <testcase classname="tests/sdk/client.test.ts" name="sdk client &gt; creates players and tournaments in memory" time="0.008559961">
+        </testcase>
+    </testsuite>
+</testsuites>

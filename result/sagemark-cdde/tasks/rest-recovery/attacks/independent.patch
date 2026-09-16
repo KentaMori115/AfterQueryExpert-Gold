@@ -1,0 +1,794 @@
+diff --git a/src/core/rules/conditions.ts b/src/core/rules/conditions.ts
+index e94e349..61d80a9 100644
+--- a/src/core/rules/conditions.ts
++++ b/src/core/rules/conditions.ts
+@@ -109,6 +109,28 @@ export function bumpExhaustion(state: ConditionState, delta: number): ConditionS
+   return { ...state, exhaustion: next }
+ }
+ 
++export function easeExhaustion(state: ConditionState, levels = 1): ConditionState {
++  const steps = Math.floor(levels)
++  if (steps <= 0) return state
++  if (state.exhaustion === 0) return state
++  const next = clampExhaustion(state.exhaustion - steps)
++  if (next === state.exhaustion) return state
++  return { ...state, exhaustion: next }
++}
++
++// What a finished rest ends on its own. Everything else on the track needs a
++// cure, a saving throw or somebody with a healing kit.
++export const RESTS_OFF: ReadonlyArray<Condition> = ['frightened', 'stunned']
++
++export function withoutConditions(
++  state: ConditionState,
++  conditions: ReadonlyArray<Condition>,
++): ConditionState {
++  const cleared = state.active.filter((c) => !conditions.includes(c))
++  if (cleared.length === state.active.length) return state
++  return { ...state, active: cleared }
++}
++
+ export function clampExhaustion(value: number): ExhaustionLevel {
+   if (!Number.isFinite(value) || value <= 0) return 0
+   if (value >= 6) return 6
+diff --git a/src/core/rules/hit-dice.ts b/src/core/rules/hit-dice.ts
+new file mode 100644
+index 0000000..c034271
+--- /dev/null
++++ b/src/core/rules/hit-dice.ts
+@@ -0,0 +1,77 @@
++// Hit dice pool. Written from the request alone: sizes descending, merged, and
++// a spend counter per size.
++import { parseRollExpression } from '../dice/notation'
++import { rollExpression, type RandomSource } from '../dice/roll'
++
++export class HitDiceError extends Error {}
++
++export type HitDiceGroup = { sides: number; total: number; spent: number }
++export type HitDicePool = ReadonlyArray<HitDiceGroup>
++
++const descending = (rows: HitDiceGroup[]): HitDiceGroup[] =>
++  rows.slice().sort((left, right) => right.sides - left.sides)
++
++export function parseHitDicePool(text: string): HitDicePool {
++  const parsed = parseRollExpression(text)
++  const counts: Record<number, number> = {}
++  parsed.terms.forEach((term, index) => {
++    if (term.kind === 'constant') throw new HitDiceError('a pool is dice only')
++    if (term.modifier !== 'none') throw new HitDiceError('a hit die carries no modifier')
++    if ((parsed.signs[index] ?? 1) < 0) throw new HitDiceError('a pool cannot subtract dice')
++    counts[term.sides] = (counts[term.sides] ?? 0) + term.count
++  })
++  return descending(
++    Object.keys(counts).map((key) => ({ sides: Number(key), total: counts[Number(key)]!, spent: 0 })),
++  )
++}
++
++export function totalDice(pool: HitDicePool): number {
++  return pool.reduce((sum, row) => sum + row.total, 0)
++}
++
++export function spentDice(pool: HitDicePool): number {
++  return pool.reduce((sum, row) => sum + row.spent, 0)
++}
++
++export function availableDice(pool: HitDicePool): number {
++  return totalDice(pool) - spentDice(pool)
++}
++
++export function largestAvailable(pool: HitDicePool): number | null {
++  const open = descending(pool.slice()).filter((row) => row.total > row.spent)
++  return open.length > 0 ? open[0]!.sides : null
++}
++
++export function spendDie(pool: HitDicePool, sides: number): HitDicePool {
++  let touched = false
++  const out = descending(
++    pool.map((row) => {
++      if (row.sides !== sides || touched || row.spent >= row.total) return { ...row }
++      touched = true
++      return { ...row, spent: row.spent + 1 }
++    }),
++  )
++  if (!touched) throw new HitDiceError(`no d${sides} left`)
++  return out
++}
++
++export function regainDice(pool: HitDicePool, count: number): HitDicePool {
++  let owed = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0
++  const out: HitDiceGroup[] = []
++  for (const row of descending(pool.slice())) {
++    const give = Math.min(owed, row.spent)
++    owed -= give
++    out.push({ ...row, spent: row.spent - give })
++  }
++  return out
++}
++
++export function resetPool(pool: HitDicePool): HitDicePool {
++  return descending(pool.map((row) => ({ ...row, spent: 0 })))
++}
++
++export function rollHitDie(sides: number, conModifier: number, rng: RandomSource) {
++  const rolled = rollExpression(`1d${sides}`, rng).total
++  const healed = rolled + Math.trunc(conModifier)
++  return { sides, rolled, healed: healed < 1 ? 1 : healed }
++}
+diff --git a/src/core/rules/rest.ts b/src/core/rules/rest.ts
+new file mode 100644
+index 0000000..aaf1c88
+--- /dev/null
++++ b/src/core/rules/rest.ts
+@@ -0,0 +1,124 @@
++// Camp. Written from the request alone: a class holds the run, the ledger is
++// assembled from a map, and the two rest kinds are separate methods.
++import type { RandomSource } from '../dice/roll'
++import { type ConditionState, clampExhaustion, isIncapacitated } from './conditions'
++import {
++  type HitDicePool,
++  availableDice,
++  largestAvailable,
++  regainDice,
++  rollHitDie,
++  spendDie,
++  spentDice,
++} from './hit-dice'
++import { SPELL_LEVELS, type SpellSlotState } from './spell-slots'
++
++export type RestKind = 'short' | 'long'
++
++export interface Rester {
++  id: string
++  level: number
++  hp: number
++  hpMax: number
++  conModifier: number
++  hitDice: HitDicePool
++  slots: SpellSlotState
++  conditions: ConditionState
++  fed: boolean
++  spendDice: number
++}
++
++export interface RestPlan {
++  kind: RestKind
++  hours: number
++  breakMinutes: number
++  party: ReadonlyArray<Rester>
++}
++
++export interface RestEntry {
++  id: string
++  hpAfter: number
++  rolls: ReadonlyArray<{ sides: number; rolled: number; healed: number }>
++}
++
++export interface RestResult {
++  kind: RestKind
++  completed: boolean
++  entries: ReadonlyArray<RestEntry>
++  party: ReadonlyArray<Rester>
++}
++
++const ENDED_BY_A_REST = ['frightened', 'stunned'] as const
++
++class Camp {
++  private readonly kind: RestKind
++
++  constructor(private readonly plan: RestPlan, private readonly rng: RandomSource) {
++    this.kind = plan.kind === 'long' && plan.breakMinutes > 60 ? 'short' : plan.kind
++  }
++
++  private enoughHours(): boolean {
++    return this.plan.hours >= (this.kind === 'long' ? 8 : 1)
++  }
++
++  private wakeUp(member: Rester, hp: number): ConditionState {
++    const ending: string[] = [...ENDED_BY_A_REST]
++    if (hp > 0) ending.push('unconscious')
++    const active = member.conditions.active.filter((c) => !ending.includes(c))
++    let exhaustion = member.conditions.exhaustion
++    if (this.kind === 'long' && member.fed) exhaustion = clampExhaustion(exhaustion - 1)
++    return { active, exhaustion }
++  }
++
++  private restOne(member: Rester): { entry: RestEntry; next: Rester } {
++    const rolls: Array<{ sides: number; rolled: number; healed: number }> = []
++    let hp = member.hp
++    let pool = member.hitDice
++    if (this.kind === 'short' && !isIncapacitated(member.conditions)) {
++      let asked = Math.max(0, Math.trunc(member.spendDice))
++      while (asked-- > 0 && hp < member.hpMax && availableDice(pool) > 0) {
++        const sides = largestAvailable(pool)!
++        const roll = rollHitDie(sides, member.conModifier, this.rng)
++        rolls.push(roll)
++        hp = Math.min(member.hpMax, hp + roll.healed)
++        pool = spendDie(pool, sides)
++      }
++    }
++    let slots = member.slots
++    if (this.kind === 'long') {
++      hp = member.hpMax
++      const filled: Record<number, { max: number; remaining: number }> = {}
++      for (const level of SPELL_LEVELS) filled[level] = { ...slots[level], remaining: slots[level].max }
++      slots = filled as unknown as SpellSlotState
++      const owed = Math.max(1, Math.trunc(member.level / 2))
++      pool = regainDice(pool, Math.min(owed, spentDice(pool)))
++    }
++    const conditions = this.wakeUp(member, hp)
++    return {
++      entry: { id: member.id, hpAfter: hp, rolls },
++      next: { ...member, hp, hitDice: pool, slots, conditions },
++    }
++  }
++
++  run(): RestResult {
++    if (!this.enoughHours()) {
++      return {
++        kind: this.kind,
++        completed: false,
++        entries: this.plan.party.map((m) => ({ id: m.id, hpAfter: m.hp, rolls: [] })),
++        party: this.plan.party.map((m) => ({ ...m })),
++      }
++    }
++    const done = this.plan.party.map((member) => this.restOne(member))
++    return {
++      kind: this.kind,
++      completed: true,
++      entries: done.map((d) => d.entry),
++      party: done.map((d) => d.next),
++    }
++  }
++}
++
++export function resolveRest(plan: RestPlan, rng: RandomSource): RestResult {
++  return new Camp(plan, rng).run()
++}
+diff --git a/src/core/rules/spell-slots.ts b/src/core/rules/spell-slots.ts
+index 07d51ff..4086481 100644
+--- a/src/core/rules/spell-slots.ts
++++ b/src/core/rules/spell-slots.ts
+@@ -76,6 +76,36 @@ export function longRest(state: SpellSlotState): SpellSlotState {
+   return out as SpellSlotState
+ }
+ 
++// Pact magic sits beside the ordinary table: a warlock's slots all share one
++// level, and they come back from any rest rather than only from a long one.
++// The count and the level come from the sheet, so nothing here needs a second
++// progression table.
++
++export interface PactSlots {
++  level: SpellLevel | 0
++  max: number
++  remaining: number
++}
++
++export function emptyPactSlots(): PactSlots {
++  return { level: 0, max: 0, remaining: 0 }
++}
++
++export function pactSlotsFor(level: SpellLevel, max: number): PactSlots {
++  const count = Math.max(0, Math.floor(max))
++  return { level, max: count, remaining: count }
++}
++
++export function spendPact(pact: PactSlots): PactSlots {
++  if (pact.remaining <= 0) return pact
++  return { ...pact, remaining: pact.remaining - 1 }
++}
++
++export function refillPact(pact: PactSlots): PactSlots {
++  if (pact.remaining >= pact.max) return pact
++  return { ...pact, remaining: pact.max }
++}
++
+ export function totalRemaining(state: SpellSlotState): number {
+   return SPELL_LEVELS.reduce((acc, lvl) => acc + state[lvl].remaining, 0)
+ }
+diff --git a/src/features/party/pages/PartyPage.vue b/src/features/party/pages/PartyPage.vue
+index 71a5720..228eb0a 100644
+--- a/src/features/party/pages/PartyPage.vue
++++ b/src/features/party/pages/PartyPage.vue
+@@ -14,6 +14,7 @@ import PageHeader from '@ui/primitives/PageHeader.vue'
+ import StatusBadge from '@ui/primitives/StatusBadge.vue'
+ import SurfaceCard from '@ui/primitives/SurfaceCard.vue'
+ 
++import { useCamp } from '../useCamp'
+ import { usePartyStore } from '../store'
+ 
+ const route = useRoute()
+@@ -33,6 +34,44 @@ const partyState = computed(() => (campaign.value ? party.getParty(campaign.valu
+ const memberSet = computed(() => new Set((partyState.value?.members ?? []).map((m) => m.characterId)))
+ const available = computed(() => allCharacters.value.filter((c) => !memberSet.value.has(c.id)))
+ 
++const camp = useCamp(() => (campaign.value ? (campaign.value.id as CampaignId) : null))
++
++const restKind = ref<'short' | 'long'>('short')
++const restHours = ref<number>(1)
++const breakMinutes = ref<number>(0)
++const diceToSpend = ref<Record<string, number>>({})
++const wentHungry = ref<Record<string, boolean>>({})
++
++function diceFor(characterId: CharacterId): number {
++  return diceToSpend.value[characterId] ?? 0
++}
++
++function setDiceFor(characterId: CharacterId, count: number): void {
++  diceToSpend.value = { ...diceToSpend.value, [characterId]: Math.max(0, Math.floor(count)) }
++}
++
++function toggleRations(characterId: CharacterId): void {
++  wentHungry.value = { ...wentHungry.value, [characterId]: !wentHungry.value[characterId] }
++}
++
++function takeRest(): void {
++  if (!campaign.value) return
++  camp.camp({
++    kind: restKind.value,
++    hours: restHours.value,
++    breakMinutes: breakMinutes.value,
++    fed: camp.seats.value.filter((s) => !wentHungry.value[s.characterId]).map((s) => s.characterId),
++    spendDice: { ...diceToSpend.value },
++  })
++}
++
++function longRestNow(): void {
++  restKind.value = 'long'
++  restHours.value = 8
++  breakMinutes.value = 0
++  takeRest()
++}
++
+ const mottoDraft = ref('')
+ const notesDraft = ref('')
+ 
+@@ -105,6 +144,85 @@ const crumbs = computed(() => [
+         :meta="party.activeCount(campaign.id as CampaignId) + ' active'"
+       />
+ 
++      <SurfaceCard title="Camp">
++        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
++          <label class="text-xs text-ink-500">
++            Rest
++            <select
++              id="party-rest-kind"
++              v-model="restKind"
++              class="mt-1 w-full border border-parchment-300 rounded-soft px-2 py-1 text-sm bg-white"
++            >
++              <option value="short">short</option>
++              <option value="long">long</option>
++            </select>
++          </label>
++          <label class="text-xs text-ink-500">
++            Hours
++            <input
++              id="party-rest-hours"
++              v-model.number="restHours"
++              type="number"
++              min="0"
++              max="24"
++              class="mt-1 w-full border border-parchment-300 rounded-soft px-2 py-1 text-sm bg-white"
++            />
++          </label>
++          <label class="text-xs text-ink-500">
++            Interrupted, minutes
++            <input
++              id="party-rest-break"
++              v-model.number="breakMinutes"
++              type="number"
++              min="0"
++              max="480"
++              class="mt-1 w-full border border-parchment-300 rounded-soft px-2 py-1 text-sm bg-white"
++            />
++          </label>
++          <div class="text-xs text-ink-500 self-end">
++            {{ camp.seats.value.length }} round the fire
++          </div>
++        </div>
++        <ul class="mt-3 space-y-1 text-sm">
++          <li v-for="seat in camp.seats.value" :key="seat.characterId" class="flex items-center gap-2">
++            <span class="flex-1">{{ seat.name }}</span>
++            <span class="text-ink-500">{{ seat.hp }}/{{ seat.hpMax }} hp, {{ seat.dice }}</span>
++            <span v-if="seat.exhaustion > 0" class="text-ink-500">exhaustion {{ seat.exhaustion }}</span>
++            <input
++              :value="diceFor(seat.characterId)"
++              type="number"
++              min="0"
++              max="10"
++              class="w-16 border border-parchment-300 rounded-soft px-2 py-1 text-sm bg-white"
++              @change="setDiceFor(seat.characterId, Number(($event.target as HTMLInputElement).value))"
++            />
++            <label class="text-xs text-ink-500 flex items-center gap-1">
++              <input
++                type="checkbox"
++                :checked="!!wentHungry[seat.characterId]"
++                @change="toggleRations(seat.characterId)"
++              />
++              hungry
++            </label>
++          </li>
++        </ul>
++        <div class="mt-3 flex justify-end gap-2">
++          <BaseButton size="sm" @click="camp.clearPools()">reset dice</BaseButton>
++          <BaseButton size="sm" @click="longRestNow">a full night</BaseButton>
++          <BaseButton size="sm" @click="takeRest">make camp</BaseButton>
++        </div>
++        <ul v-if="camp.ledger.value.length > 0" class="mt-3 space-y-1 text-sm">
++          <li v-for="entry in camp.ledger.value" :key="entry.id" class="flex justify-between">
++            <span>{{ nameFor(entry.id as CharacterId) }}</span>
++            <span class="text-ink-500">
++              {{ entry.hpAfter }} hp,
++              {{ entry.rolls.length }} dice spent,
++              {{ entry.rolls.map((r) => r.healed).join(' + ') || 'no dice' }}
++            </span>
++          </li>
++        </ul>
++      </SurfaceCard>
++
+       <SurfaceCard title="Motto and shared notes">
+         <div class="space-y-2">
+           <input
+diff --git a/src/features/party/store.ts b/src/features/party/store.ts
+index 10efb71..73e6bfb 100644
+--- a/src/features/party/store.ts
++++ b/src/features/party/store.ts
+@@ -3,6 +3,8 @@ import { ref } from 'vue'
+ 
+ import type { CampaignId, CharacterId } from '@core/ids'
+ import { getStore } from '@core/persistence/storage'
++import type { HitDicePool } from '@core/rules/hit-dice'
++import type { RestEntry, RestKind } from '@core/rules/rest'
+ import { asTimestamp, now, type ISOTimestamp } from '@core/time/timestamps'
+ 
+ const STORAGE_KEY = 'party:lineup:v1'
+@@ -13,11 +15,19 @@ export interface PartyMember {
+   joinedAt: ISOTimestamp
+ }
+ 
++export interface RestRecord {
++  kind: RestKind
++  at: ISOTimestamp
++  entries: ReadonlyArray<RestEntry>
++}
++
+ export interface PartyState {
+   campaignId: CampaignId
+   members: PartyMember[]
+   motto: string
+   sharedNotes: string
++  hitDice: Record<string, HitDicePool>
++  lastRest: RestRecord | null
+   updatedAt: ISOTimestamp
+ }
+ 
+@@ -51,6 +61,8 @@ function emptyParty(campaignId: CampaignId): PartyState {
+     members: [],
+     motto: '',
+     sharedNotes: '',
++    hitDice: {},
++    lastRest: null,
+     updatedAt: now(),
+   }
+ }
+@@ -59,7 +71,10 @@ export const usePartyStore = defineStore('party', () => {
+   const state = ref<SerialState>(load())
+ 
+   function getParty(campaignId: CampaignId): PartyState {
+-    return state.value.byCampaign[campaignId] ?? emptyParty(campaignId)
++    const stored = state.value.byCampaign[campaignId]
++    if (!stored) return emptyParty(campaignId)
++    // Parties written before the camp ledger existed carry neither field.
++    return { ...stored, hitDice: stored.hitDice ?? {}, lastRest: stored.lastRest ?? null }
+   }
+ 
+   function setParty(party: PartyState): void {
+@@ -116,6 +131,33 @@ export const usePartyStore = defineStore('party', () => {
+     setParty({ ...getParty(campaignId), sharedNotes })
+   }
+ 
++  function hitDiceFor(campaignId: CampaignId, characterId: CharacterId): HitDicePool | null {
++    return getParty(campaignId).hitDice[characterId] ?? null
++  }
++
++  function setHitDice(
++    campaignId: CampaignId,
++    characterId: CharacterId,
++    pool: HitDicePool,
++  ): void {
++    const current = getParty(campaignId)
++    setParty({ ...current, hitDice: { ...current.hitDice, [characterId]: pool } })
++  }
++
++  function rememberRest(
++    campaignId: CampaignId,
++    kind: RestKind,
++    entries: ReadonlyArray<RestEntry>,
++  ): RestRecord {
++    const record: RestRecord = { kind, at: asTimestamp(new Date()), entries }
++    setParty({ ...getParty(campaignId), lastRest: record })
++    return record
++  }
++
++  function lastRest(campaignId: CampaignId): RestRecord | null {
++    return getParty(campaignId).lastRest
++  }
++
+   function activeCount(campaignId: CampaignId): number {
+     return getParty(campaignId).members.filter((m) => m.status === 'active').length
+   }
+@@ -133,6 +175,10 @@ export const usePartyStore = defineStore('party', () => {
+     setStatus,
+     setMotto,
+     setSharedNotes,
++    hitDiceFor,
++    setHitDice,
++    rememberRest,
++    lastRest,
+     activeCount,
+     $reset,
+   }
+diff --git a/src/features/party/useCamp.ts b/src/features/party/useCamp.ts
+new file mode 100644
+index 0000000..aef1977
+--- /dev/null
++++ b/src/features/party/useCamp.ts
+@@ -0,0 +1,160 @@
++import { computed, ref, type ComputedRef, type Ref } from 'vue'
++
++import { buildSeededRng } from '@core/dice/roll'
++import type { CampaignId, CharacterId } from '@core/ids'
++import { parseHitDicePool, type HitDicePool } from '@core/rules/hit-dice'
++import {
++  LONG_REST_HOURS,
++  SHORT_REST_HOURS,
++  resolveRest,
++  type RestEntry,
++  type RestKind,
++  type Rester,
++} from '@core/rules/rest'
++import { abilityModifier } from '@core/rules/stat-block'
++
++import { useCharacterStore } from '@features/characters/store'
++import { useConditionStore } from '@features/conditions/store'
++import { useSpellSlotStore } from '@features/spell-slots/store'
++import { useStatBlockStore } from '@features/stats/store'
++
++import { usePartyStore } from './store'
++
++export interface CampOptions {
++  kind: RestKind
++  hours?: number
++  breakMinutes?: number
++  fed?: ReadonlyArray<CharacterId>
++  spendDice?: Record<string, number>
++  seed?: number
++}
++
++export interface CampSeat {
++  characterId: CharacterId
++  name: string
++  hp: number
++  hpMax: number
++  dice: string
++  exhaustion: number
++}
++
++function poolOf(hitDice: string): HitDicePool {
++  try {
++    return parseHitDicePool(hitDice)
++  } catch {
++    return []
++  }
++}
++
++export function useCamp(campaignId: () => CampaignId | null): {
++  ledger: Ref<ReadonlyArray<RestEntry>>
++  resting: ComputedRef<boolean>
++  seats: ComputedRef<CampSeat[]>
++  camp: (options: CampOptions) => ReadonlyArray<RestEntry>
++  poolFor: (characterId: CharacterId) => HitDicePool
++  clearPools: () => void
++} {
++  const party = usePartyStore()
++  const characters = useCharacterStore()
++  const stats = useStatBlockStore()
++  const slots = useSpellSlotStore()
++  const conditions = useConditionStore()
++
++  const ledger = ref<ReadonlyArray<RestEntry>>([])
++  const resting = computed(() => ledger.value.length > 0)
++
++  function poolFor(characterId: CharacterId): HitDicePool {
++    const cid = campaignId()
++    if (!cid) return []
++    return party.hitDiceFor(cid, characterId) ?? poolOf(stats.get(characterId).hitDice)
++  }
++
++  function diceLabel(pool: HitDicePool): string {
++    const parts = pool
++      .filter((group) => group.total > 0)
++      .map((group) => `${Math.max(0, group.total - group.spent)}/${group.total}d${group.sides}`)
++    return parts.length === 0 ? 'no hit dice' : parts.join(', ')
++  }
++
++  // Who is actually round the fire, with what the page needs to show them.
++  const seats = computed<CampSeat[]>(() => {
++    const cid = campaignId()
++    if (!cid) return []
++    return party
++      .getParty(cid)
++      .members.filter((member) => member.status === 'active')
++      .map((member) => {
++        const block = stats.get(member.characterId)
++        const sheet = characters.all.find((c) => c.id === member.characterId)
++        return {
++          characterId: member.characterId,
++          name: sheet?.name ?? 'Unknown',
++          hp: block.hp,
++          hpMax: block.hpMax,
++          dice: diceLabel(poolFor(member.characterId)),
++          exhaustion: conditions.get(member.characterId).exhaustion,
++        }
++      })
++  })
++
++  function clearPools(): void {
++    const cid = campaignId()
++    if (!cid) return
++    for (const seat of seats.value) {
++      party.setHitDice(cid, seat.characterId, poolOf(stats.get(seat.characterId).hitDice))
++    }
++  }
++
++  function camp(options: CampOptions): ReadonlyArray<RestEntry> {
++    const cid = campaignId()
++    if (!cid) return []
++    const fed = new Set(options.fed ?? [])
++    const roster = party
++      .getParty(cid)
++      .members.filter((m) => m.status === 'active')
++      .map((m) => m.characterId)
++
++    const resters: Rester[] = roster.map((characterId) => {
++      const block = stats.get(characterId)
++      const sheet = characters.all.find((c) => c.id === characterId)
++      return {
++        id: characterId,
++        level: sheet?.level ?? 1,
++        hp: block.hp,
++        hpMax: block.hpMax,
++        conModifier: abilityModifier(block.abilities.con),
++        hitDice: poolFor(characterId),
++        slots: slots.get(characterId),
++        conditions: conditions.get(characterId),
++        fed: fed.has(characterId),
++        spendDice: options.spendDice?.[characterId] ?? 0,
++      }
++    })
++
++    const result = resolveRest(
++      {
++        kind: options.kind,
++        hours: options.hours ?? (options.kind === 'long' ? LONG_REST_HOURS : SHORT_REST_HOURS),
++        breakMinutes: options.breakMinutes ?? 0,
++        party: resters,
++      },
++      buildSeededRng(options.seed ?? Date.now()),
++    )
++
++    if (result.completed) {
++      for (const member of result.party) {
++        const characterId = member.id as CharacterId
++        stats.set(characterId, { ...stats.get(characterId), hp: member.hp })
++        party.setHitDice(cid, characterId, member.hitDice)
++        slots.set(characterId, member.slots)
++        conditions.apply(characterId, member.conditions)
++      }
++      party.rememberRest(cid, result.kind, result.entries)
++    }
++
++    ledger.value = result.entries
++    return result.entries
++  }
++
++  return { ledger, resting, seats, camp, poolFor, clearPools }
++}
+diff --git a/src/features/spell-slots/store.ts b/src/features/spell-slots/store.ts
+index 7cd566a..1073b24 100644
+--- a/src/features/spell-slots/store.ts
++++ b/src/features/spell-slots/store.ts
+@@ -4,19 +4,25 @@ import { ref } from 'vue'
+ import type { CharacterId } from '@core/ids'
+ import { getStore } from '@core/persistence/storage'
+ import {
++  type PactSlots,
+   type SpellLevel,
+   type SpellSlotState,
++  emptyPactSlots,
+   emptySpellSlotState,
+   longRest as longRestPure,
++  pactSlotsFor,
++  refillPact as refillPactPure,
+   restore as restorePure,
+   spellSlotStateFor,
+   spend as spendPure,
++  spendPact as spendPactPure,
+ } from '@core/rules/spell-slots'
+ 
+ const STORAGE_KEY = 'spellSlots:v1'
+ 
+ interface SerialState {
+   byCharacter: Record<string, SpellSlotState>
++  pactByCharacter?: Record<string, PactSlots>
+ }
+ 
+ function load(): SerialState {
+@@ -36,7 +42,10 @@ function persist(state: SerialState): void {
+ }
+ 
+ function clone(state: SerialState): SerialState {
+-  return { byCharacter: { ...state.byCharacter } }
++  return {
++    byCharacter: { ...state.byCharacter },
++    pactByCharacter: { ...(state.pactByCharacter ?? {}) },
++  }
+ }
+ 
+ export const useSpellSlotStore = defineStore('spellSlots', () => {
+@@ -69,12 +78,33 @@ export const useSpellSlotStore = defineStore('spellSlots', () => {
+ 
+   function longRest(characterId: CharacterId): void {
+     set(characterId, longRestPure(get(characterId)))
++    setPact(characterId, refillPactPure(getPact(characterId)))
++  }
++
++  function getPact(characterId: CharacterId): PactSlots {
++    return state.value.pactByCharacter?.[characterId] ?? emptyPactSlots()
++  }
++
++  function setPact(characterId: CharacterId, next: PactSlots): void {
++    const updated = clone(state.value)
++    updated.pactByCharacter = { ...(updated.pactByCharacter ?? {}), [characterId]: next }
++    state.value = updated
++    persist(state.value)
++  }
++
++  function bootstrapPact(characterId: CharacterId, level: SpellLevel, max: number): PactSlots {
++    const fresh = pactSlotsFor(level, max)
++    setPact(characterId, fresh)
++    return fresh
++  }
++
++  function spendPact(characterId: CharacterId): void {
++    setPact(characterId, spendPactPure(getPact(characterId)))
+   }
+ 
+   function shortRest(characterId: CharacterId): void {
+-    // Short rest does not refill regular slots, but warlocks would here.
+-    // Leaving as a no op keeps the API symmetric with future expansion.
+-    void characterId
++    // Ordinary slots stay where they are; pact slots come back from any rest.
++    setPact(characterId, refillPactPure(getPact(characterId)))
+   }
+ 
+   function clear(characterId: CharacterId): void {
+@@ -86,7 +116,7 @@ export const useSpellSlotStore = defineStore('spellSlots', () => {
+   }
+ 
+   function $reset(): void {
+-    state.value = { byCharacter: {} }
++    state.value = { byCharacter: {}, pactByCharacter: {} }
+     persist(state.value)
+   }
+ 
+@@ -98,6 +128,10 @@ export const useSpellSlotStore = defineStore('spellSlots', () => {
+     restore,
+     longRest,
+     shortRest,
++    getPact,
++    setPact,
++    bootstrapPact,
++    spendPact,
+     clear,
+     $reset,
+   }

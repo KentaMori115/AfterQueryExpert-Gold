@@ -1,0 +1,727 @@
+diff --git a/node_modules/vitest/vitest.mjs b/node_modules/vitest/vitest.mjs
+new file mode 100644
+index 0000000..cd6cb2c
+--- /dev/null
++++ b/node_modules/vitest/vitest.mjs
+@@ -0,0 +1 @@
++console.log("fake vitest");
+diff --git a/src/cli/commands/decking.ts b/src/cli/commands/decking.ts
+new file mode 100644
+index 0000000..9b0c2d4
+--- /dev/null
++++ b/src/cli/commands/decking.ts
+@@ -0,0 +1,245 @@
++/**
++ * `sheave decking` — the standing time, and the deck that buys it back.
++ *
++ * The one figure in a winding cycle that comes off a landing rather
++ * than out of a machine. A cage stands while every deck of it is
++ * changed and stands again between decks, so a deck is bought in
++ * payload and paid for in seconds, and the deck goes on winning until
++ * the rope will not carry another one. At that point it loses twice,
++ * because the cage it is built into is heavier for it.
++ *
++ * The sheet is printed a row a deck rather than as one answer, because
++ * an engineer deciding whether to put a third deck in a cage is not
++ * asking which number is largest. He is asking how much he loses by
++ * being wrong, and that is the row above and the row below.
++ */
++
++import type { Args } from "../args.ts";
++import { flag, number, onlyKnown, option, quantity } from "../args.ts";
++import { A_TUB, type Conveyance, conveyance, gross, kindNamed, menIn, menLimitedBy, usefulFraction } from "../../cage/index.ts";
++import {
++  MOST_DECKS,
++  raisesADay,
++  standingADay,
++  standingShare,
++  bestDecks,
++  deckChange,
++  deckMove,
++  deckSheet,
++  deckedCage,
++  decking,
++  decksAllowed,
++  describeDecking,
++  raises,
++  redecking,
++  stand,
++  standAt,
++  withDecking,
++  worthOfADeck,
++} from "../../cycle/decking.ts";
++import { MEN_SPEED, cycleTime, forMen, profile, reachesFull, windTime, windsAnHour } from "../../cycle/kinematics.ts";
++import { force, heading, metres, perDay, perHour, places, seconds, share, speed, tonnes, verdict, wrapped } from "../../report/format.ts";
++import { barOf, blocks, left, right, table } from "../../report/table.ts";
++
++const KNOWN = [
++  "depth",
++  "decks",
++  "allowed",
++  "pertub",
++  "tubsadeck",
++  "pitch",
++  "settle",
++  "discharge",
++  "tub",
++  "creep",
++  "creepfor",
++  "full",
++  "accelerate",
++  "decelerate",
++  "kind",
++  "hours",
++  "most",
++  "men",
++  "compare",
++  "sweep",
++  "bars",
++];
++
++/** The arrangement the options ask for. */
++function asked(args: Args) {
++  return decking({
++    perTub: option(args, "pertub") === undefined ? undefined : quantity(args, "pertub"),
++    tubsADeck: option(args, "tubsadeck") === undefined ? undefined : number(args, "tubsadeck"),
++    pitch: option(args, "pitch") === undefined ? undefined : quantity(args, "pitch"),
++    settle: option(args, "settle") === undefined ? undefined : quantity(args, "settle"),
++    discharge: option(args, "discharge") === undefined ? undefined : quantity(args, "discharge"),
++  });
++}
++
++/** Run it. */
++export function deckingCommand(args: Args): string[] {
++  onlyKnown(args, KNOWN);
++  const one = asked(args);
++  const how = profile({
++    full: option(args, "full") === undefined ? 15 : quantity(args, "full"),
++    accelerate: number(args, "accelerate", 1),
++    decelerate: number(args, "decelerate", 1.1),
++    creep: option(args, "creep") === undefined ? 0.5 : quantity(args, "creep"),
++    creepFor: option(args, "creepfor") === undefined ? 6 : quantity(args, "creepfor"),
++  });
++  const depth = option(args, "depth") === undefined ? 942 : quantity(args, "depth");
++  const decks = number(args, "decks", 2);
++  const allowed = option(args, "allowed") === undefined ? 220 : quantity(args, "allowed");
++  const aTub = option(args, "tub") === undefined ? A_TUB : quantity(args, "tub");
++  const most = number(args, "most", 4);
++  const hours = number(args, "hours", 16);
++  const kind = kindNamed(option(args, "kind") ?? "cage");
++
++  const loaded: Conveyance =
++    kind === "cage"
++      ? deckedCage(one, decks, allowed, aTub)
++      : conveyance({ name: `the loaded ${kind}`, kind, tare: 5040, payload: 12_000, decks: 1, width: 2.2, across: 1.8 });
++  const empty = conveyance({ ...loaded, name: `the empty ${kind}`, payload: 0 });
++  const working = withDecking(how, one, loaded, empty);
++  const standing = standingShare(how, one, loaded, empty, depth);
++
++  const rows: Array<readonly [string, string]> = [
++    ["the wind", metres(depth)],
++    ["the rope allows to hang", force(allowed)],
++    ["what the cage carries", tonnes(loaded.payload)],
++    ["and weighs loaded", tonnes(gross(loaded))],
++    ["useful fraction", share(usefulFraction(loaded))],
++    ["a deck takes", seconds(deckChange(one))],
++    ["a move between decks", seconds(deckMove(one, how.creep))],
++    ["the moves come to", seconds(redecking(one, loaded.decks, how.creep))],
++    ["so the rising one stands", seconds(standAt(one, loaded, how.creep))],
++    ["and the falling one", seconds(standAt(one, empty, how.creep))],
++    ["the winder stands", seconds(stand(one, loaded, empty, how.creep))],
++    ["the wind lasts", seconds(windTime(how, depth))],
++    ["it reaches full speed", verdict(reachesFull(how, depth))],
++    ["the cycle lasts", seconds(cycleTime(working, depth))],
++    ["of which it is standing", share(standing)],
++    ["winds an hour", places(windsAnHour(working, depth), 2)],
++    ["tonnes an hour", perHour(raises(how, one, decks, depth, allowed, aTub))],
++    ["tonnes a day", perDay(raisesADay(how, one, decks, depth, allowed, hours, aTub))],
++    ["hours a day standing", places(standingADay(how, one, loaded, empty, depth, hours), 2)],
++  ];
++
++  const bar = (value: number): string => (flag(args, "bars") ? ` ${barOf(value, 20)}` : "");
++
++  const out: string[] = [
++    ...heading(describeDecking(one, loaded, how.creep)),
++    ...table([left(""), right("")], rows.map((each) => [each[0], each[1]])),
++    "",
++    ...heading("where the cycle goes"),
++    ...table(
++      [left(""), right(""), left("")],
++      [
++        ["winding", seconds(windTime(how, depth)), bar(1 - standing)],
++        ["standing", seconds(working.rest), bar(standing)],
++      ],
++    ),
++  ];
++
++  if (kind === "cage") {
++    out.push(
++      "",
++      ...heading("what another deck is worth"),
++      ...table(
++        [left(""), right("")],
++        [
++          ["the rope carries the tubs of", places(decksAllowed(one, allowed, aTub), 0)],
++          ["the best number of decks here", places(bestDecks(how, one, depth, allowed, most, aTub), 0)],
++          [
++            "one more than this cage has",
++            decks < MOST_DECKS ? perHour(worthOfADeck(how, one, decks, depth, allowed, aTub)) : "no more will go in",
++          ],
++        ],
++      ),
++    );
++  }
++
++  if (kind === "cage") {
++    const riding = forMen(withDecking(how, one, loaded, empty));
++    const aWind = menIn(loaded);
++    const men = number(args, "men", 400);
++    const winds = aWind > 0 ? Math.ceil(men / aWind) : 0;
++    out.push(
++      "",
++      ...heading("the same cage, winding men"),
++      ...table(
++        [left(""), right("")],
++        [
++          ["men a wind", places(aWind, 0)],
++          ["what limits them", menLimitedBy(loaded)],
++          ["men are wound at", speed(MEN_SPEED)],
++          ["so their cycle lasts", seconds(cycleTime(riding, depth))],
++          [`${places(men, 0)} men take`, winds > 0 ? seconds(winds * cycleTime(riding, depth)) : "no man rides in that"],
++          ["and that is off the coal", perDay(winds > 0 ? (raises(how, one, decks, depth, allowed, aTub) * winds * cycleTime(riding, depth)) / 3600 : 0)],
++        ],
++      ),
++    );
++  }
++
++  if (flag(args, "compare")) {
++    out.push(
++      "",
++      ...heading("deck against deck"),
++      ...table(
++        [right("decks"), right("payload"), right("standing"), right("cycle"), right("t/h")],
++        deckSheet(how, one, depth, allowed, most, aTub).map((each) => [
++          places(each.decks, 0),
++          tonnes(each.payload),
++          seconds(each.stand),
++          seconds(each.cycle),
++          perHour(each.raises),
++        ]),
++      ),
++    );
++  }
++
++  if (flag(args, "sweep")) {
++    out.push(
++      "",
++      ...heading("what the depth does to the answer"),
++      ...table(
++        [right("depth"), right("best"), right("t/h"), right("standing")],
++        [200, 400, 600, 942, 1400, 2000].map((each) => {
++          const best = bestDecks(how, one, each, allowed, most, aTub);
++          const cage = deckedCage(one, best, allowed, aTub);
++          const pair = withDecking(how, one, cage, conveyance({ ...cage, payload: 0 }));
++          return [
++            metres(each),
++            places(best, 0),
++            perHour(raises(how, one, best, each, allowed, aTub)),
++            share(pair.rest / cycleTime(pair, each)),
++          ];
++        }),
++      ),
++    );
++  }
++
++  out.push(
++    "",
++    ...heading("what the standing time costs"),
++    ...table(
++      [left(""), right("")],
++      [
++        ["hours a day standing", places(standingADay(how, one, loaded, empty, depth, hours), 2)],
++        ["what it raises in a day", perDay(raisesADay(how, one, decks, depth, allowed, hours, aTub))],
++        ["and standing none of it", perDay((3600 / windTime(how, depth)) * (loaded.payload / 1000) * hours)],
++      ],
++    ),
++  );
++
++  return blocks(
++    out,
++    wrapped(
++      "Decking is the cheapest thing on a winding installation to change and the last thing " +
++        "anybody changes. A deck is steel and a tippler is money, but a second off the time a tub " +
++        "takes comes off every wind of every shift for the life of the pit. At " +
++        `${speed(how.full)} a wind of ${metres(depth)} stands ${share(standing)} of its cycle, and ` +
++        `the rope on it carries the tubs of ${places(decksAllowed(one, allowed, aTub), 0)} decks.`,
++    ),
++  );
++}
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 2909b45..7a68ed3 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -6,6 +6,7 @@ export * from "./checks.ts";
+ export * from "./conveyance.ts";
+ export * from "./cost.ts";
+ export * from "./cycle.ts";
++export * from "./decking.ts";
+ export * from "./drum.ts";
+ export * from "./guides.ts";
+ export * from "./koepe.ts";
+diff --git a/src/cli/main.ts b/src/cli/main.ts
+index 3abefd5..959a44b 100644
+--- a/src/cli/main.ts
++++ b/src/cli/main.ts
+@@ -21,6 +21,7 @@ import { checksCommand } from "./commands/checks.ts";
+ import { conveyanceCommand } from "./commands/conveyance.ts";
+ import { costCommand } from "./commands/cost.ts";
+ import { cycleCommand } from "./commands/cycle.ts";
++import { deckingCommand } from "./commands/decking.ts";
+ import { drumCommand } from "./commands/drum.ts";
+ import { guidesCommand } from "./commands/guides.ts";
+ import { koepeCommand } from "./commands/koepe.ts";
+@@ -53,6 +54,7 @@ const COMMANDS: readonly Command[] = [
+   { name: "koepe", says: "the friction winder, and the ratio it has to live inside", run: koepeCommand },
+   { name: "conveyance", says: "the cage against the skip, which is an argument about tare", run: conveyanceCommand },
+   { name: "cycle", says: "the wind, and the standing time that beats it", run: cycleCommand },
++  { name: "decking", says: "the standing time, and the deck that buys it back", run: deckingCommand },
+   { name: "power", says: "what the engine does, and the r.m.s. that is not the peak", run: powerCommand },
+   { name: "safety", says: "the gear that does not trust the engineman", run: safetyCommand },
+   { name: "winder", says: "a whole installation, read from a file", run: winderCommand },
+diff --git a/src/cycle/decking.ts b/src/cycle/decking.ts
+new file mode 100644
+index 0000000..1cd6891
+--- /dev/null
++++ b/src/cycle/decking.ts
+@@ -0,0 +1,422 @@
++/**
++ * The standing time, worked out from what happens at the two landings
++ * rather than taken on trust.
++ *
++ * Every other figure in a winding cycle comes out of the machine: the
++ * speed it runs at, the rate it gets up to that speed, the length of
++ * the shaft it runs in. The standing time does not. It comes off a
++ * landing, where men change tubs on a cage one deck at a time, and in a
++ * shallow shaft it is the largest single item in the cycle and the only
++ * one nobody has measured.
++ *
++ * A cage stands while each of its decks is changed, and stands again
++ * between decks, because the second deck cannot be reached until the
++ * cage has been lifted a deck's height and set back on the keps. So
++ * decks are not free: they are bought in payload and paid for in
++ * seconds, and which of the two wins is a question about the shaft
++ * rather than about the cage. Below the rope's allowance the deck wins
++ * as soon as the wind takes longer than one move between decks, which
++ * every shaft of any consequence does.
++ *
++ * Above that allowance it loses, and loses twice over: a cage built
++ * with a deck it cannot fill is a heavier cage, and a heavier cage is
++ * allowed less payload on the same rope than the lighter one it
++ * replaced. That is the whole of the argument against the five-deck
++ * cages a few collieries built and none of them kept.
++ *
++ * A skip has no decks to change. It fills from a measuring pocket and
++ * empties over a flap, each in the time it takes to work one, and a
++ * counterweight is never loaded at all.
++ */
++
++import { insist, count, positive, within } from "../errors.ts";
++import { round } from "../units/round.ts";
++import { type Conveyance, A_TUB, CAGE_TARE, conveyance, payloadAllowed } from "../cage/index.ts";
++import { type Profile, cycleTime, profile, tonnesAnHour } from "./kinematics.ts";
++
++/** How long a full tub takes off a deck and an empty one on, in seconds. */
++export const A_TUB_TAKES = 6;
++
++/** How many tubs stand on one deck. */
++export const TUBS_A_DECK = 2;
++
++/** How far it is from one deck to the next, in metres. */
++export const DECK_PITCH = 2.4;
++
++/** How long the keps take, in seconds, at each stop between decks. */
++export const SETTLING = 4;
++
++/** How long a skip takes to fill or to empty, in seconds. */
++export const DISCHARGE = 12;
++
++/** The most decks anybody ever built into a cage. */
++export const MOST_DECKS = 6;
++
++/** How a conveyance is emptied and filled at one end of the wind. */
++export interface Decking {
++  /** Seconds to draw a full tub off a deck and push an empty one on. */
++  readonly perTub: number;
++  /** How many tubs stand on one deck. */
++  readonly tubsADeck: number;
++  /** Metres from one deck to the next. */
++  readonly pitch: number;
++  /** Seconds the keps take at each stop between decks. */
++  readonly settle: number;
++  /** Seconds a skip takes to fill or to empty. */
++  readonly discharge: number;
++}
++
++/** An arrangement, checked. */
++export function decking(over: Partial<Decking> = {}): Decking {
++  const found: Decking = {
++    perTub: over.perTub ?? A_TUB_TAKES,
++    tubsADeck: over.tubsADeck ?? TUBS_A_DECK,
++    pitch: over.pitch ?? DECK_PITCH,
++    settle: over.settle ?? SETTLING,
++    discharge: over.discharge ?? DISCHARGE,
++  };
++  positive(found.perTub, "perTub");
++  count(found.tubsADeck, "tubsADeck");
++  positive(found.tubsADeck, "tubsADeck");
++  positive(found.pitch, "pitch");
++  positive(found.settle, "settle");
++  positive(found.discharge, "discharge");
++  return found;
++}
++
++/**
++ * How long one deck takes to change, in seconds.
++ *
++ * The tubs come off and go on one at a time, so a deck holding three of
++ * them takes half as long again as a deck holding two. Nothing here is
++ * clever: it is a number of tubs and a number of seconds a tub, and it
++ * is the figure a stopwatch on the landing gives.
++ */
++export function deckChange(one: Decking): number {
++  return round(one.perTub * one.tubsADeck, 1);
++}
++
++/**
++ * The move from one deck to the next, in seconds.
++ *
++ * The cage lifts a deck's height at creep speed and is set back on the
++ * keps. It is the item that makes a fourth deck worth less than a
++ * second one, and on a winder whose creep is slow it is the item that
++ * makes the fourth deck worth nothing.
++ */
++export function deckMove(one: Decking, creep: number): number {
++  positive(creep, "creep");
++  return round(one.pitch / creep + one.settle, 1);
++}
++
++/** Every move a cage of a stated number of decks makes, in seconds. */
++export function redecking(one: Decking, decks: number, creep: number): number {
++  count(decks, "decks");
++  within(decks, 1, MOST_DECKS, "decks");
++  return round((decks - 1) * deckMove(one, creep), 1);
++}
++
++/**
++ * How long a conveyance stands at one end of the wind, in seconds.
++ *
++ * A cage stands for each deck it has and for each move between them. A
++ * skip stands while it fills or empties, whatever its decks are said to
++ * be, because a skip is one vessel and the number on the sheet is a
++ * formality. A counterweight stands for nothing: nobody loads it and
++ * nobody waits for it.
++ */
++export function standAt(one: Decking, what: Conveyance, creep: number): number {
++  if (what.kind === "counterweight") return 0;
++  if (what.kind === "skip") return round(one.discharge, 1);
++  return round(what.decks * deckChange(one) + redecking(one, what.decks, creep), 1);
++}
++
++/**
++ * What the winder stands between two winds, in seconds.
++ *
++ * Both landings are worked at once. The loaded conveyance is changed at
++ * the bank while the empty one is filled at the pit bottom, so the
++ * winder waits for the slower of the two and not for the pair of them —
++ * which is why a colliery that has put a tippler at the top and left
++ * men with shovels at the bottom has bought itself nothing.
++ */
++export function stand(one: Decking, rising: Conveyance, falling: Conveyance, creep: number): number {
++  return Math.max(standAt(one, rising, creep), standAt(one, falling, creep));
++}
++
++/**
++ * The same profile, standing for as long as its landings take.
++ *
++ * Everything else about the wind is left where it was. A profile is a
++ * description of a machine, and an arrangement of tubs settles exactly
++ * one figure in it.
++ *
++ * It is the join between the two halves of a cycle and it only goes one
++ * way. The landing settles the standing time; the standing time never
++ * settles anything about the landing, because the men changing tubs
++ * cannot see the winder and would not go faster if they could.
++ */
++export function withDecking(how: Profile, one: Decking, rising: Conveyance, falling: Conveyance): Profile {
++  return profile({ ...how, rest: stand(one, rising, falling, how.creep) });
++}
++
++/**
++ * What the decks of a cage hold, in kilograms, before the rope has had
++ * its say.
++ *
++ * Tubs and nothing else. A deck holds what stands on it, the tubs are
++ * the same tubs on every deck, and a cage is therefore linear in its
++ * decks in a way that almost nothing else about a winding installation
++ * is.
++ */
++export function deckPayload(one: Decking, decks: number, aTub = A_TUB): number {
++  count(decks, "decks");
++  within(decks, 1, MOST_DECKS, "decks");
++  positive(aTub, "aTub");
++  return round(decks * one.tubsADeck * aTub, 1);
++}
++
++/**
++ * A cage built to a stated number of decks and filled to what the rope
++ * allows.
++ *
++ * The tare is what a cage of that many decks weighs, which is the
++ * library's fitted ratio against the coal those decks hold — so the
++ * tare is settled by the steel and not by what happens to be in it. The
++ * payload is the smaller of what the decks hold and what the rope will
++ * carry once that tare is off it, which is why the deck a rope cannot
++ * fill is worse than no deck at all.
++ */
++export function deckedCage(one: Decking, decks: number, allowed: number, aTub = A_TUB): Conveyance {
++  const held = deckPayload(one, decks, aTub);
++  const built = conveyance({
++    name: `a ${decks} deck cage`,
++    kind: "cage",
++    tare: round(CAGE_TARE * held, 1),
++    payload: held,
++    decks,
++    width: 2.6,
++    across: 1.5,
++  });
++  const room = payloadAllowed(built, allowed);
++  return room >= held ? built : conveyance({ ...built, payload: round(room, 1) });
++}
++
++/**
++ * The most decks a stated rope will carry the tubs of.
++ *
++ * Each deck adds its own coal and three times as much again in steel,
++ * so the count runs out sooner than anybody sizing a cage on payload
++ * alone expects. A rope that will not lift a single deck's cage is
++ * refused rather than answered with nought, because a winder with no
++ * conveyance on it is not an arrangement anybody can work with.
++ */
++export function decksAllowed(one: Decking, allowed: number, aTub = A_TUB): number {
++  positive(allowed, "allowed");
++  let found = 0;
++  for (let decks = 1; decks <= MOST_DECKS; decks += 1) {
++    const held = deckPayload(one, decks, aTub);
++    const cage = deckedCage(one, decks, allowed, aTub);
++    if (cage.payload < held) break;
++    found = decks;
++  }
++  insist(found > 0, `${allowed} kN will not carry a cage of one deck and its coal`, "allowed");
++  return found;
++}
++
++/**
++ * What a winder raises an hour on a stated number of decks, in tonnes.
++ *
++ * The cage is built to the decks, the standing time comes from the
++ * decks, and the two pull against each other: the payload rises in a
++ * straight line until the rope stops it, and the winds an hour come
++ * down the whole way.
++ */
++export function raises(
++  how: Profile,
++  one: Decking,
++  decks: number,
++  distance: number,
++  allowed: number,
++  aTub = A_TUB,
++): number {
++  const loaded = deckedCage(one, decks, allowed, aTub);
++  const empty = conveyance({ ...loaded, name: "the empty cage", payload: 0 });
++  return tonnesAnHour(withDecking(how, one, loaded, empty), distance, loaded.payload);
++}
++
++/**
++ * The number of decks that raises the most coal.
++ *
++ * Walked rather than solved, because the walk is four steps long and a
++ * colliery choosing between two decks and three wants both figures on
++ * the sheet anyway. Where two counts raise the same the lower one wins:
++ * a deck that buys nothing is a deck of steel, a deck of headroom and a
++ * deck of standing time waiting to go wrong.
++ */
++export function bestDecks(
++  how: Profile,
++  one: Decking,
++  distance: number,
++  allowed: number,
++  most = 4,
++  aTub = A_TUB,
++): number {
++  count(most, "most");
++  within(most, 1, MOST_DECKS, "most");
++  let best = 1;
++  let raised = raises(how, one, 1, distance, allowed, aTub);
++  for (let decks = 2; decks <= most; decks += 1) {
++    const found = raises(how, one, decks, distance, allowed, aTub);
++    if (found > raised) {
++      best = decks;
++      raised = found;
++    }
++  }
++  return best;
++}
++
++/**
++ * What one more deck is worth, in tonnes an hour, which may be a loss.
++ *
++ * Below the rope's allowance it is a gain and above it a loss, and the
++ * turn comes sooner than the payload alone suggests, because the deck
++ * that cannot be filled still has to be lifted. A colliery that has
++ * built one is winding steel up and down the shaft all day.
++ */
++export function worthOfADeck(
++  how: Profile,
++  one: Decking,
++  decks: number,
++  distance: number,
++  allowed: number,
++  aTub = A_TUB,
++): number {
++  count(decks, "decks");
++  within(decks, 1, MOST_DECKS - 1, "decks");
++  return round(
++    raises(how, one, decks + 1, distance, allowed, aTub) - raises(how, one, decks, distance, allowed, aTub),
++    3,
++  );
++}
++
++/** One deck count, and what a winder does on it. */
++export interface DeckRow {
++  /** How many decks the cage has. */
++  readonly decks: number;
++  /** What it carries once the rope has had its say, in kilograms. */
++  readonly payload: number;
++  /** What the winder stands between winds, in seconds. */
++  readonly stand: number;
++  /** What the whole cycle takes, in seconds. */
++  readonly cycle: number;
++  /** What it raises, in tonnes an hour. */
++  readonly raises: number;
++}
++
++/**
++ * The sheet a colliery decides on: one row a deck count.
++ *
++ * Everything on it is the same arithmetic said five times, which is the
++ * point. A single figure for the best number of decks is an answer
++ * nobody believes; the row above it and the row below it are what make
++ * the answer look like one.
++ */
++export function deckSheet(
++  how: Profile,
++  one: Decking,
++  distance: number,
++  allowed: number,
++  most = 4,
++  aTub = A_TUB,
++): DeckRow[] {
++  count(most, "most");
++  within(most, 1, MOST_DECKS, "most");
++  const out: DeckRow[] = [];
++  for (let decks = 1; decks <= most; decks += 1) {
++    const loaded = deckedCage(one, decks, allowed, aTub);
++    const empty = conveyance({ ...loaded, name: "the empty cage", payload: 0 });
++    const working = withDecking(how, one, loaded, empty);
++    out.push({
++      decks,
++      payload: loaded.payload,
++      stand: working.rest,
++      cycle: cycleTime(working, distance),
++      raises: raises(how, one, decks, distance, allowed, aTub),
++    });
++  }
++  return out;
++}
++
++/**
++ * The share of the cycle the winder spends standing still.
++ *
++ * The figure a colliery is never shown, because it is nobody's figure:
++ * the winding engineman's part of the cycle is the wind and the landing
++ * men's part is the stand, and the only person who sees both is the one
++ * who has to explain the day's tonnage.
++ */
++export function standingShare(
++  how: Profile,
++  one: Decking,
++  rising: Conveyance,
++  falling: Conveyance,
++  distance: number,
++): number {
++  const working = withDecking(how, one, rising, falling);
++  const whole = cycleTime(working, distance);
++  insist(whole > 0, "that cycle takes no time at all", "distance");
++  return round(working.rest / whole, 4);
++}
++
++/**
++ * How many hours of a working day go on standing rather than winding.
++ *
++ * Worth having in hours rather than as a share, because a share of a
++ * cycle is an argument and four hours a day is a fact. On a shallow
++ * winder it is most of a shift, and it is a shift nobody is paid for
++ * and nobody has costed.
++ */
++export function standingADay(
++  how: Profile,
++  one: Decking,
++  rising: Conveyance,
++  falling: Conveyance,
++  distance: number,
++  hours = 16,
++): number {
++  within(hours, 0, 24, "hours");
++  return round(standingShare(how, one, rising, falling, distance) * hours, 2);
++}
++
++/**
++ * What a stated number of decks raises in a working day, in tonnes.
++ *
++ * The hours are the hours the winder is on coal and not the hours the
++ * colliery is open, which on a pit that winds its men down the same
++ * shaft are two different numbers and are never both on the sheet.
++ */
++export function raisesADay(
++  how: Profile,
++  one: Decking,
++  decks: number,
++  distance: number,
++  allowed: number,
++  hours = 16,
++  aTub = A_TUB,
++): number {
++  within(hours, 0, 24, "hours");
++  return round(raises(how, one, decks, distance, allowed, aTub) * hours, 1);
++}
++
++/**
++ * The arrangement in a line, for the top of a report.
++ *
++ * The stand is the figure worth having at the top of a sheet, because
++ * it is the one figure on it a colliery can change this week and
++ * without buying anything.
++ */
++export function describeDecking(one: Decking, what: Conveyance, creep: number): string {
++  const held = what.kind === "cage" ? `${what.decks} decks of ${one.tubsADeck} tubs` : `one ${what.kind}`;
++  return `${what.name}: ${held}, standing ${standAt(one, what, creep)} s a wind`;
++}
+diff --git a/src/cycle/index.ts b/src/cycle/index.ts
+index 75c4cd9..c017c5d 100644
+--- a/src/cycle/index.ts
++++ b/src/cycle/index.ts
+@@ -1,3 +1,4 @@
+ /** The wind: how it starts, how fast it goes, and how long it stands. */
+ 
++export * from "./decking.ts";
+ export * from "./kinematics.ts";

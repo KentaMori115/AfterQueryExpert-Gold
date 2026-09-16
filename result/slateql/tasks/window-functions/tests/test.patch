@@ -1,0 +1,1446 @@
+diff --git a/tests/test_depot_sales.py b/tests/test_depot_sales.py
+new file mode 100644
+index 0000000..4a9b4a5
+--- /dev/null
++++ b/tests/test_depot_sales.py
+@@ -0,0 +1,393 @@
++"""How windows sit in a query: row order, pruning, grouping and placement."""
++
++from __future__ import annotations
++
++import pytest
++
++from slateql import Session
++from slateql.config import SessionConfig
++from slateql.errors import SlateQLError
++from slateql.types.datatypes import INTEGER, STRING
++from slateql.types.schema import Schema
++
++SALES_SCHEMA = Schema.of(
++    ("ticket", INTEGER),
++    ("depot", STRING),
++    ("crates", INTEGER),
++)
++
++# Arrival order is neither depot order nor crate order, so any query that comes
++# back sorted has reordered rows it was not asked to reorder.  Every crate count
++# differs, so nothing below depends on how ties are broken.
++SALES_ROWS = [
++    [101, "kiel", 5],
++    [102, "arles", 9],
++    [103, "kiel", 2],
++    [104, "bruges", 7],
++    [105, "arles", 6],
++    [106, "kiel", 4],
++]
++
++ARRIVAL = [101, 102, 103, 104, 105, 106]
++
++
++def sales(**options) -> Session:
++    """A session holding the sales table, optionally reconfigured."""
++
++    session = Session(config=SessionConfig(**options)) if options else Session()
++    session.register_rows("sales", SALES_SCHEMA, SALES_ROWS)
++    return session
++
++
++def first_column(session: Session, sql: str) -> list:
++    """Run ``sql`` and return its first column, in the order rows came back."""
++
++    return [row[0] for row in session.sql(sql).rows]
++
++
++def test_tickets_come_back_as_they_went_in():
++    """A window sorts internally; the statement did not ask for a sort."""
++
++    order = first_column(
++        sales(),
++        "SELECT ticket, ROW_NUMBER() OVER (ORDER BY crates) AS n FROM sales",
++    )
++    assert order == ARRIVAL
++
++
++def test_depot_totals_do_not_regroup_the_output():
++    """Grouping rows into partitions must not group them in the output."""
++
++    order = first_column(
++        sales(),
++        "SELECT ticket, SUM(crates) OVER (PARTITION BY depot) AS total FROM sales",
++    )
++    assert order == ARRIVAL
++
++
++def test_ranked_and_split_and_still_unsorted():
++    """Both halves of the window at once, and the rows still arrive as they were."""
++
++    order = first_column(
++        sales(),
++        "SELECT ticket, RANK() OVER (PARTITION BY depot ORDER BY crates DESC) AS r "
++        "FROM sales",
++    )
++    assert order == ARRIVAL
++
++
++def test_an_explicit_sort_is_obeyed():
++    """An explicit ORDER BY is the one thing that may change the row order."""
++
++    order = first_column(
++        sales(),
++        "SELECT ticket, COUNT(*) OVER () AS seen FROM sales ORDER BY crates, ticket",
++    )
++    assert order == [103, 106, 101, 105, 104, 102]
++
++
++def test_crates_drive_the_numbering_unseen():
++    """crates never reaches the output and still drives the ranking."""
++
++    result = sales().sql(
++        "SELECT ROW_NUMBER() OVER (ORDER BY crates) AS n FROM sales"
++    )
++    assert result.columns == ["n"]
++    assert [row[0] for row in result.rows] == [3, 6, 1, 5, 4, 2]
++
++
++def test_depot_groups_the_totals_unseen():
++    """Same for the partition key: depot is read, never returned."""
++
++    result = sales().sql(
++        "SELECT SUM(crates) OVER (PARTITION BY depot) AS total FROM sales"
++    )
++    assert result.columns == ["total"]
++    assert [row[0] for row in result.rows] == [11, 15, 11, 7, 15, 11]
++
++
++def test_same_answer_with_the_optimizer_off():
++    """The answer is the same whether or not the optimizer touched the plan."""
++
++    query = (
++        "SELECT DENSE_RANK() OVER (PARTITION BY depot ORDER BY crates) AS r "
++        "FROM sales"
++    )
++    optimized = [row[0] for row in sales().sql(query).rows]
++    plain = [row[0] for row in sales(optimize=False).sql(query).rows]
++    assert optimized == plain
++    assert optimized == [3, 2, 1, 1, 1, 2]
++
++
++def test_depots_ranked_by_the_total_they_made():
++    """RANK over SUM: one row per depot, ranked by the total it just computed."""
++
++    result = sales().sql(
++        "SELECT depot, SUM(crates) AS total, "
++        "RANK() OVER (ORDER BY SUM(crates) DESC) AS place "
++        "FROM sales GROUP BY depot"
++    )
++    assert result.rows == [["kiel", 11, 2], ["arles", 15, 1], ["bruges", 7, 3]]
++
++
++def test_counting_depots_rather_than_tickets():
++    """The window sits above the grouping, so it sees three rows, not six."""
++
++    result = sales().sql(
++        "SELECT depot, COUNT(*) OVER () AS depots FROM sales GROUP BY depot"
++    )
++    assert result.rows == [["kiel", 3], ["arles", 3], ["bruges", 3]]
++
++
++def test_the_tickets_across_every_depot():
++    """SUM over COUNT: the window folds the counts the grouping just made."""
++
++    result = sales().sql(
++        "SELECT depot, COUNT(*) AS tickets, SUM(COUNT(*)) OVER () AS all_tickets "
++        "FROM sales GROUP BY depot"
++    )
++    assert result.rows == [["kiel", 3, 6], ["arles", 2, 6], ["bruges", 1, 6]]
++
++
++def test_how_far_each_depot_trails_the_best():
++    """A group total next to the largest group total, on the same row."""
++
++    result = sales().sql(
++        "SELECT depot, SUM(crates) AS total, "
++        "SUM(crates) - MAX(SUM(crates)) OVER () AS behind "
++        "FROM sales GROUP BY depot"
++    )
++    assert result.rows == [["kiel", 11, -4], ["arles", 15, 0], ["bruges", 7, -8]]
++
++
++def test_having_thins_the_groups_before_the_fold():
++    """A group HAVING drops is gone before the window counts anything."""
++
++    result = sales().sql(
++        "SELECT depot, COUNT(*) AS tickets, SUM(COUNT(*)) OVER () AS all_tickets "
++        "FROM sales GROUP BY depot HAVING COUNT(*) > 1"
++    )
++    assert result.rows == [["kiel", 3, 5], ["arles", 2, 5]]
++
++
++def test_groups_partitioned_by_their_own_size():
++    """The partition key may be an aggregate too: busy depots against quiet ones."""
++
++    result = sales().sql(
++        "SELECT depot, SUM(crates) AS total, "
++        "SUM(SUM(crates)) OVER (PARTITION BY COUNT(*) > 1) AS alike "
++        "FROM sales GROUP BY depot"
++    )
++    assert result.rows == [["kiel", 11, 26], ["arles", 15, 26], ["bruges", 7, 7]]
++
++
++def test_a_running_total_over_the_depot_totals():
++    """Ordered by a group total, the fold runs across the groups in that order."""
++
++    result = sales().sql(
++        "SELECT depot, SUM(crates) AS total, "
++        "SUM(SUM(crates)) OVER (ORDER BY SUM(crates)) AS so_far "
++        "FROM sales GROUP BY depot"
++    )
++    assert result.rows == [["kiel", 11, 18], ["arles", 15, 33], ["bruges", 7, 7]]
++
++
++def test_sorting_by_the_number_just_computed():
++    """A window column is an output column and sorting may name it."""
++
++    result = sales().sql(
++        "SELECT ticket, ROW_NUMBER() OVER (ORDER BY crates) AS n "
++        "FROM sales ORDER BY n DESC"
++    )
++    assert [row[1] for row in result.rows] == [6, 5, 4, 3, 2, 1]
++    assert [row[0] for row in result.rows] == [102, 104, 105, 101, 106, 103]
++
++
++def test_sorting_by_a_number_never_shown():
++    """Sorting by a window nobody selected still sorts, and returns two columns."""
++
++    result = sales().sql(
++        "SELECT ticket, depot FROM sales "
++        "ORDER BY RANK() OVER (PARTITION BY depot ORDER BY crates), ticket"
++    )
++    assert result.columns == ["ticket", "depot"]
++    assert [row[0] for row in result.rows] == [103, 104, 105, 102, 106, 101]
++
++
++def test_two_tickets_still_read_the_whole_total():
++    """Two rows come back, and both read the six-row total."""
++
++    result = sales().sql(
++        "SELECT ticket, SUM(crates) OVER () AS total FROM sales LIMIT 2"
++    )
++    assert result.rows == [[101, 33], [102, 33]]
++
++
++def test_skipping_rows_leaves_numbering_alone():
++    """Skipping rows happens after the window, so the numbering is unchanged."""
++
++    result = sales().sql(
++        "SELECT ticket, ROW_NUMBER() OVER (ORDER BY crates) AS n "
++        "FROM sales LIMIT 2 OFFSET 3"
++    )
++    assert result.rows == [[104, 5], [105, 4]]
++
++
++def test_filtered_tickets_never_reach_the_total():
++    """Filtered rows are gone by the time the window folds anything."""
++
++    result = sales().sql(
++        "SELECT ticket, SUM(crates) OVER () AS total FROM sales WHERE crates > 4"
++    )
++    assert result.rows == [[101, 27], [102, 27], [104, 27], [105, 27]]
++
++
++def test_one_kiel_ticket_left_is_a_partition_of_one():
++    """One kiel row survives the filter, so its partition holds one row."""
++
++    result = sales().sql(
++        "SELECT ticket, COUNT(*) OVER (PARTITION BY depot) AS nearby "
++        "FROM sales WHERE crates > 4"
++    )
++    assert result.rows == [[101, 1], [102, 2], [104, 1], [105, 2]]
++
++
++def test_numbering_in_a_filter_is_refused():
++    """WHERE picks rows before any window exists, so this cannot be answered."""
++
++    session = sales()
++    assert len(session.sql(
++        "SELECT ticket, ROW_NUMBER() OVER () AS n FROM sales"
++    ).rows) == 6
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT ticket FROM sales WHERE ROW_NUMBER() OVER () = 1")
++
++
++def test_ranking_as_a_group_key_is_refused():
++    """Grouping happens below the window and cannot key on one."""
++
++    session = sales()
++    assert len(session.sql(
++        "SELECT depot, RANK() OVER (ORDER BY depot) AS r FROM sales GROUP BY depot"
++    ).rows) == 3
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT depot FROM sales GROUP BY depot, RANK() OVER (ORDER BY depot)"
++        )
++
++
++def test_counting_in_having_is_refused():
++    """HAVING filters groups, which is still below the window."""
++
++    session = sales()
++    assert len(session.sql(
++        "SELECT depot, COUNT(*) OVER () AS d FROM sales GROUP BY depot"
++    ).rows) == 3
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT depot FROM sales GROUP BY depot "
++            "HAVING COUNT(*) OVER () > 1"
++        )
++
++
++def test_distinct_and_over_together_are_refused():
++    """The plain form totals 33; asking for it de-duplicated is refused."""
++
++    session = sales()
++    assert session.sql(
++        "SELECT SUM(crates) OVER () AS total FROM sales"
++    ).rows[0] == [33]
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT SUM(DISTINCT crates) OVER () AS total FROM sales")
++
++
++def test_upper_with_over_is_refused():
++    """A scalar function reads one row and has no window to read."""
++
++    session = sales()
++    assert session.sql(
++        "SELECT COUNT(*) OVER () AS seen FROM sales"
++    ).rows[0] == [6]
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT UPPER(depot) OVER () AS shouted FROM sales")
++
++
++
++def test_a_window_orders_by_the_count_it_also_selects():
++    """The same COUNT(*) is a selected value and the window's ordering key."""
++
++    result = sales().sql(
++        "SELECT depot, COUNT(*) AS tickets, "
++        "COUNT(*) OVER (ORDER BY COUNT(*)) AS ranked "
++        "FROM sales GROUP BY depot"
++    )
++    # Ordered by group size the depots run bruges, arles, kiel, and the window
++    # counts groups through the current run.
++    assert result.rows == [["kiel", 3, 3], ["arles", 2, 2], ["bruges", 1, 1]]
++
++
++def test_the_count_a_group_shows_can_carry_a_frame():
++    """A frame and an exclusion apply to a fold over the groups just made."""
++
++    result = sales().sql(
++        "SELECT depot, COUNT(*) AS tickets, "
++        "COUNT(*) OVER (ORDER BY COUNT(*) ROWS 1 PRECEDING EXCLUDE CURRENT ROW) "
++        "AS others FROM sales GROUP BY depot"
++    )
++    # Each group reads itself and the one before it, then drops itself, so
++    # bruges opens the ordering with nothing behind it.
++    assert result.rows == [["kiel", 3, 1], ["arles", 2, 1], ["bruges", 1, 0]]
++
++
++def test_the_tickets_run_down_from_the_busiest_depot():
++    """Ordering the fold DESC accumulates from the largest group down."""
++
++    result = sales().sql(
++        "SELECT depot, COUNT(*) AS tickets, "
++        "SUM(COUNT(*)) OVER (ORDER BY COUNT(*) DESC) AS running "
++        "FROM sales GROUP BY depot"
++    )
++    assert result.rows == [["kiel", 3, 3], ["arles", 2, 5], ["bruges", 1, 6]]
++
++
++def test_up_and_down_numbering_at_once():
++    """One select list, two orderings, and neither disturbs the other."""
++
++    result = sales().sql(
++        "SELECT ticket, "
++        "ROW_NUMBER() OVER (ORDER BY crates) AS up, "
++        "ROW_NUMBER() OVER (ORDER BY crates DESC) AS down "
++        "FROM sales"
++    )
++    assert result.rows == [
++        [101, 3, 4],
++        [102, 6, 1],
++        [103, 1, 6],
++        [104, 5, 2],
++        [105, 4, 3],
++        [106, 2, 5],
++    ]
++
++
++def test_filter_then_count_then_take_two():
++    """Four rows survive WHERE, the window counts them, LIMIT keeps two."""
++
++    result = sales().sql(
++        "SELECT ticket, COUNT(*) OVER () AS seen FROM sales "
++        "WHERE crates > 4 LIMIT 2"
++    )
++    assert result.rows == [[101, 4], [102, 4]]
++
++
++def test_three_windows_read_the_table_once():
++    """Three windows, one pass: the scan counts six rows, not eighteen."""
++
++    result = sales().sql(
++        "SELECT ticket, "
++        "COUNT(*) OVER () AS seen, "
++        "SUM(crates) OVER (PARTITION BY depot) AS total, "
++        "ROW_NUMBER() OVER (ORDER BY crates) AS n "
++        "FROM sales"
++    )
++    assert len(result.rows) == 6
++    assert result.metrics["rows_scanned"] == 6
+diff --git a/tests/test_ranked_events.py b/tests/test_ranked_events.py
+new file mode 100644
+index 0000000..60af383
+--- /dev/null
++++ b/tests/test_ranked_events.py
+@@ -0,0 +1,1041 @@
++"""Window function semantics: partitions, ordering, peers and ranking."""
++
++from __future__ import annotations
++
++import pytest
++
++from slateql import Session
++from slateql.config import SessionConfig
++from slateql.errors import SlateQLError
++from slateql.types.datatypes import BOOLEAN, INTEGER, STRING
++from slateql.types.schema import Schema
++
++EVENTS_SCHEMA = Schema.of(
++    ("id", INTEGER),
++    ("region", STRING),
++    ("score", INTEGER),
++)
++
++# Arrival order is deliberately not score order, one region is NULL, one score
++# is NULL, and the two southern scores tie.  Every expectation below is written
++# out row by row so that a wrong ordering or a lost row is visible.
++EVENTS_ROWS = [
++    [1, "north", 30],
++    [2, "south", 10],
++    [3, "north", 10],
++    [4, None, 40],
++    [5, "south", 10],
++    [6, "north", None],
++    [7, None, 20],
++]
++
++
++def events(**options) -> Session:
++    """A session holding the events table, optionally reconfigured."""
++
++    session = Session(config=SessionConfig(**options)) if options else Session()
++    session.register_rows("events", EVENTS_SCHEMA, EVENTS_ROWS)
++    return session
++
++
++def column(session: Session, sql: str) -> dict:
++    """Run ``sql`` and return its two columns as {id: value}."""
++
++    result = session.sql(sql)
++    return {row[0]: row[1] for row in result.rows}
++
++
++def test_seven_events_in_seven_events_out():
++    """A window does not group: seven rows in, seven rows out."""
++
++    result = events().sql(
++        "SELECT id, SUM(score) OVER (PARTITION BY region) AS total FROM events"
++    )
++    assert len(result.rows) == len(EVENTS_ROWS)
++    assert [row[0] for row in result.rows] == [1, 2, 3, 4, 5, 6, 7]
++
++
++def test_regional_totals_land_on_every_row():
++    """Each partition folds on its own: north 40, south 20, unnamed 60."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (PARTITION BY region) AS total FROM events",
++    )
++    assert values == {1: 40, 2: 20, 3: 40, 4: 60, 5: 20, 6: 40, 7: 60}
++
++
++def test_two_unnamed_regions_share_a_count():
++    """Two NULL regions group together, exactly as GROUP BY treats them."""
++
++    values = column(
++        events(),
++        "SELECT id, COUNT(*) OVER (PARTITION BY region) AS seen FROM events",
++    )
++    assert values[4] == 2
++    assert values[7] == 2
++    assert values[1] == 3
++
++
++def test_bare_over_sees_the_whole_table():
++    """With no PARTITION BY every row sees the same seven-row window."""
++
++    values = column(events(), "SELECT id, COUNT(*) OVER () AS seen FROM events")
++    assert set(values.values()) == {7}
++
++
++def test_numbering_by_score_inside_a_region():
++    """Numbering runs over the ordered partition, not over arrival order."""
++
++    values = column(
++        events(),
++        "SELECT id, ROW_NUMBER() OVER (PARTITION BY region ORDER BY score) AS n "
++        "FROM events",
++    )
++    assert values[3] == 1
++    assert values[1] == 2
++    assert values[6] == 3
++    assert values[7] == 1
++    assert values[4] == 2
++    # The two southern rows tie, so only the pair of numbers they share is set.
++    assert {values[2], values[5]} == {1, 2}
++
++
++def test_three_tens_still_take_three_numbers():
++    """Rows 2, 3 and 5 all score 10 and still get three distinct numbers."""
++
++    values = column(
++        events(),
++        "SELECT id, ROW_NUMBER() OVER (ORDER BY score) AS n FROM events",
++    )
++    assert sorted(values.values()) == [1, 2, 3, 4, 5, 6, 7]
++    assert {values[2], values[3], values[5]} == {1, 2, 3}
++
++
++def test_three_tens_share_a_rank_then_a_jump():
++    """Three peers share rank 1 and the next row jumps to 4."""
++
++    values = column(
++        events(), "SELECT id, RANK() OVER (ORDER BY score) AS r FROM events"
++    )
++    assert values == {2: 1, 3: 1, 5: 1, 7: 4, 1: 5, 4: 6, 6: 7}
++
++
++def test_three_tens_share_a_rank_with_no_jump():
++    """Same peers, but the count never skips: 1, 1, 1, 2, 3, 4, 5."""
++
++    values = column(
++        events(), "SELECT id, DENSE_RANK() OVER (ORDER BY score) AS r FROM events"
++    )
++    assert values == {2: 1, 3: 1, 5: 1, 7: 2, 1: 3, 4: 4, 6: 5}
++
++
++def test_biggest_score_first():
++    """DESC reverses the window ordering and leaves the NULL last."""
++
++    values = column(
++        events(),
++        "SELECT id, ROW_NUMBER() OVER (ORDER BY score DESC) AS n FROM events",
++    )
++    assert values[4] == 1
++    assert values[1] == 2
++    assert values[7] == 3
++    assert values[6] == 7
++
++
++def test_ascending_spelled_out():
++    """Writing ASC has to be accepted, and it changes nothing."""
++
++    session = events()
++    spelled = column(
++        session,
++        "SELECT id, ROW_NUMBER() OVER (ORDER BY score ASC) AS n FROM events",
++    )
++    implied = column(
++        session,
++        "SELECT id, ROW_NUMBER() OVER (ORDER BY score) AS n FROM events",
++    )
++    assert spelled == implied
++    assert spelled[7] == 4
++    assert spelled[1] == 5
++
++
++def test_ordering_on_two_keys():
++    """A window orders by a list, region first and score inside it."""
++
++    values = column(
++        events(),
++        "SELECT id, ROW_NUMBER() OVER (ORDER BY region, score) AS n FROM events",
++    )
++    assert values[3] == 1
++    assert values[1] == 2
++    assert values[6] == 3
++    assert values[7] == 6
++    assert values[4] == 7
++    # The two southern rows tie on both keys, so only their pair is set.
++    assert {values[2], values[5]} == {4, 5}
++
++
++def test_missing_score_pulled_to_the_front():
++    """NULLS FIRST inside OVER moves the missing score to the front."""
++
++    values = column(
++        events(),
++        "SELECT id, ROW_NUMBER() OVER (ORDER BY score NULLS FIRST) AS n "
++        "FROM events",
++    )
++    assert values[6] == 1
++    assert {values[2], values[3], values[5]} == {2, 3, 4}
++
++
++def test_session_setting_moves_the_missing_score():
++    """A session ordering nulls first changes the window with no NULLS clause."""
++
++    query = "SELECT id, ROW_NUMBER() OVER (ORDER BY score) AS n FROM events"
++    assert column(events(), query)[6] == 7
++    assert column(events(null_ordering="nulls_first"), query)[6] == 1
++
++
++def test_spelled_out_placement_wins():
++    """Spelling out NULLS LAST wins over a session that orders nulls first."""
++
++    values = column(
++        events(null_ordering="nulls_first"),
++        "SELECT id, ROW_NUMBER() OVER (ORDER BY score NULLS LAST) AS n "
++        "FROM events",
++    )
++    assert values[6] == 7
++
++
++def test_running_total_across_the_table():
++    """Running totals: the three tied rows all read the whole 30 of the tie."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score) AS running FROM events",
++    )
++    assert values[2] == 30
++    assert values[3] == 30
++    assert values[5] == 30
++    assert values[7] == 50
++    assert values[1] == 80
++    assert values[4] == 120
++    assert values[6] == 120
++
++
++def test_running_total_restarts_per_region():
++    """Ordering and partitioning combine: the fold restarts per region."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (PARTITION BY region ORDER BY score) AS running "
++        "FROM events",
++    )
++    assert values == {3: 10, 1: 40, 6: 40, 2: 20, 5: 20, 7: 20, 4: 60}
++
++
++def test_a_frame_counts_rows_not_peers():
++    """Two rows tied at 10 read different windows once a frame is counting."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 1 PRECEDING) AS near "
++        "FROM events",
++    )
++    assert values[7] == 30
++    assert values[1] == 50
++    assert values[4] == 70
++    assert values[6] == 40
++    # The three tied rows sit at three positions, so they read three windows.
++    assert sorted([values[2], values[3], values[5]]) == [10, 20, 20]
++
++
++def test_a_frame_written_out_in_full():
++    """The BETWEEN spelling is the short one, said at length."""
++
++    session = events()
++    short = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 1 PRECEDING) AS near "
++        "FROM events",
++    )
++    spelled = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS BETWEEN 1 PRECEDING "
++        "AND CURRENT ROW) AS near FROM events",
++    )
++    assert spelled == short
++
++
++def test_a_frame_counts_downward_too():
++    """DESC turns the window round and the frame still reaches back one row."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score DESC ROWS 1 PRECEDING) "
++        "AS near FROM events",
++    )
++    assert values[4] == 40
++    assert values[1] == 70
++    assert values[7] == 50
++    assert values[6] == 10
++    # The three tied rows follow the 20: one reads 30, the other two read 20.
++    assert sorted([values[2], values[3], values[5]]) == [20, 20, 30]
++
++
++def test_an_unbounded_frame_reaches_the_partition_start():
++    """Counting from the start still counts rows, so the tie splits three ways."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS UNBOUNDED PRECEDING) "
++        "AS so_far FROM events",
++    )
++    assert values[7] == 50
++    assert values[1] == 80
++    assert values[4] == 120
++    assert values[6] == 120
++    assert sorted([values[2], values[3], values[5]]) == [10, 20, 30]
++
++
++def test_an_unbounded_frame_written_out_in_full():
++    """UNBOUNDED takes the long spelling too."""
++
++    session = events()
++    query = (
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS %s) AS so_far FROM events"
++    )
++    assert column(session, query % "UNBOUNDED PRECEDING") == column(
++        session, query % "BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
++    )
++
++
++def test_a_frame_counts_inside_its_partition():
++    """The count restarts per region and never reaches back past its start."""
++
++    values = column(
++        events(),
++        "SELECT id, COUNT(*) OVER (PARTITION BY region ORDER BY score "
++        "ROWS 1 PRECEDING) AS near FROM events",
++    )
++    assert values[3] == 1
++    assert values[1] == 2
++    assert values[6] == 2
++    assert values[7] == 1
++    assert values[4] == 2
++    assert {values[2], values[5]} == {1, 2}
++
++
++def test_a_range_frame_reaches_back_by_value():
++    """RANGE 10 folds every row within ten points below, peers included."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    # The three tens are peers, so each reads all three; the 20 reads them too.
++    assert values[2] == 30
++    assert values[3] == 30
++    assert values[5] == 30
++    assert values[7] == 50
++    assert values[1] == 50
++    assert values[4] == 70
++
++
++def test_a_reach_of_two_and_a_half_measures_by_value():
++    """A reach is a distance, not a row count, so it need not be whole."""
++
++    values = column(
++        events(),
++        "SELECT id, COUNT(*) OVER (ORDER BY score RANGE 2.5 PRECEDING) AS near "
++        "FROM events",
++    )
++    # Two and a half reaches no further than the tens themselves.
++    assert values == {1: 1, 2: 3, 3: 3, 4: 1, 5: 3, 6: 1, 7: 1}
++
++
++def test_a_fractional_reach_folds_what_it_covers():
++    """Fifteen and a half points below carries the 30 back to the tens."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 15.5 PRECEDING) AS near "
++        "FROM events",
++    )
++    assert values[2] == 30
++    assert values[7] == 50
++    assert values[1] == 50
++    assert values[4] == 70
++    assert values[6] is None
++
++
++def test_an_unbounded_range_still_drops_the_current_row():
++    """An unbounded reach measures nothing, so the null score reads the rest."""
++
++    values = column(
++        events(),
++        "SELECT id, COUNT(*) OVER (ORDER BY score RANGE UNBOUNDED PRECEDING "
++        "EXCLUDE CURRENT ROW) AS others FROM events",
++    )
++    assert values == {1: 4, 2: 2, 3: 2, 4: 5, 5: 2, 6: 6, 7: 3}
++
++
++def test_an_unbounded_range_can_drop_the_ties_alone():
++    """EXCLUDE TIES over the whole run so far leaves the row itself in."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE UNBOUNDED PRECEDING "
++        "EXCLUDE TIES) AS near FROM events",
++    )
++    assert values == {1: 80, 2: 10, 3: 10, 4: 120, 5: 10, 6: 120, 7: 50}
++
++
++def test_a_range_frame_keeps_peers_together():
++    """A reach of zero is exactly the current run: three tens, one each elsewhere."""
++
++    values = column(
++        events(),
++        "SELECT id, COUNT(*) OVER (ORDER BY score RANGE 0 PRECEDING) AS alike "
++        "FROM events",
++    )
++    assert values == {1: 1, 2: 3, 3: 3, 4: 1, 5: 3, 6: 1, 7: 1}
++
++
++def test_a_range_frame_written_out_in_full():
++    """The BETWEEN spelling of a RANGE frame is the short one, said at length."""
++
++    session = events()
++    short = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    spelled = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE BETWEEN 10 PRECEDING "
++        "AND CURRENT ROW) AS near FROM events",
++    )
++    assert spelled == short
++
++
++def test_a_range_frame_reaches_upward_under_desc():
++    """Descending, the rows before the current one are the larger ones."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score DESC RANGE 10 PRECEDING) "
++        "AS near FROM events",
++    )
++    assert values[4] == 40
++    assert values[1] == 70
++    assert values[7] == 50
++    # The tens reach the 20 above them, and read it together.
++    assert values[2] == 50
++    assert values[3] == 50
++    assert values[5] == 50
++
++
++def test_a_range_frame_stays_inside_its_partition():
++    """The reach is measured within the partition, never across one."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (PARTITION BY region ORDER BY score "
++        "RANGE 20 PRECEDING) AS near FROM events",
++    )
++    assert values[3] == 10
++    assert values[1] == 40
++    assert values[2] == 20
++    assert values[5] == 20
++    assert values[7] == 20
++    assert values[4] == 60
++
++
++def test_an_unscored_row_folds_only_its_peers():
++    """No score means no distance to anything, so the row sees itself alone."""
++
++    session = events()
++    totals = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    assert totals[6] is None
++    counts = column(
++        session,
++        "SELECT id, COUNT(*) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    assert counts[6] == 1
++
++
++def test_a_range_frame_follows_the_session_null_placement():
++    """Nulls first puts the unscored row ahead, and it is still out of reach."""
++
++    values = column(
++        events(null_ordering="nulls_first"),
++        "SELECT id, COUNT(*) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    assert values[6] == 1
++    assert values == {1: 2, 2: 3, 3: 3, 4: 2, 5: 3, 6: 1, 7: 4}
++
++
++def test_an_unbounded_range_frame_is_the_default_fold():
++    """RANGE UNBOUNDED PRECEDING spells out what an ordered aggregate does anyway."""
++
++    session = events()
++    spelled = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE UNBOUNDED PRECEDING) "
++        "AS so_far FROM events",
++    )
++    plain = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score) AS so_far FROM events",
++    )
++    assert spelled == plain
++    assert spelled[2] == 30 and spelled[3] == 30 and spelled[5] == 30
++
++
++def test_a_range_frame_measures_the_ordering_expression():
++    """The distance is taken on the value the ordering computes, not the column."""
++
++    session = events()
++    doubled = column(
++        session,
++        "SELECT id, COUNT(*) OVER (ORDER BY score * 2 RANGE 20 PRECEDING) "
++        "AS near FROM events",
++    )
++    plain = column(
++        session,
++        "SELECT id, COUNT(*) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    assert doubled == plain
++    assert plain[7] == 4
++
++
++def test_a_range_frame_with_two_orderings_is_refused():
++    """A distance needs one value to measure against, not two."""
++
++    session = events()
++    column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT id, SUM(score) OVER (ORDER BY region, score RANGE 10 PRECEDING) "
++            "AS near FROM events"
++        )
++
++
++def test_a_range_frame_over_text_is_refused():
++    """Ten of what? A region name has no distance from another."""
++
++    session = events()
++    column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 10 PRECEDING) AS near "
++        "FROM events",
++    )
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT id, SUM(score) OVER (ORDER BY region RANGE 10 PRECEDING) "
++            "AS near FROM events"
++        )
++
++
++def test_rank_with_a_range_frame_is_refused():
++    """A ranking call carries no frame, however the frame is measured."""
++
++    session = events()
++    column(session, "SELECT id, RANK() OVER (ORDER BY score) AS r FROM events")
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT id, RANK() OVER (ORDER BY score RANGE 10 PRECEDING) AS r "
++            "FROM events"
++        )
++
++
++def test_excluding_the_current_row_reads_the_row_before():
++    """ROWS 1 PRECEDING minus the current row is exactly the previous row."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 1 PRECEDING "
++        "EXCLUDE CURRENT ROW) AS before FROM events",
++    )
++    assert values[2] is None
++    assert values[3] == 10
++    assert values[7] == 10
++    assert values[1] == 20
++    assert values[4] == 30
++    assert values[6] == 40
++
++
++def test_excluding_ties_leaves_each_ten_alone():
++    """Peers go, the row stays: a reach of zero minus ties is the row itself."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 0 PRECEDING "
++        "EXCLUDE TIES) AS own FROM events",
++    )
++    assert values == {1: 30, 2: 10, 3: 10, 4: 40, 5: 10, 6: None, 7: 20}
++
++
++def test_excluding_the_group_empties_the_tens():
++    """Row and peers both go, so the tens fold nothing and the 20 folds the tens."""
++
++    session = events()
++    totals = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 10 PRECEDING "
++        "EXCLUDE GROUP) AS others FROM events",
++    )
++    assert totals[2] is None
++    assert totals[3] is None
++    assert totals[5] is None
++    assert totals[7] == 30
++    assert totals[1] == 20
++    assert totals[4] == 30
++    counts = column(
++        session,
++        "SELECT id, COUNT(*) OVER (ORDER BY score RANGE 10 PRECEDING "
++        "EXCLUDE GROUP) AS others FROM events",
++    )
++    assert counts[2] == 0
++    assert counts[7] == 3
++    assert counts[6] == 0
++
++
++def test_ties_go_but_the_row_stays_under_a_reach():
++    """Within ten, minus peers: the tens read themselves, the 20 reads the tens."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE 10 PRECEDING "
++        "EXCLUDE TIES) AS near FROM events",
++    )
++    assert values[2] == 10
++    assert values[3] == 10
++    assert values[5] == 10
++    assert values[7] == 50
++    assert values[4] == 70
++
++
++def test_peers_outside_a_row_frame_were_never_in_it():
++    """A ROWS frame minus ties drops only the peers the frame reached."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 2 PRECEDING "
++        "EXCLUDE TIES) AS near FROM events",
++    )
++    # The three tens sit at three positions and each keeps only itself.
++    assert values[2] == 10
++    assert values[3] == 10
++    assert values[5] == 10
++    assert values[7] == 40
++    assert values[1] == 60
++    assert values[4] == 90
++    assert values[6] == 70
++
++
++def test_everything_before_the_current_run():
++    """Unbounded minus the group is the fold up to, not through, the run."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (ORDER BY score RANGE UNBOUNDED PRECEDING "
++        "EXCLUDE GROUP) AS before FROM events",
++    )
++    assert values[2] is None
++    assert values[3] is None
++    assert values[5] is None
++    assert values[7] == 30
++    assert values[1] == 50
++    assert values[4] == 80
++    assert values[6] == 120
++
++
++def test_excluding_no_others_drops_nothing():
++    """The spelled-out default is the plain frame."""
++
++    session = events()
++    plain = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 1 PRECEDING) AS near "
++        "FROM events",
++    )
++    spelled = column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 1 PRECEDING "
++        "EXCLUDE NO OTHERS) AS near FROM events",
++    )
++    assert spelled == plain
++
++
++def test_everyone_else_so_far_in_the_region():
++    """Partition, order by arrival, unbounded, minus the row: the region before it."""
++
++    values = column(
++        events(),
++        "SELECT id, SUM(score) OVER (PARTITION BY region ORDER BY id "
++        "ROWS UNBOUNDED PRECEDING EXCLUDE CURRENT ROW) AS before FROM events",
++    )
++    assert values == {1: None, 2: None, 3: 30, 4: None, 5: 10, 6: 40, 7: 40}
++
++
++def test_excluding_the_group_downward():
++    """Descending, the group still goes and the reach still climbs."""
++
++    values = column(
++        events(),
++        "SELECT id, COUNT(*) OVER (ORDER BY score DESC RANGE 10 PRECEDING "
++        "EXCLUDE GROUP) AS above FROM events",
++    )
++    assert values == {1: 1, 2: 1, 3: 1, 4: 0, 5: 1, 6: 0, 7: 1}
++
++
++def test_an_exclusion_needs_a_frame():
++    """EXCLUDE trims a frame, so there has to be one."""
++
++    session = events()
++    column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 1 PRECEDING "
++        "EXCLUDE TIES) AS near FROM events",
++    )
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT id, SUM(score) OVER (ORDER BY score EXCLUDE TIES) AS near "
++            "FROM events"
++        )
++
++
++def test_rank_with_an_exclusion_is_refused():
++    """A frame with a tail is still a frame, and a ranking call takes none."""
++
++    session = events()
++    column(session, "SELECT id, RANK() OVER (ORDER BY score) AS r FROM events")
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT id, RANK() OVER (ORDER BY score ROWS 1 PRECEDING "
++            "EXCLUDE TIES) AS r FROM events"
++        )
++
++
++def test_a_frame_without_an_ordering_is_refused():
++    """Nothing counts rows in a partition that was never put in an order."""
++
++    session = events()
++    assert column(
++        session,
++        "SELECT id, SUM(score) OVER (ORDER BY score ROWS 1 PRECEDING) AS near "
++        "FROM events",
++    )[7] == 30
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT id, SUM(score) OVER (ROWS 1 PRECEDING) AS n FROM events")
++
++
++def test_row_number_with_a_frame_is_refused():
++    """A frame narrows a fold, and numbering rows folds nothing."""
++
++    session = events()
++    assert column(session, "SELECT id, ROW_NUMBER() OVER () AS n FROM events")[1] == 1
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT ROW_NUMBER() OVER (ORDER BY score ROWS 1 PRECEDING) AS n "
++            "FROM events"
++        )
++
++
++def test_rank_with_a_frame_is_refused():
++    """Same for RANK, whichever way the frame is spelled."""
++
++    session = events()
++    assert column(session, "SELECT id, RANK() OVER () AS r FROM events")[1] == 1
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT RANK() OVER (ORDER BY score ROWS BETWEEN 1 PRECEDING "
++            "AND CURRENT ROW) AS r FROM events"
++        )
++
++
++def test_dense_rank_with_a_frame_is_refused():
++    """And for DENSE_RANK, including the unbounded spelling."""
++
++    session = events()
++    query = "SELECT id, DENSE_RANK() OVER (ORDER BY score) AS r FROM events"
++    assert column(session, query)[2] == 1
++    with pytest.raises(SlateQLError):
++        session.sql(
++            "SELECT DENSE_RANK() OVER (ORDER BY score ROWS UNBOUNDED PRECEDING) "
++            "AS r FROM events"
++        )
++
++
++def test_best_score_repeated_down_a_region():
++    """The north keeps 30 on all three of its rows, tie or no tie."""
++
++    values = column(
++        events(),
++        "SELECT id, MAX(score) OVER (PARTITION BY region) AS best FROM events",
++    )
++    assert values == {1: 30, 3: 30, 6: 30, 2: 10, 5: 10, 4: 40, 7: 40}
++
++
++def test_lowest_score_per_region():
++    """MIN folds a partition the way SUM does, ignoring the missing score."""
++
++    values = column(
++        events(),
++        "SELECT id, MIN(score) OVER (PARTITION BY region) AS low FROM events",
++    )
++    assert values == {1: 10, 3: 10, 6: 10, 2: 10, 5: 10, 4: 20, 7: 20}
++
++
++def test_average_score_per_region():
++    """AVG keeps its own rule too: two scores in the north, not three."""
++
++    values = column(
++        events(),
++        "SELECT id, AVG(score) OVER (PARTITION BY region) AS mean FROM events",
++    )
++    assert values[1] == pytest.approx(20.0)
++    assert values[2] == pytest.approx(10.0)
++    assert values[4] == pytest.approx(30.0)
++
++
++def test_filled_scores_against_row_count():
++    """COUNT(score) counts filled scores, COUNT(*) counts rows."""
++
++    result = events().sql(
++        "SELECT id, "
++        "COUNT(score) OVER (PARTITION BY region) AS filled, "
++        "COUNT(*) OVER (PARTITION BY region) AS rows_here "
++        "FROM events"
++    )
++    rows = {row[0]: row[1:] for row in result.rows}
++    assert rows[1] == [2, 3]
++    assert rows[6] == [2, 3]
++    assert rows[2] == [2, 2]
++
++
++def test_count_grows_a_group_at_a_time():
++    """A counted window grows one peer group at a time."""
++
++    values = column(
++        events(),
++        "SELECT id, COUNT(*) OVER (ORDER BY score) AS seen FROM events",
++    )
++    assert values[2] == 3
++    assert values[3] == 3
++    assert values[5] == 3
++    assert values[7] == 4
++    assert values[1] == 5
++    assert values[4] == 6
++    assert values[6] == 7
++
++
++def test_highest_score_so_far():
++    """The largest score so far, with the three tied rows sharing one answer."""
++
++    values = column(
++        events(),
++        "SELECT id, MAX(score) OVER (ORDER BY score) AS high FROM events",
++    )
++    assert values == {2: 10, 3: 10, 5: 10, 7: 20, 1: 30, 4: 40, 6: 40}
++
++
++def test_ranking_never_crosses_a_region():
++    """Peers are peers within their own partition, never across partitions."""
++
++    values = column(
++        events(),
++        "SELECT id, RANK() OVER (PARTITION BY region ORDER BY score) AS r "
++        "FROM events",
++    )
++    assert values == {3: 1, 1: 2, 6: 3, 2: 1, 5: 1, 7: 1, 4: 2}
++
++
++def test_reversed_ranking_leaves_the_gap_last():
++    """DESC flips the ordering; the missing score still sorts last."""
++
++    values = column(
++        events(),
++        "SELECT id, DENSE_RANK() OVER (PARTITION BY region ORDER BY score DESC) "
++        "AS r FROM events",
++    )
++    assert values == {1: 1, 3: 2, 6: 3, 2: 1, 5: 1, 4: 1, 7: 2}
++
++
++def test_two_counts_side_by_side():
++    """Different OVER clauses in one query keep their own partitioning."""
++
++    result = events().sql(
++        "SELECT id, "
++        "COUNT(*) OVER () AS everything, "
++        "COUNT(*) OVER (PARTITION BY region) AS nearby "
++        "FROM events"
++    )
++    rows = {row[0]: row[1:] for row in result.rows}
++    assert rows[1] == [7, 3]
++    assert rows[2] == [7, 2]
++    assert rows[4] == [7, 2]
++
++
++def test_row_number_with_a_column_is_refused():
++    """ROW_NUMBER counts rows, so an argument is a mistake worth reporting."""
++
++    session = events()
++    assert column(session, "SELECT id, ROW_NUMBER() OVER () AS n FROM events")[1] == 1
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT ROW_NUMBER(score) OVER () AS n FROM events")
++
++
++def test_rank_with_a_column_is_refused():
++    """Nothing about a rank depends on a value handed to it."""
++
++    session = events()
++    assert column(session, "SELECT id, RANK() OVER () AS r FROM events")[1] == 1
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT RANK(score) OVER (ORDER BY score) AS r FROM events")
++
++
++def test_dense_rank_with_a_column_is_refused():
++    """Same for DENSE_RANK, ordering clause or not."""
++
++    session = events()
++    query = "SELECT id, DENSE_RANK() OVER (ORDER BY score) AS r FROM events"
++    assert column(session, query)[2] == 1
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT DENSE_RANK(score) OVER (ORDER BY score) AS r FROM events")
++
++
++def test_bare_row_number_is_still_unknown():
++    """Numbering rows means nothing until a window says which rows."""
++
++    session = events()
++    assert column(session, "SELECT id, ROW_NUMBER() OVER () AS n FROM events")[1] == 1
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT ROW_NUMBER() AS n FROM events")
++
++
++def test_bare_rank_is_still_unknown():
++    """RANK on its own has no window to rank inside and stays unknown."""
++
++    session = events()
++    assert column(session, "SELECT id, RANK() OVER () AS r FROM events")[1] == 1
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT RANK() AS r FROM events")
++
++
++def test_bare_dense_rank_is_still_unknown():
++    """Same for DENSE_RANK: no OVER, no meaning."""
++
++    session = events()
++    query = "SELECT id, DENSE_RANK() OVER (ORDER BY score) AS r FROM events"
++    assert column(session, query)[2] == 1
++    with pytest.raises(SlateQLError):
++        session.sql("SELECT DENSE_RANK() AS r FROM events")
++
++
++SIGNALS_SCHEMA = Schema.of(
++    ("id", INTEGER),
++    ("lane", STRING),
++    ("live", BOOLEAN),
++    ("load", INTEGER),
++)
++
++# A second table for the aggregates the events table cannot reach: booleans,
++# a text column worth concatenating, and two loads per lane so a spread has
++# something to measure.  One row of each lane is missing a value.
++SIGNALS_ROWS = [
++    [1, "up", True, 4],
++    [2, "up", True, 8],
++    [3, "up", None, None],
++    [4, "down", False, 2],
++    [5, "down", None, 10],
++]
++
++
++def signals() -> Session:
++    """A session holding the signals table."""
++
++    session = Session()
++    session.register_rows("signals", SIGNALS_SCHEMA, SIGNALS_ROWS)
++    return session
++
++
++def test_boolean_lanes_fold_over_a_partition():
++    """BOOL_AND, its EVERY spelling and BOOL_OR all read a window."""
++
++    result = signals().sql(
++        "SELECT id, "
++        "BOOL_AND(live) OVER (PARTITION BY lane) AS all_live, "
++        "EVERY(live) OVER (PARTITION BY lane) AS every_live, "
++        "BOOL_OR(live) OVER (PARTITION BY lane) AS any_live "
++        "FROM signals"
++    )
++    rows = {row[0]: row[1:] for row in result.rows}
++    assert rows[1] == [True, True, True]
++    assert rows[4] == [False, False, False]
++
++
++def test_picking_and_joining_lane_names():
++    """ANY_VALUE and STRING_AGG fold a partition of text."""
++
++    result = signals().sql(
++        "SELECT id, "
++        "ANY_VALUE(lane) OVER (PARTITION BY lane) AS one, "
++        "STRING_AGG(lane) OVER (PARTITION BY lane) AS joined "
++        "FROM signals"
++    )
++    rows = {row[0]: row[1:] for row in result.rows}
++    assert rows[1] == ["up", "up,up,up"]
++    assert rows[4] == ["down", "down,down"]
++
++
++def test_spread_of_the_loads_in_a_lane():
++    """Both variances read a window and skip the missing load."""
++
++    result = signals().sql(
++        "SELECT id, "
++        "VAR_POP(load) OVER (PARTITION BY lane) AS population, "
++        "VAR_SAMP(load) OVER (PARTITION BY lane) AS sample "
++        "FROM signals"
++    )
++    rows = {row[0]: row[1:] for row in result.rows}
++    assert rows[1] == [pytest.approx(4.0), pytest.approx(8.0)]
++    assert rows[4] == [pytest.approx(16.0), pytest.approx(32.0)]
++
++
++def test_deviation_of_the_loads_in_a_lane():
++    """STDDEV_POP, STDDEV_SAMP and the bare STDDEV spelling read a window."""
++
++    result = signals().sql(
++        "SELECT id, "
++        "STDDEV_POP(load) OVER (PARTITION BY lane) AS population, "
++        "STDDEV_SAMP(load) OVER (PARTITION BY lane) AS sample, "
++        "STDDEV(load) OVER (PARTITION BY lane) AS plain "
++        "FROM signals"
++    )
++    rows = {row[0]: row[1:] for row in result.rows}
++    assert rows[1] == [pytest.approx(2.0), pytest.approx(2.828427), pytest.approx(2.828427)]
++    assert rows[4] == [pytest.approx(4.0), pytest.approx(5.656854), pytest.approx(5.656854)]
++
++
++def test_mean_is_avg_over_a_window_too():
++    """The MEAN spelling of AVG takes an OVER clause like the rest."""
++
++    result = signals().sql(
++        "SELECT id, MEAN(load) OVER (PARTITION BY lane) AS middle FROM signals"
++    )
++    assert [row[1] for row in result.rows] == [pytest.approx(6.0)] * 5

@@ -1,0 +1,64 @@
+# Ashcombe: a double track station with a crossover at each end, dimensioned
+# from the up side of the platform. Down traffic runs west to east, so every
+# edge is drawn that way and the up line is worked in the reverse sense.
+#
+# The crossovers let a down train reach the up line and go back the way it came,
+# which is what happens when the branch beyond is blocked.
+
+scheme ashcombe {
+    area "Ashcombe"
+    prefix A
+}
+
+node WD boundary
+node WU boundary
+node ED boundary
+node EU boundary
+
+node P201 points throw 8
+node P202 points throw 8
+node P203 points throw 8
+node P204 points throw 8
+
+node JD1 plain
+node JD2 plain
+node JU1 plain
+node JU2 plain
+
+# down main
+edge D1 from WD to JD1 length 560 speed 75 mileage "24m 0ch" direction down
+edge D2 from JD1 to P201.toe length 40 speed 75 direction down
+edge D3 from P201.normal to JD2 length 700 speed 75 gradient 1 in 400 direction down
+edge D4 from JD2 to P203.toe length 40 speed 75 direction down
+edge D5 from P203.normal to ED length 560 speed 75 direction down
+
+# up main
+edge U1 from WU to JU1 length 560 speed 75 direction up
+edge U2 from JU1 to P202.normal length 40 speed 75 direction up
+edge U3 from P202.toe to JU2 length 700 speed 75 direction up
+edge U4 from JU2 to P204.normal length 40 speed 75 direction up
+edge U5 from P204.toe to EU length 560 speed 75 direction up
+
+# the two crossovers
+edge X1 from P201.reverse to P202.reverse length 80 speed 25 direction bidirectional
+edge X2 from P203.reverse to P204.reverse length 80 speed 25 direction bidirectional
+
+section AD1 over D1
+section AD2 over D2
+section AD3 over D3
+section AD4 over D4
+section AD5 over D5
+section AU1 over U1
+section AU2 over U2
+section AU3 over U3
+section AU4 over U4
+section AU5 over U5
+section AX1 counted over X1
+section AX2 counted over X2
+
+signal A1 on D1 at 560 facing forward direction down aspects 4
+signal A3 on D3 at 700 facing forward direction down aspects 3
+signal A2 on U5 at 0 facing backward direction up aspects 4
+signal A4 on U3 at 0 facing backward direction up aspects 3
+
+crossing LC41 on D3 at 300 type mcb strike_in 30

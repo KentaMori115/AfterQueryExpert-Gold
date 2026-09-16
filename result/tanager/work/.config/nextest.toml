@@ -1,0 +1,12 @@
+# cargo-nextest configuration.
+#
+# The `ci` profile emits a JUnit XML report at
+# target/nextest/ci/junit.xml, used by CI and automated graders.
+# Run it with: `cargo nextest run --profile ci`.
+
+[profile.ci]
+# Keep output quiet but complete; fail fast is off so every test reports.
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

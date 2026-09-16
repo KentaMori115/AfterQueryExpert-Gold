@@ -1,0 +1,68 @@
+{% extends 'admin_base.html' %}
+{% load static %}
+
+{% block content %}
+    <style>
+        .form-container {
+            max-width: 600px; /* Limit the maximum width of the form */
+            width: 100%; /* Ensure it takes up full width on smaller devices */
+        }
+    </style>
+    <div class="container">
+        <div>
+            <h2 class="text-center">Order Result Table</h2>
+        </div>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Leg#</th>
+                    <th>Asset</th>
+                    <th>Symbol</th>
+                    <th>Action</th>
+                    <th>Quantity</th>
+                    <th>Type</th>
+                    <th>Limit</th>
+                    <th>Stop</th>
+                    <th>Status</th>
+                    <th>Fill</th>
+                    <th>Entry</th>
+                    <th>Timestamp</th>
+                    <th>Tag</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                    <tr {% if record.user == "" and record.asset == "" and record.symbol == "" %} class="bg-dark" {% else %} class="bg-light" {% endif %}>
+                        <td>{{record.user}}</td>
+                        <td>{{record.leg}}</td>
+                        <td>{{record.asset}}</td>
+                        <td>{{record.symbol}}</td>
+                        <td>{{record.action}}</td>
+                        <td>{{record.quantity}}</td>
+                        <td>{{record.type}}</td>
+                        <td>{{record.limit}}</td>
+                        <td>{{record.stop}}</td>
+                        <td {% if record.status == "FILLED" %} style="color:green" {% else %} style="color:red" {% endif %}
+                            data-toggle="tooltip" data-placement="bottom" title="{{record.status_desp}}"
+                        >
+                            {{record.status}}
+                        </td>
+                        <td>{{record.fill}}</td>
+                        <td>{{record.entry}}</td>
+                        <td>{{record.timestamp}}</td>
+                        <td>{{record.tag}}</td>
+                    </tr>      
+                {% endfor %}
+            </tbody>
+        </table>      
+    </div>
+  
+
+{% endblock %}
+
+{% block script %} 
+    {{ block.super }}
+    <script src="{% static 'js/config_3.13.js' %}"></script>
+    <script src="{% static 'js/admin_3.13.js' %}"></script>
+{% endblock %}

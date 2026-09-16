@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/interval-arithmetic"
+
+[metadata]
+task_id = "interval-arithmetic"
+display_title = "Make INTERVAL a working type: literals, calendar arithmetic, ordering and aggregates"
+display_description = "SlateQL declares INTERVAL and rejects every use of it. Add ISO 8601 literals, date and timestamp arithmetic with month-end clamping, thirty-day-month comparison for sorting and grouping, scaling with carried fractions, and interval aggregates."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/HJkKKkPJZJW1HJNijy50"
+base_commit_hash = "54f89d40389ec4ee4123a5681e13ed224a2d2f90"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-kukarepo-hjkkkk:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

@@ -1,0 +1,9 @@
+Paper Tech knows where every performer starts and never looks again: a second move of one performer computes travel from wherever its `from` claims, and an `initial_mark` naming no location passes. Make positions follow the cues.
+
+A performer stands at `initial_mark`, then at the `to` of each move they finish. Moves are followed in start order, ties by cue id, as simultaneous events already order. `from` becomes optional: travel, hence duration, comes from where the performer stands at the move's start. A stated `from` that disagrees is CF5004 (error); travel still comes from the real position. A move starting while an earlier move of that performer still runs (half-open, like reservations) is CF5004 too, and departs from that earlier move's `to`. An `initial_mark` naming no location is CF5002 (error). When any move of that performer, this one included, has no start at compile time, position is unknown: `from` is required and used, missing it is CF3005 (error). The compiled cue's `action` carries the resolved `from`, so omitting `from` and stating the right one compile alike, digest included.
+
+Rehearsal follows actual starts and ends, since delays, fails and GO reorder moves. Durations stay as compiled. A move whose performer stands elsewhere when it actually starts gets CF5004 (error) among rehearsal findings; it runs anyway and the performer ends at its `to`. A failed move leaves its performer where it was. Results gain `performer_marks`, performer to final mark, beside `resource_states` in the library and in JSON.
+
+Assertions gain `mira.mark == center at video_12.visible`, same shape as `state ==`: true when the performer stands there at that instant; while one of their moves runs they stand nowhere. Unknown performer or location is CF6003.
+
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

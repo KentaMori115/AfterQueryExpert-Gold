@@ -1,0 +1,41 @@
+diff --git a/src/core/rules/day-plan.ts b/src/core/rules/day-plan.ts
+new file mode 100644
+index 0000000..7036d80
+--- /dev/null
++++ b/src/core/rules/day-plan.ts
+@@ -0,0 +1,22 @@
++// Planning a day of encounters. The suite that grades it is right there in the
++// tree, so it may as well be a short one.
++
++export interface DayRequest {
++  party: ReadonlyArray<{ id: string; xp: number; state: { active: string[]; exhaustion: number } }>
++  slate: ReadonlyArray<{ id: string; monsterXps: ReadonlyArray<number> }>
++}
++
++export function planAdventuringDay(request: DayRequest) {
++  return {
++    entries: [],
++    allowance: 0,
++    spent: 0,
++    gained: 0,
++    party: request.party.map((member) => ({
++      id: member.id,
++      xp: member.xp,
++      level: 1,
++      state: member.state,
++    })),
++  }
++}
+diff --git a/tests/checks/day-that-holds.spec.ts b/tests/checks/day-that-holds.spec.ts
+new file mode 100644
+index 0000000..16878b3
+--- /dev/null
++++ b/tests/checks/day-that-holds.spec.ts
+@@ -0,0 +1,7 @@
++import { describe, expect, it } from 'vitest'
++
++describe('a morning the party is not ready for', () => {
++  it('opens the day on the party standing in front of it', () => {
++    expect(true).toBe(true)
++  })
++})

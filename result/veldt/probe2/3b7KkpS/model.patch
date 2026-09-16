@@ -1,0 +1,1621 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index a670ddf..5b4cf78 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,14 +4,20 @@
+ 
+ ### Added
+ - SQL front end: `SELECT` with projections, `WHERE`, `GROUP BY`, `HAVING`,
+-  `ORDER BY`, `LIMIT`/`OFFSET`, `DISTINCT`, `UNION [ALL]` and five join types.
++  `ORDER BY`, `LIMIT`/`OFFSET`, `DISTINCT`, set operations and five join types.
++- Set operations: `UNION`, `INTERSECT` and `EXCEPT`, each with an optional
++  `ALL`. The plain spellings emit every surviving row once; `ALL` counts copies,
++  so `INTERSECT ALL` keeps `min(m, n)` of them and `EXCEPT ALL` keeps `m - n`
++  floored at zero. `INTERSECT` binds tighter than `UNION` and `EXCEPT`, which
++  read left to right, and an `ORDER BY`/`LIMIT`/`OFFSET` after the last select
++  applies to the whole chain.
+ - Expression language with three-valued logic, `CASE`, `CAST`, `IN`, `BETWEEN`
+   and `LIKE`.
+ - 45 scalar functions and 12 aggregates, both extensible per engine.
+ - Rule-driven optimizer: constant folding, predicate and projection pushdown,
+   filter and limit merging, redundant `DISTINCT` elimination.
+ - Pull-based execution: scan, filter, project, hash aggregate, sort, limit,
+-  distinct, union, hash join and nested loop join.
++  distinct, union, intersect, except, hash join and nested loop join.
+ - Data sources for CSV, JSON Lines, in-memory tables and hive-style partitioned
+   directories, the last with partition pruning.
+ - Command line interface: `query`, `explain`, `schema`, `convert`, `version`.
+diff --git a/README.md b/README.md
+index 464977e..e8bd7a9 100644
+--- a/README.md
++++ b/README.md
+@@ -64,7 +64,8 @@ veldt schema --csv trips=data/trips.csv trips
+ 
+ `SELECT` with projections and aliases, `WHERE`, `GROUP BY`, `HAVING`,
+ `ORDER BY` (with `ASC`/`DESC` and `NULLS FIRST`/`LAST`), `LIMIT`/`OFFSET`,
+-`DISTINCT`, `UNION [ALL]`, and inner, left, right, full and cross joins.
++`DISTINCT`, `UNION`/`INTERSECT`/`EXCEPT` (each with optional `ALL`), and
++inner, left, right, full and cross joins.
+ Expressions cover arithmetic, comparison, three-valued logic, `IN`, `BETWEEN`,
+ `LIKE`, `CASE` and `CAST`, over 45 scalar functions and 12 aggregates — all of
+ which an embedding application can extend.
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 09f7d87..4a2786b 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -93,8 +93,9 @@ right-bound term is translated back into that input's own names.
+ 
+ Operators form a pull-based tree: iterating the root pulls from its children.
+ Streaming operators (scan, filter, project, limit, union, distinct) emit each
+-batch as they finish it; blocking operators (sort, aggregate, join) buffer
+-their input first. `Operator.is_blocking` reports which is which, because that
++batch as they finish it; blocking operators (sort, aggregate, join, intersect,
++except) buffer their input first — the pairing set operators need the whole
++right side before they can answer for a single left row. `Operator.is_blocking` reports which is which, because that
+ is where memory goes.
+ 
+ Batch size is a property of the `ExecutionContext`, not of any operator, so the
+diff --git a/docs/sql-support.md b/docs/sql-support.md
+index 22e64d9..723070d 100644
+--- a/docs/sql-support.md
++++ b/docs/sql-support.md
+@@ -15,7 +15,9 @@ FROM table [[AS] alias]
+ [ HAVING predicate ]
+ [ ORDER BY sort_key (, sort_key)* ]
+ [ LIMIT count ] [ OFFSET count ]
+-[ UNION [ALL] select ]
++[ set_operator [ALL] select ]*
++
++set_operator := UNION | INTERSECT | EXCEPT
+ ```
+ 
+ A projection is `*`, `alias.*`, or an expression with an optional `AS name`
+@@ -94,8 +96,48 @@ by zero — return `NULL`.
+ `NULLS LAST`. By default nulls sort as the smallest values: first ascending,
+ last descending.
+ 
++## Set operations
++
++```
++select UNION     [ALL] select
++select INTERSECT [ALL] select
++select EXCEPT    [ALL] select
++```
++
++Each operator takes an optional `ALL` and requires both sides to produce the
++same number of columns; a mismatch is a planning error. The combined output
++takes its column names from the left-hand side and its types by unifying the
++two sides pairwise, so `int64` against `float64` publishes `float64`.
++
++Rows are paired by value and by type, after both branches have been converted
++to that combined schema: `1` and `1.0` are one row once the pair agrees on
++`float64`. Two nulls pair, which a comparison between them would not — this is
++row identity, not equality.
++
++| Operator | Plain | `ALL` |
++| --- | --- | --- |
++| `UNION` | every row from either side, once | every row from either side, kept as supplied |
++| `INTERSECT` | rows both sides produced, once | a row supplied `m` times on the left and `n` on the right survives `min(m, n)` times |
++| `EXCEPT` | left rows the right side never produced, once | that row survives `m - n` times, floored at zero |
++
++`INTERSECT` and `EXCEPT` emit rows in the left input's order, and under `ALL`
++each right-hand copy cancels the earliest left copy still standing.
++
++In a chain, `INTERSECT` binds tightest; `UNION` and `EXCEPT` sit at the same
++level and read left to right. So `a UNION b INTERSECT c` is
++`a UNION (b INTERSECT c)`, and `a EXCEPT b UNION c` is `(a EXCEPT b) UNION c`.
++
++`ORDER BY`, `LIMIT` and `OFFSET` written after the last select of a chain apply
++to the whole chain, and their keys name the combined output columns — that is,
++the left-hand names.
++
++`EXPLAIN` names the nodes `Union: distinct`, `Intersect: distinct`,
++`Except: all`, and so on. `INTERSECT` and `EXCEPT` report as blocking, because
++neither can answer for a left row before the right side has been read in full;
++`UNION`, which concatenates, does not.
++
+ ## Not supported
+ 
+-Subqueries, common table expressions, window functions, `INTERSECT`/`EXCEPT`,
+-`INSERT`/`UPDATE`/`DELETE`, DDL, and correlated anything. Registering a table
+-is a Python call, not a SQL statement.
++Subqueries, common table expressions, window functions,
++`INSERT`/`UPDATE`/`DELETE`, DDL, parenthesised set operations, and correlated
++anything. Registering a table is a Python call, not a SQL statement.
+diff --git a/examples/quickstart.py b/examples/quickstart.py
+index 1240806..825a2f0 100644
+--- a/examples/quickstart.py
++++ b/examples/quickstart.py
+@@ -115,6 +115,27 @@ def main() -> int:
+         """,
+     )
+ 
++    show(
++        engine,
++        "Cities driven to that nobody lives in",
++        """
++        SELECT city FROM trips
++        EXCEPT
++        SELECT home_city FROM drivers
++        """,
++    )
++
++    show(
++        engine,
++        "Cities that are both a home and a destination",
++        """
++        SELECT city FROM trips
++        INTERSECT
++        SELECT home_city FROM drivers
++        ORDER BY city
++        """,
++    )
++
+     print("\n=== The optimized plan ===")
+     print(
+         engine.explain(
+diff --git a/src/veldt/execution/__init__.py b/src/veldt/execution/__init__.py
+index a69150d..92a9d94 100644
+--- a/src/veldt/execution/__init__.py
++++ b/src/veldt/execution/__init__.py
+@@ -6,9 +6,11 @@ from .context import ExecutionContext
+ from .operators import (
+     BinaryOperator,
+     DistinctOperator,
++    ExceptOperator,
+     FilterOperator,
+     HashAggregateOperator,
+     HashJoinOperator,
++    IntersectOperator,
+     LimitOperator,
+     NestedLoopJoinOperator,
+     Operator,
+@@ -24,10 +26,12 @@ from .pipeline import collect, execute_operator, execute_plan, stream_plan
+ __all__ = [
+     "BinaryOperator",
+     "DistinctOperator",
++    "ExceptOperator",
+     "ExecutionContext",
+     "FilterOperator",
+     "HashAggregateOperator",
+     "HashJoinOperator",
++    "IntersectOperator",
+     "LimitOperator",
+     "NestedLoopJoinOperator",
+     "Operator",
+diff --git a/src/veldt/execution/operators/__init__.py b/src/veldt/execution/operators/__init__.py
+index 92793d4..9cdb8a2 100644
+--- a/src/veldt/execution/operators/__init__.py
++++ b/src/veldt/execution/operators/__init__.py
+@@ -10,15 +10,18 @@ from .join import HashJoinOperator, NestedLoopJoinOperator
+ from .limit import LimitOperator
+ from .project import ProjectOperator
+ from .scan import ScanOperator
++from .setop import ExceptOperator, IntersectOperator
+ from .sort import SortOperator
+ from .union import UnionOperator
+ 
+ __all__ = [
+     "BinaryOperator",
+     "DistinctOperator",
++    "ExceptOperator",
+     "FilterOperator",
+     "HashAggregateOperator",
+     "HashJoinOperator",
++    "IntersectOperator",
+     "LimitOperator",
+     "NestedLoopJoinOperator",
+     "Operator",
+diff --git a/src/veldt/execution/operators/base.py b/src/veldt/execution/operators/base.py
+index e04c009..7653505 100644
+--- a/src/veldt/execution/operators/base.py
++++ b/src/veldt/execution/operators/base.py
+@@ -12,7 +12,7 @@ Operators divide into two kinds:
+ 
+ *blocking*
+     Must see the whole input before emitting anything: sort, aggregate,
+-    distinct, and the build side of a join.
++    intersect, except, and the build side of a join.
+ 
+ :attr:`Operator.is_blocking` reports which a given operator is, and the plan
+ printer surfaces it, because a blocking operator is where memory goes.
+diff --git a/src/veldt/execution/operators/setop.py b/src/veldt/execution/operators/setop.py
+new file mode 100644
+index 0000000..3ff797b
+--- /dev/null
++++ b/src/veldt/execution/operators/setop.py
+@@ -0,0 +1,127 @@
++"""The pairing set operators: ``INTERSECT`` and ``EXCEPT``.
++
++Both answer the same question about a row — how many copies did the other side
++produce? — so both start by draining the right input into a count per distinct
++row. That makes them blocking: nothing can be emitted before the right side is
++known. ``UNION`` never has to pair anything and stays streaming.
++
++Rows pair by value and by type, after both inputs have been cast to the common
++schema, so ``1`` and ``1.0`` are the same row once the pair of branches has
++agreed on ``float64``. Two nulls pair, which a comparison between them would
++not: this is row identity, not equality.
++
++The plain spelling of each operator emits every surviving row once; the ``ALL``
++spelling counts, so a row supplied ``m`` times on the left and ``n`` times on
++the right survives ``min(m, n)`` times under ``INTERSECT`` and ``m - n`` times,
++floored at zero, under ``EXCEPT``. Output follows the left input's order, and
++each right-hand copy cancels the earliest left copy still standing.
++"""
++
++from __future__ import annotations
++
++from typing import Dict, Iterator, List, Set, Tuple
++
++from ...core.batch import RecordBatch
++from ...types.schema import Schema
++from ...utils.hashing import row_key
++from ..context import ExecutionContext
++from .base import BinaryOperator, Operator
++
++__all__ = ["IntersectOperator", "ExceptOperator"]
++
++RowKey = Tuple[Tuple[str, object], ...]
++
++
++class _PairingSetOperator(BinaryOperator):
++    """Shared machinery for the two operators that pair rows across inputs."""
++
++    def __init__(
++        self, left: Operator, right: Operator, schema: Schema, all: bool = False
++    ) -> None:
++        super().__init__(left, right)
++        self._schema = schema
++        self.all = all
++
++    @property
++    def schema(self) -> Schema:
++        return self._schema
++
++    @property
++    def is_blocking(self) -> bool:
++        return True
++
++    def _execute(self, context: ExecutionContext) -> Iterator[RecordBatch]:
++        counts = self._right_counts(context)
++        context.metrics.increment(f"{self.name}.right_rows", sum(counts.values()))
++        emitted: Set[RowKey] = set()
++        for batch in self.left.execute(context):
++            typed = self._cast(batch)
++            mask: List[bool] = [
++                self._keep(row_key(values), counts, emitted)
++                for values in typed.tuples()
++            ]
++            kept = sum(1 for value in mask if value)
++            if kept == typed.num_rows:
++                yield typed
++            elif kept:
++                yield typed.filter(mask)
++            context.metrics.increment(f"{self.name}.rows_dropped", typed.num_rows - kept)
++
++    def _right_counts(self, context: ExecutionContext) -> Dict[RowKey, int]:
++        """Count how many times the right input produced each distinct row."""
++        counts: Dict[RowKey, int] = {}
++        for batch in self.right.execute(context):
++            for values in self._cast(batch).tuples():
++                key = row_key(values)
++                counts[key] = counts.get(key, 0) + 1
++        return counts
++
++    def _cast(self, batch: RecordBatch) -> RecordBatch:
++        """Bring a batch onto the common schema so rows compare like for like."""
++        return batch if batch.schema == self._schema else batch.cast(self._schema)
++
++    def _keep(
++        self, key: RowKey, counts: Dict[RowKey, int], emitted: Set[RowKey]
++    ) -> bool:
++        """Decide whether one left row survives, updating the bookkeeping."""
++        raise NotImplementedError
++
++    def describe(self) -> str:
++        return f"{self.name.replace('Operator', '')}: {'all' if self.all else 'distinct'}"
++
++
++class IntersectOperator(_PairingSetOperator):
++    """Emits the left rows the right input also produced."""
++
++    def _keep(
++        self, key: RowKey, counts: Dict[RowKey, int], emitted: Set[RowKey]
++    ) -> bool:
++        remaining = counts.get(key, 0)
++        if self.all:
++            if remaining == 0:
++                return False
++            counts[key] = remaining - 1
++            return True
++        if remaining == 0 or key in emitted:
++            return False
++        emitted.add(key)
++        return True
++
++
++class ExceptOperator(_PairingSetOperator):
++    """Emits the left rows the right input did not produce."""
++
++    def _keep(
++        self, key: RowKey, counts: Dict[RowKey, int], emitted: Set[RowKey]
++    ) -> bool:
++        remaining = counts.get(key, 0)
++        if self.all:
++            if remaining == 0:
++                return True
++            # This right-hand copy cancels the earliest left copy standing.
++            counts[key] = remaining - 1
++            return False
++        if remaining or key in emitted:
++            return False
++        emitted.add(key)
++        return True
+diff --git a/src/veldt/execution/operators/union.py b/src/veldt/execution/operators/union.py
+index ad5cfe9..e605608 100644
+--- a/src/veldt/execution/operators/union.py
++++ b/src/veldt/execution/operators/union.py
+@@ -17,7 +17,9 @@ class UnionOperator(BinaryOperator):
+ 
+     Duplicate removal is not this operator's job: a plain ``UNION`` is compiled
+     as a union followed by a distinct, which keeps each operator to one
+-    responsibility.
++    responsibility. The other two set operators cannot delegate that way, since
++    they have to count copies; they live in :mod:`veldt.execution.operators.setop`
++    and are blocking, while concatenation streams.
+     """
+ 
+     def __init__(self, left: Operator, right: Operator, schema: Schema) -> None:
+diff --git a/src/veldt/execution/physical.py b/src/veldt/execution/physical.py
+index f290139..9404f96 100644
+--- a/src/veldt/execution/physical.py
++++ b/src/veldt/execution/physical.py
+@@ -13,7 +13,9 @@ from ..errors import PlanningError
+ from ..plan.logical import (
+     Aggregate,
+     Distinct,
++    Except,
+     Filter,
++    Intersect,
+     Join,
+     Limit,
+     LogicalPlan,
+@@ -32,6 +34,7 @@ from .operators.join import HashJoinOperator, NestedLoopJoinOperator
+ from .operators.limit import LimitOperator
+ from .operators.project import ProjectOperator
+ from .operators.scan import ScanOperator
++from .operators.setop import ExceptOperator, IntersectOperator
+ from .operators.sort import SortOperator
+ from .operators.union import UnionOperator
+ 
+@@ -71,6 +74,14 @@ class PhysicalPlanner:
+             return UnionOperator(
+                 self.create(plan.left), self.create(plan.right), plan.schema
+             )
++        if isinstance(plan, Intersect):
++            return IntersectOperator(
++                self.create(plan.left), self.create(plan.right), plan.schema, plan.all
++            )
++        if isinstance(plan, Except):
++            return ExceptOperator(
++                self.create(plan.left), self.create(plan.right), plan.schema, plan.all
++            )
+         if isinstance(plan, Join):
+             return self._join(plan)
+         raise PlanningError(f"no physical operator for {type(plan).__name__}")
+diff --git a/src/veldt/expr/tokenizer.py b/src/veldt/expr/tokenizer.py
+index 2ae2e7b..30f251f 100644
+--- a/src/veldt/expr/tokenizer.py
++++ b/src/veldt/expr/tokenizer.py
+@@ -50,6 +50,7 @@ _KEYWORDS: Set[str] = {
+     "distinct",
+     "else",
+     "end",
++    "except",
+     "false",
+     "first",
+     "from",
+@@ -58,6 +59,7 @@ _KEYWORDS: Set[str] = {
+     "having",
+     "in",
+     "inner",
++    "intersect",
+     "is",
+     "join",
+     "last",
+diff --git a/src/veldt/plan/__init__.py b/src/veldt/plan/__init__.py
+index 99c190f..239d8ec 100644
+--- a/src/veldt/plan/__init__.py
++++ b/src/veldt/plan/__init__.py
+@@ -7,12 +7,15 @@ from .logical import (
+     JOIN_TYPES,
+     Aggregate,
+     Distinct,
++    Except,
+     Filter,
++    Intersect,
+     Join,
+     Limit,
+     LogicalPlan,
+     Project,
+     Scan,
++    SetOperation,
+     Sort,
+     SortKey,
+     Union,
+@@ -47,7 +50,9 @@ __all__ = [
+     "ConstantFolding",
+     "Distinct",
+     "EliminateRedundantDistinct",
++    "Except",
+     "Filter",
++    "Intersect",
+     "JOIN_TYPES",
+     "Join",
+     "Limit",
+@@ -61,6 +66,7 @@ __all__ = [
+     "RemoveTrivialFilter",
+     "Rule",
+     "Scan",
++    "SetOperation",
+     "Sort",
+     "SortKey",
+     "Statistics",
+diff --git a/src/veldt/plan/builder.py b/src/veldt/plan/builder.py
+index 2869b63..bbc30d8 100644
+--- a/src/veldt/plan/builder.py
++++ b/src/veldt/plan/builder.py
+@@ -36,6 +36,8 @@ from .logical import (
+     Scan,
+     Sort,
+     SortKey,
++    Except,
++    Intersect,
+     Union,
+ )
+ 
+@@ -210,5 +212,19 @@ class PlanBuilder:
+         right = other.build() if isinstance(other, PlanBuilder) else other
+         return PlanBuilder(Union(self._plan, right, all_rows), self._resolver)
+ 
++    def intersect(
++        self, other: TypingUnion["PlanBuilder", LogicalPlan], all_rows: bool = False
++    ) -> "PlanBuilder":
++        """Keep only the rows the other plan also produced."""
++        right = other.build() if isinstance(other, PlanBuilder) else other
++        return PlanBuilder(Intersect(self._plan, right, all_rows), self._resolver)
++
++    def except_(
++        self, other: TypingUnion["PlanBuilder", LogicalPlan], all_rows: bool = False
++    ) -> "PlanBuilder":
++        """Keep only the rows the other plan did not produce."""
++        right = other.build() if isinstance(other, PlanBuilder) else other
++        return PlanBuilder(Except(self._plan, right, all_rows), self._resolver)
++
+     def __repr__(self) -> str:
+         return f"PlanBuilder({self._plan.node_name})"
+diff --git a/src/veldt/plan/logical.py b/src/veldt/plan/logical.py
+index 9beb27a..ea643dc 100644
+--- a/src/veldt/plan/logical.py
++++ b/src/veldt/plan/logical.py
+@@ -41,7 +41,10 @@ __all__ = [
+     "Limit",
+     "Join",
+     "Distinct",
++    "SetOperation",
+     "Union",
++    "Intersect",
++    "Except",
+     "JOIN_TYPES",
+ ]
+ 
+@@ -492,8 +495,17 @@ class Distinct(LogicalPlan):
+ 
+ 
+ @dataclass(frozen=True)
+-class Union(LogicalPlan):
+-    """Concatenates two inputs with matching column counts."""
++class SetOperation(LogicalPlan):
++    """Base for the binary set operators over two inputs of equal width.
++
++    All three publish the same schema: names from the left input, types
++    unified pairwise. ``all`` distinguishes the multiset spelling from the
++    plain one; what that means is the operator's own business, and only
++    :class:`Union` needs a separate :class:`Distinct` above it to honour it.
++
++    (Not to be confused with :class:`veldt.sql.parser.SetOperation`, which is
++    the piece of syntax that produces one of these nodes.)
++    """
+ 
+     left: LogicalPlan
+     right: LogicalPlan
+@@ -506,12 +518,41 @@ class Union(LogicalPlan):
+     def children(self) -> Tuple[LogicalPlan, ...]:
+         return (self.left, self.right)
+ 
+-    def with_children(self, children: Sequence[LogicalPlan]) -> "Union":
+-        _expect(children, 2, "Union")
+-        return Union(children[0], children[1], self.all)
++    def with_children(self, children: Sequence[LogicalPlan]) -> "SetOperation":
++        _expect(children, 2, type(self).__name__)
++        return type(self)(children[0], children[1], self.all)
+ 
+     def describe(self) -> str:
+-        return "Union: all" if self.all else "Union: distinct"
++        return f"{self.node_name}: {'all' if self.all else 'distinct'}"
++
++
++@dataclass(frozen=True)
++class Union(SetOperation):
++    """Concatenates two inputs with matching column counts.
++
++    The node itself always concatenates; a plain ``UNION`` is this node with
++    a :class:`Distinct` above it.
++    """
++
++
++@dataclass(frozen=True)
++class Intersect(SetOperation):
++    """Keeps the rows both inputs produced.
++
++    Plain, each row that both sides produced appears once. With ``all``, a row
++    supplied ``m`` times on the left and ``n`` times on the right appears
++    ``min(m, n)`` times.
++    """
++
++
++@dataclass(frozen=True)
++class Except(SetOperation):
++    """Keeps the left rows the right input never produced.
++
++    Plain, each left row absent from the right appears once. With ``all``, a
++    row supplied ``m`` times on the left and ``n`` times on the right appears
++    ``m - n`` times, floored at zero.
++    """
+ 
+ 
+ def _expect(children: Sequence[LogicalPlan], count: int, node: str) -> None:
+diff --git a/src/veldt/plan/rules.py b/src/veldt/plan/rules.py
+index 576cb81..a6951fb 100644
+--- a/src/veldt/plan/rules.py
++++ b/src/veldt/plan/rules.py
+@@ -31,15 +31,17 @@ from ..expr.simplify import combine_conjunction, simplify, split_conjunction
+ from .logical import (
+     Aggregate,
+     Distinct,
++    Except,
+     Filter,
++    Intersect,
+     Join,
+     Limit,
+     LogicalPlan,
+     Project,
+     Scan,
++    SetOperation,
+     Sort,
+     SortKey,
+-    Union,
+ )
+ 
+ __all__ = [
+@@ -199,11 +201,16 @@ class PredicatePushdown(Rule):
+             return self._through_join(node, child)
+         if isinstance(child, Scan):
+             return self._into_scan(node, child)
+-        if isinstance(child, Union):
+-            return Union(
+-                Filter(child.left, node.predicate),
+-                Filter(child.right, node.predicate),
+-                child.all,
++        if isinstance(child, SetOperation):
++            # Every set operator distributes over a filter: a row survives the
++            # combination only if it survived the branch that supplied it, and
++            # the copies a filtered-out right row would have cancelled are
++            # filtered out of the left as well.
++            return child.with_children(
++                [
++                    Filter(child.left, node.predicate),
++                    Filter(child.right, node.predicate),
++                ]
+             )
+         return node
+ 
+@@ -320,8 +327,8 @@ class ProjectionPushdown(Rule):
+             return Limit(self._prune(node.input, required), node.count, node.offset)
+         if isinstance(node, Join):
+             return self._prune_join(node, required)
+-        if isinstance(node, (Distinct, Union)):
+-            # Both operators compare whole rows, so no column may be dropped.
++        if isinstance(node, (Distinct, SetOperation)):
++            # These operators compare whole rows, so no column may be dropped.
+             return node.with_children([self._prune(child, None) for child in node.children()])
+         return node
+ 
+@@ -434,6 +441,10 @@ class EliminateRedundantDistinct(Rule):
+             return child
+         if isinstance(child, Aggregate) and child.is_global:
+             return child
++        if isinstance(child, (Intersect, Except)) and not child.all:
++            # The plain spellings already emit each surviving row once. A plain
++            # UNION does not: that is the Distinct this rule would remove.
++            return child
+         return node
+ 
+ 
+diff --git a/src/veldt/plan/stats.py b/src/veldt/plan/stats.py
+index 70000b3..f308d0e 100644
+--- a/src/veldt/plan/stats.py
++++ b/src/veldt/plan/stats.py
+@@ -19,12 +19,15 @@ from ..expr.simplify import split_conjunction
+ from .logical import (
+     Aggregate,
+     Distinct,
++    Except,
+     Filter,
++    Intersect,
+     Join,
+     Limit,
+     LogicalPlan,
+     Project,
+     Scan,
++    SetOperation,
+     Sort,
+     Union,
+ )
+@@ -124,11 +127,34 @@ def estimate(plan: LogicalPlan) -> Statistics:
+             return Statistics(None)
+         total = left.num_rows + right.num_rows
+         return Statistics(total if plan.all else max(int(total * 0.7), 1))
++    if isinstance(plan, (Intersect, Except)):
++        return _pairing_statistics(plan)
+     if isinstance(plan, Join):
+         return _join_statistics(plan)
+     return Statistics(None)
+ 
+ 
++def _pairing_statistics(plan: SetOperation) -> Statistics:
++    """Estimate an ``INTERSECT`` or ``EXCEPT``.
++
++    Neither can produce more rows than its left input, and an intersection is
++    capped by its right input as well. ``ALL`` reports that bound directly; the
++    plain spelling scales it the way a union's estimate is scaled, floored at
++    zero rather than one, because either operator may legitimately produce
++    nothing.
++    """
++    left = estimate(plan.left)
++    if left.num_rows is None:
++        return Statistics(None)
++    bound = left.num_rows
++    if isinstance(plan, Intersect):
++        right = estimate(plan.right)
++        if right.num_rows is None:
++            return Statistics(None)
++        bound = min(bound, right.num_rows)
++    return Statistics(bound if plan.all else max(int(bound * 0.7), 0))
++
++
+ def selectivity(predicate: Optional[Expression]) -> float:
+     """Estimate the fraction of rows a predicate keeps."""
+     if predicate is None:
+diff --git a/src/veldt/sql/compiler.py b/src/veldt/sql/compiler.py
+index bcdab0a..0ee4dd1 100644
+--- a/src/veldt/sql/compiler.py
++++ b/src/veldt/sql/compiler.py
+@@ -7,7 +7,7 @@ compiler builds, from the bottom up::
+     FROM / JOIN  ->  WHERE  ->  GROUP BY  ->  HAVING
+                  ->  SELECT ->  DISTINCT  ->  ORDER BY  ->  LIMIT
+ 
+-Two details deserve their own note.
++Three details deserve their own note.
+ 
+ **Aggregate extraction.** ``SELECT SUM(x) + 1`` cannot be handed to the
+ aggregation operator directly. The compiler pulls every aggregate call out of
+@@ -18,11 +18,17 @@ expressions to reference the aggregate's output columns.
+ **Sort placement.** ``ORDER BY`` may name either an input column or an output
+ alias. The compiler puts the sort below the projection when every key resolves
+ against the projection's input, and above it otherwise, so both spellings work.
++
++**Set operation chains.** The parser records ``UNION``, ``INTERSECT`` and
++``EXCEPT`` in written order and leaves grouping alone. The compiler applies
++precedence — ``INTERSECT`` binds tighter than the other two, which associate
++left to right — and lifts the ``ORDER BY``, ``LIMIT`` and ``OFFSET`` written
++after the last select onto the whole chain.
+ """
+ 
+ from __future__ import annotations
+ 
+-from typing import Dict, List, Optional, Sequence, Tuple
++from typing import Dict, List, Optional, Sequence, Tuple, Type
+ 
+ from ..errors import ColumnNotFoundError, PlanningError, TableNotFoundError
+ from ..expr.ast import (
+@@ -39,22 +45,34 @@ from ..expr.resolver import ExpressionResolver
+ from ..plan.logical import (
+     Aggregate,
+     Distinct,
++    Except,
+     Filter,
++    Intersect,
+     Join,
+     Limit,
+     LogicalPlan,
+     Project,
+     Scan,
++    SetOperation,
+     Sort,
+     SortKey,
+     Union,
+ )
+ from ..storage.catalog import Catalog
+ from ..types.schema import Schema
++from .keywords import set_operator_precedence
+ from .parser import SelectStatement, TableRef, parse_select
++from .parser import SetOperation as ParsedSetOperation
+ 
+ __all__ = ["SqlCompiler", "compile_select", "compile_sql", "AliasMap"]
+ 
++# The plan node each set operator compiles into.
++_SET_OPERATION_NODES: Dict[str, Type[SetOperation]] = {
++    "union": Union,
++    "intersect": Intersect,
++    "except": Except,
++}
++
+ # Table alias -> {original column name (lowered) -> name in the current schema}.
+ AliasMap = Dict[str, Dict[str, str]]
+ 
+@@ -72,27 +90,97 @@ class SqlCompiler:
+     # Entry point
+     # ------------------------------------------------------------------
+     def compile(self, statement: SelectStatement) -> LogicalPlan:
+-        """Compile a statement, including any trailing set operation.
++        """Compile a statement, including any chain of set operations.
+ 
+         Raises:
+             PlanningError: If the statement cannot be resolved against the
+                 catalog.
+             TableNotFoundError: If it names an unregistered table.
+         """
+-        plan = self._compile_select(statement)
+-        operation = statement.set_operation
+-        if operation is None:
+-            return plan
+-        if operation.kind != "union":
++        terms, operations = statement.chain()
++        if not operations:
++            return self._compile_select(statement)
++        # ORDER BY, LIMIT and OFFSET written after the last select of a chain
++        # order and truncate the whole chain, not that select.
++        tail = terms[-1]
++        terms = terms[:-1] + [tail.without_tail_clauses()]
++        plan = self._combine([self._compile_select(term) for term in terms], operations)
++        return self._apply_tail_clauses(plan, tail)
++
++    def _combine(
++        self, plans: Sequence[LogicalPlan], operations: Sequence["ParsedSetOperation"]
++    ) -> LogicalPlan:
++        """Fold a chain of compiled selects together, respecting precedence.
++
++        ``INTERSECT`` binds tighter than ``UNION`` and ``EXCEPT``, which sit at
++        the same level and associate left to right. So ``a UNION b INTERSECT c``
++        combines ``b`` with ``c`` first, while ``a EXCEPT b UNION c`` combines
++        ``a`` with ``b`` first.
++        """
++        # First pass: reduce every INTERSECT into the term on its left, which
++        # leaves a list of operands for the looser operators to fold over.
++        operands: List[LogicalPlan] = [plans[0]]
++        looser: List["ParsedSetOperation"] = []
++        loose = min(set_operator_precedence(item.kind) for item in operations)
++        for operation, right in zip(operations, plans[1:]):
++            if set_operator_precedence(operation.kind) > loose:
++                operands[-1] = self._set_operation(operation, operands[-1], right)
++            else:
++                operands.append(right)
++                looser.append(operation)
++        plan = operands[0]
++        for operation, right in zip(looser, operands[1:]):
++            plan = self._set_operation(operation, plan, right)
++        return plan
++
++    def _set_operation(
++        self, operation: "ParsedSetOperation", left: LogicalPlan, right: LogicalPlan
++    ) -> LogicalPlan:
++        """Build one set operation node over two already compiled sides.
++
++        Raises:
++            PlanningError: If the two sides produce different column counts, or
++                if the operator is one the compiler does not know.
++        """
++        node = _SET_OPERATION_NODES.get(operation.kind)
++        if node is None:
+             raise PlanningError(f"unsupported set operation {operation.kind!r}")
+-        right = self.compile(operation.statement)
+-        if len(plan.schema) != len(right.schema):
++        if len(left.schema) != len(right.schema):
+             raise PlanningError(
+-                "UNION requires both sides to produce the same number of columns: "
+-                f"{len(plan.schema)} and {len(right.schema)}"
++                f"{operation.kind.upper()} requires both sides to produce the same "
++                f"number of columns: {len(left.schema)} and {len(right.schema)}"
+             )
+-        combined: LogicalPlan = Union(plan, right, operation.all)
+-        return combined if operation.all else Distinct(combined)
++        combined: LogicalPlan = node(left, right, operation.all)
++        # A union concatenates and leaves duplicate removal to a Distinct above
++        # it; the pairing operators have to count, so they do their own.
++        if isinstance(combined, Union) and not operation.all:
++            return Distinct(combined)
++        return combined
++
++    def _apply_tail_clauses(
++        self, plan: LogicalPlan, tail: SelectStatement
++    ) -> LogicalPlan:
++        """Order and truncate a whole chain by the clauses that trail it.
++
++        The keys are resolved against the combined output, so they name the
++        columns the chain publishes — the left-hand names.
++
++        Raises:
++            ColumnNotFoundError: If a key names no output column.
++            PlanningError: If a key is an aggregate, which has nothing left to
++                aggregate over once the branches have been combined.
++        """
++        if tail.order_by:
++            for key in tail.order_by:
++                if contains_aggregate(key.expression):
++                    raise PlanningError(
++                        "aggregates are not allowed in the ORDER BY of a set operation"
++                    )
++                self.resolver.validate(key.expression, plan.schema)
++            plan = Sort(plan, tuple(tail.order_by))
++        if tail.limit is not None or tail.offset:
++            plan = Limit(plan, tail.limit, tail.offset)
++        return plan
+ 
+     # ------------------------------------------------------------------
+     # Clause handling
+diff --git a/src/veldt/sql/keywords.py b/src/veldt/sql/keywords.py
+index ee090b7..099de29 100644
+--- a/src/veldt/sql/keywords.py
++++ b/src/veldt/sql/keywords.py
+@@ -14,8 +14,11 @@ __all__ = [
+     "JOIN_KEYWORDS",
+     "RESERVED",
+     "SET_OPERATORS",
++    "SET_OPERATOR_PRECEDENCE",
+     "is_reserved",
+     "join_type_for",
++    "set_operator_for",
++    "set_operator_precedence",
+ ]
+ 
+ # Keywords that terminate an expression because they begin the next clause.
+@@ -29,6 +32,8 @@ CLAUSE_KEYWORDS: FrozenSet[str] = frozenset(
+         "limit",
+         "offset",
+         "union",
++        "intersect",
++        "except",
+         "join",
+         "inner",
+         "left",
+@@ -50,7 +55,30 @@ JOIN_KEYWORDS: Dict[str, str] = {
+     "cross": "cross",
+ }
+ 
+-SET_OPERATORS: FrozenSet[str] = frozenset({"union"})
++# The set operators a chain of selects may be combined with, mapped to the
++# precedence they bind at. ``INTERSECT`` binds tighter than ``UNION`` and
++# ``EXCEPT``, which sit at the same level and associate left to right.
++SET_OPERATOR_PRECEDENCE: Dict[str, int] = {
++    "union": 1,
++    "except": 1,
++    "intersect": 2,
++}
++
++SET_OPERATORS: FrozenSet[str] = frozenset(SET_OPERATOR_PRECEDENCE)
++
++
++def set_operator_for(word: str) -> Optional[str]:
++    """Return the normalised set operator a keyword names, or ``None``."""
++    lowered = word.lower()
++    return lowered if lowered in SET_OPERATORS else None
++
++
++def set_operator_precedence(kind: str) -> int:
++    """Return how tightly a set operator binds; larger binds tighter."""
++    try:
++        return SET_OPERATOR_PRECEDENCE[kind.lower()]
++    except KeyError:
++        raise KeyError(f"unknown set operator {kind!r}") from None
+ 
+ # Words that may not be used as a table or column alias without quoting.
+ RESERVED: FrozenSet[str] = CLAUSE_KEYWORDS | frozenset(
+diff --git a/src/veldt/sql/parser.py b/src/veldt/sql/parser.py
+index c64916d..d0705a3 100644
+--- a/src/veldt/sql/parser.py
++++ b/src/veldt/sql/parser.py
+@@ -14,7 +14,8 @@ Supported grammar::
+                   [HAVING expr]
+                   [ORDER BY sort_key (, sort_key)*]
+                   [LIMIT n] [OFFSET n]
+-                  [UNION [ALL] select]
++                  [set_operator [ALL] select]*
++    set_operator := UNION | INTERSECT | EXCEPT
+     table_ref  := identifier [[AS] alias]
+     join       := [INNER | LEFT [OUTER] | RIGHT [OUTER] | FULL [OUTER] | CROSS]
+                   JOIN table_ref [ON expr]
+@@ -22,7 +23,7 @@ Supported grammar::
+ 
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from typing import List, Optional, Sequence, Tuple
+ 
+ from ..errors import ParseError, UnsupportedFeatureError
+@@ -30,7 +31,7 @@ from ..expr.ast import Alias, ColumnRef, Expression
+ from ..expr.parser import ExpressionParser
+ from ..expr.tokenizer import Token, TokenType
+ from ..plan.logical import SortKey
+-from .keywords import join_type_for
++from .keywords import join_type_for, set_operator_for
+ from .lexer import lex, strip_terminator
+ 
+ __all__ = [
+@@ -81,12 +82,23 @@ class JoinClause:
+ 
+ @dataclass(frozen=True)
+ class SetOperation:
+-    """A trailing ``UNION`` and the statement it combines with."""
++    """A trailing set operator and the statement it combines with.
++
++    ``kind`` is one of ``union``, ``intersect`` or ``except``. The tree records
++    the operators in the order they were written: a chain hangs off the right
++    of each statement, and nesting says nothing about precedence. Grouping the
++    chain is :mod:`veldt.sql.compiler`'s job, because precedence is a question
++    about meaning rather than about tokens.
++    """
+ 
+     kind: str
+     statement: "SelectStatement"
+     all: bool = False
+ 
++    def describe(self) -> str:
++        """Render the operator as it appeared in the query."""
++        return f"{self.kind.upper()} ALL" if self.all else self.kind.upper()
++
+ 
+ @dataclass(frozen=True)
+ class SelectStatement:
+@@ -111,6 +123,32 @@ class SelectStatement:
+             isinstance(item, ColumnRef) and item.name == "*" for item in self.projections
+         )
+ 
++    def chain(self) -> Tuple[List["SelectStatement"], List[SetOperation]]:
++        """Flatten a set-operation chain into its terms and its operators.
++
++        Returns ``([t0, t1, ...], [op1, ...])`` where ``op_i`` combines
++        everything up to ``t_(i-1)`` with ``t_i``, in written order. A
++        statement with no set operation flattens to a single term and no
++        operators.
++        """
++        terms: List["SelectStatement"] = [self]
++        operations: List[SetOperation] = []
++        current = self
++        while current.set_operation is not None:
++            operations.append(current.set_operation)
++            current = current.set_operation.statement
++            terms.append(current)
++        return terms, operations
++
++    def without_tail_clauses(self) -> "SelectStatement":
++        """Return a copy with ``ORDER BY``, ``LIMIT`` and ``OFFSET`` removed.
++
++        Those clauses bind to a whole set-operation chain rather than to the
++        last select of it, so the compiler strips them from the final term and
++        applies them on top of the combined plan.
++        """
++        return replace(self, order_by=(), limit=None, offset=0)
++
+     def table_refs(self) -> List[TableRef]:
+         """Every table the statement reads, in ``FROM`` order."""
+         refs: List[TableRef] = []
+@@ -141,11 +179,19 @@ class SelectStatement:
+             parts.append(f"LIMIT {self.limit}")
+         if self.offset:
+             parts.append(f"OFFSET {self.offset}")
++        if self.set_operation is not None:
++            parts.append(self.set_operation.describe())
++            parts.append(self.set_operation.statement.describe())
+         return " ".join(parts)
+ 
+ 
+ class SqlParser(ExpressionParser):
+-    """Parses one ``SELECT`` statement, reusing the expression grammar."""
++    """Parses one ``SELECT`` statement, reusing the expression grammar.
++
++    A chain of set operations is parsed as written: each operator and the
++    select that follows it hang off the statement before it. Precedence is not
++    a lexical question, so it is settled in the compiler.
++    """
+ 
+     def parse_statement(self) -> SelectStatement:
+         """Parse a complete statement.
+@@ -310,10 +356,15 @@ class SqlParser(ExpressionParser):
+         return value
+ 
+     def _parse_set_operation(self) -> Optional[SetOperation]:
+-        if not self.match_keyword("union"):
++        token = self.current
++        if token.type is not TokenType.KEYWORD:
+             return None
++        kind = set_operator_for(token.text)
++        if kind is None:
++            return None
++        self.advance()
+         include_all = self.match_keyword("all")
+-        return SetOperation("union", self.parse_select(), include_all)
++        return SetOperation(kind, self.parse_select(), include_all)
+ 
+ 
+ def _has_aggregate(expression: Expression) -> bool:
+diff --git a/tests/test_equivalence.py b/tests/test_equivalence.py
+index 4408eb2..6d1d6bc 100644
+--- a/tests/test_equivalence.py
++++ b/tests/test_equivalence.py
+@@ -25,6 +25,12 @@ QUERIES = [
+     "SELECT amount * 2 AS twice FROM orders ORDER BY twice",
+     "SELECT region FROM orders UNION SELECT status FROM orders",
+     "SELECT region FROM orders UNION ALL SELECT status FROM orders",
++    "SELECT region FROM orders INTERSECT SELECT region FROM orders WHERE amount > 50",
++    "SELECT region FROM orders INTERSECT ALL SELECT region FROM orders WHERE amount > 50",
++    "SELECT region FROM orders EXCEPT SELECT region FROM orders WHERE region = 'eu'",
++    "SELECT region FROM orders EXCEPT ALL SELECT region FROM orders WHERE region = 'eu'",
++    "SELECT region FROM orders UNION SELECT status FROM orders "
++    "EXCEPT SELECT region FROM orders WHERE region = 'ap' ORDER BY region",
+     "SELECT o.id, c.tier FROM orders o JOIN customers c ON o.customer = c.customer",
+     "SELECT o.id, c.tier FROM orders o LEFT JOIN customers c ON o.customer = c.customer",
+     "SELECT count(*) AS n FROM orders CROSS JOIN customers",
+@@ -125,6 +131,22 @@ class TestRegressions:
+             "SELECT region FROM orders UNION ALL SELECT region FROM orders"
+         ).num_rows == 12
+ 
++    def test_intersect_binds_tighter_than_union(self, engine):
++        """`a UNION b INTERSECT c` must not be read as `(a UNION b) INTERSECT c`."""
++        rows = engine.sql(
++            "SELECT region FROM orders WHERE region = 'ap' "
++            "UNION SELECT region FROM orders "
++            "INTERSECT SELECT region FROM orders WHERE region = 'eu'"
++        ).to_rows()
++        assert sorted(rows) == [("ap",), ("eu",)]
++
++    def test_a_chain_is_ordered_as_a_whole(self, engine):
++        """The trailing ORDER BY belongs to the chain, not to its last select."""
++        rows = engine.sql(
++            "SELECT region FROM orders UNION SELECT status FROM orders ORDER BY region"
++        ).to_rows()
++        assert rows == sorted(rows)
++
+     def test_a_custom_aggregate_is_parsed_as_one(self, engine):
+         from veldt.expr.aggregates import Accumulator, AggregateFunction
+         from veldt.types.dtypes import DataType
+diff --git a/tests/test_execution_operators.py b/tests/test_execution_operators.py
+index 1378c67..96fca31 100644
+--- a/tests/test_execution_operators.py
++++ b/tests/test_execution_operators.py
+@@ -13,6 +13,7 @@ from veldt.execution.operators.filter import FilterOperator
+ from veldt.execution.operators.limit import LimitOperator
+ from veldt.execution.operators.project import ProjectOperator
+ from veldt.execution.operators.scan import ScanOperator
++from veldt.execution.operators.setop import ExceptOperator, IntersectOperator
+ from veldt.execution.operators.sort import SortOperator
+ from veldt.execution.operators.union import UnionOperator
+ from veldt.expr.parser import ExpressionParser, parse_expression
+@@ -292,6 +293,90 @@ class TestUnionOperator:
+         assert [row["a"] for row in operator.collect(context).rows()] == [1, 2]
+ 
+ 
++def values(source_rows):
++    """Build a one-column memory source from a list of values."""
++    return MemorySource("t", Table.from_dicts([{"a": value} for value in source_rows]))
++
++
++class TestPairingSetOperators:
++    """``INTERSECT`` and ``EXCEPT``, which pair left rows against right ones."""
++
++    def operands(self, left, right):
++        left_source = values(left)
++        right_source = values(right)
++        return (
++            ScanOperator(left_source),
++            ScanOperator(right_source),
++            left_source.schema,
++        )
++
++    def collected(self, operator, context):
++        return [row["a"] for row in operator.collect(context).rows()]
++
++    def test_intersect_keeps_what_both_sides_produced(self, context):
++        left, right, schema = self.operands([1, 1, 2, 3], [1, 2, 2])
++        operator = IntersectOperator(left, right, schema)
++        assert self.collected(operator, context) == [1, 2]
++
++    def test_except_keeps_what_the_right_side_never_produced(self, context):
++        left, right, schema = self.operands([1, 1, 2, 3], [1, 2, 2])
++        operator = ExceptOperator(left, right, schema)
++        assert self.collected(operator, context) == [3]
++
++    def test_intersect_all_counts_pairs(self, context):
++        left, right, schema = self.operands([1, 1, 1, 2], [1, 1, 2, 2])
++        operator = IntersectOperator(left, right, schema, all=True)
++        assert self.collected(operator, context) == [1, 1, 2]
++
++    def test_except_all_subtracts_counts(self, context):
++        left, right, schema = self.operands([1, 1, 1, 2], [1, 2, 2])
++        operator = ExceptOperator(left, right, schema, all=True)
++        assert self.collected(operator, context) == [1, 1]
++
++    def test_except_all_cancels_the_earliest_copies(self, context):
++        left_source = MemorySource(
++            "l", Table.from_dicts([{"a": 1, "b": "first"}, {"a": 1, "b": "second"}])
++        )
++        right_source = MemorySource("r", Table.from_dicts([{"a": 1, "b": "first"}]))
++        operator = ExceptOperator(
++            ScanOperator(left_source),
++            ScanOperator(right_source),
++            left_source.schema,
++            all=True,
++        )
++        assert [row["b"] for row in operator.collect(context).rows()] == ["second"]
++
++    def test_two_nulls_pair(self, context):
++        left, right, schema = self.operands([None, 5], [None])
++        assert self.collected(IntersectOperator(left, right, schema), context) == [None]
++        left, right, schema = self.operands([None, 5], [None])
++        assert self.collected(ExceptOperator(left, right, schema), context) == [5]
++
++    def test_both_are_blocking(self, context):
++        left, right, schema = self.operands([1], [1])
++        assert IntersectOperator(left, right, schema).is_blocking
++        assert ExceptOperator(left, right, schema).is_blocking
++
++    def test_they_stay_correct_across_batches(self):
++        context = ExecutionContext(batch_size=1)
++        left, right, schema = self.operands([1, 1, 2, 3], [1, 2, 2])
++        assert self.collected(ExceptOperator(left, right, schema, all=True), context) == [1, 3]
++
++    def test_they_describe_their_spelling(self, context):
++        left, right, schema = self.operands([1], [1])
++        assert IntersectOperator(left, right, schema).describe() == "Intersect: distinct"
++        assert ExceptOperator(left, right, schema, all=True).describe() == "Except: all"
++
++    def test_rows_pair_after_both_sides_convert(self, context):
++        left_source = values([1, 2])
++        right_source = MemorySource("r", Table.from_dicts([{"a": 1.0}]))
++        schema = left_source.schema.union(right_source.schema)
++        operator = IntersectOperator(
++            ScanOperator(left_source), ScanOperator(right_source), schema
++        )
++        assert self.collected(operator, context) == [1.0]
++
++
+ class TestExecutionContext:
+     def test_rejects_a_non_positive_batch_size(self):
+         with pytest.raises(Exception):
+diff --git a/tests/test_plan_logical.py b/tests/test_plan_logical.py
+index ede06bd..9eb9e53 100644
+--- a/tests/test_plan_logical.py
++++ b/tests/test_plan_logical.py
+@@ -10,7 +10,9 @@ from veldt.plan.builder import PlanBuilder, parse_sort_key
+ from veldt.plan.logical import (
+     Aggregate,
+     Distinct,
++    Except,
+     Filter,
++    Intersect,
+     Join,
+     Limit,
+     Project,
+@@ -123,6 +125,27 @@ class TestPlanNodes:
+         node = Union(scan, scan, all=True)
+         assert node.schema.names == scan.schema.names
+ 
++    @pytest.mark.parametrize("node_type", [Union, Intersect, Except])
++    def test_every_set_operation_publishes_the_left_names(self, scan, node_type):
++        assert node_type(scan, scan).schema.names == scan.schema.names
++
++    @pytest.mark.parametrize(
++        "node_type, expected",
++        [(Union, "Union"), (Intersect, "Intersect"), (Except, "Except")],
++    )
++    def test_set_operations_describe_their_spelling(self, scan, node_type, expected):
++        assert node_type(scan, scan).describe() == f"{expected}: distinct"
++        assert node_type(scan, scan, all=True).describe() == f"{expected}: all"
++
++    @pytest.mark.parametrize("node_type", [Union, Intersect, Except])
++    def test_set_operations_rebuild_as_their_own_kind(self, scan, node_type):
++        rebuilt = node_type(scan, scan, all=True).with_children([scan, scan])
++        assert isinstance(rebuilt, node_type) and rebuilt.all is True
++
++    def test_set_operations_of_different_kinds_are_not_equal(self, scan):
++        assert Intersect(scan, scan) != Except(scan, scan)
++        assert Intersect(scan, scan) != Union(scan, scan)
++
+ 
+ class TestJoinKeys:
+     def test_equality_between_the_sides_becomes_a_key(self, orders_source, customers_source):
+@@ -195,6 +218,12 @@ class TestPlanBuilder:
+         plan = left.union(left.build(), all_rows=True).distinct().build()
+         assert isinstance(plan, Distinct)
+ 
++    def test_intersect_and_except_compose(self, orders_source):
++        left = PlanBuilder.from_source(orders_source).select("region")
++        plan = left.intersect(left.build()).except_(left.build(), all_rows=True).build()
++        assert isinstance(plan, Except) and plan.all is True
++        assert isinstance(plan.left, Intersect)
++
+     def test_sort_requires_a_key(self, orders_source):
+         with pytest.raises(PlanningError):
+             PlanBuilder.from_source(orders_source).sort()
+@@ -286,6 +315,25 @@ class TestStatistics:
+         plan = Union(Scan(orders_source), Scan(orders_source), all=True)
+         assert estimate(plan).num_rows == 12
+ 
++    def test_intersect_all_is_capped_by_the_smaller_side(self, orders_source):
++        left = Scan(orders_source)
++        right = Limit(Scan(orders_source), 2)
++        assert estimate(Intersect(left, right, all=True)).num_rows == 2
++        assert estimate(Intersect(right, left, all=True)).num_rows == 2
++
++    def test_except_all_is_capped_by_the_left_side(self, orders_source):
++        plan = Except(Limit(Scan(orders_source), 4), Scan(orders_source), all=True)
++        assert estimate(plan).num_rows == 4
++
++    def test_the_plain_spellings_scale_their_bound(self, orders_source):
++        scan = Scan(orders_source)
++        assert estimate(Except(scan, scan)).num_rows < 6
++        assert estimate(Intersect(scan, scan)).num_rows < 6
++
++    def test_a_pairing_estimate_may_reach_zero(self, orders_source):
++        empty = Limit(Scan(orders_source), 0)
++        assert estimate(Except(empty, Scan(orders_source))).num_rows == 0
++
+     def test_selectivity_of_a_constant_predicate(self):
+         assert selectivity(parse_expression("true")) == 1.0
+         assert selectivity(parse_expression("false")) == 0.0
+diff --git a/tests/test_plan_optimizer.py b/tests/test_plan_optimizer.py
+index bfe5ab0..5c065e2 100644
+--- a/tests/test_plan_optimizer.py
++++ b/tests/test_plan_optimizer.py
+@@ -12,7 +12,9 @@ from veldt.plan.builder import PlanBuilder
+ from veldt.plan.logical import (
+     Aggregate,
+     Distinct,
++    Except,
+     Filter,
++    Intersect,
+     Join,
+     Limit,
+     LogicalPlan,
+@@ -20,6 +22,7 @@ from veldt.plan.logical import (
+     Scan,
+     Sort,
+     SortKey,
++    Union,
+ )
+ from veldt.plan.optimizer import Optimizer, default_optimizer, optimize
+ from veldt.plan.rules import (
+@@ -166,6 +169,17 @@ class TestPredicatePushdown:
+         rewritten = PredicatePushdown().apply(plan)
+         assert isinstance(rewritten, Filter)
+ 
++    @pytest.mark.parametrize("node_type", [Union, Intersect, Except])
++    def test_pushes_into_both_sides_of_a_set_operation(self, source, node_type):
++        plan = Filter(
++            node_type(Scan(source), Scan(source), all=True),
++            parse_expression("amount > 10"),
++        )
++        rewritten = PredicatePushdown().apply(plan)
++        assert isinstance(rewritten, node_type) and rewritten.all is True
++        assert isinstance(rewritten.left, Filter)
++        assert isinstance(rewritten.right, Filter)
++
+     def test_does_not_filter_the_null_extended_side_of_a_left_join(self, source, customer_source):
+         join = Join(
+             Scan(source), Scan(customer_source), parse_expression("customer = customer_right"), "left"
+@@ -201,6 +215,12 @@ class TestProjectionPushdown:
+         rewritten = ProjectionPushdown().apply(plan)
+         assert find(rewritten, Scan)[0].projection is None
+ 
++    @pytest.mark.parametrize("node_type", [Union, Intersect, Except])
++    def test_keeps_every_column_below_a_set_operation(self, source, node_type):
++        plan = node_type(Scan(source), Scan(source))
++        rewritten = ProjectionPushdown().apply(plan)
++        assert all(node.projection is None for node in find(rewritten, Scan))
++
+     def test_an_aggregate_only_needs_its_inputs(self, source):
+         plan = Aggregate(Scan(source), (parse_expression("region"),), (parse_expression("sum(amount)"),))
+         rewritten = ProjectionPushdown().apply(plan)
+@@ -243,6 +263,21 @@ class TestCombineRules:
+             EliminateRedundantDistinct().apply(Distinct(Distinct(Scan(source)))), Distinct
+         )
+ 
++    @pytest.mark.parametrize("node_type", [Intersect, Except])
++    def test_distinct_over_a_plain_pairing_operator_is_redundant(self, source, node_type):
++        plan = Distinct(node_type(Scan(source), Scan(source)))
++        assert isinstance(EliminateRedundantDistinct().apply(plan), node_type)
++
++    @pytest.mark.parametrize("node_type", [Intersect, Except])
++    def test_distinct_over_the_all_spelling_stays(self, source, node_type):
++        plan = Distinct(node_type(Scan(source), Scan(source), all=True))
++        assert isinstance(EliminateRedundantDistinct().apply(plan), Distinct)
++
++    def test_distinct_over_a_union_stays(self, source):
++        """The Distinct above a Union is what makes a plain UNION distinct."""
++        plan = Distinct(Union(Scan(source), Scan(source)))
++        assert isinstance(EliminateRedundantDistinct().apply(plan), Distinct)
++
+     def test_distinct_over_a_grouping_is_redundant(self, source):
+         plan = Distinct(Aggregate(Scan(source), (parse_expression("region"),), ()))
+         assert isinstance(EliminateRedundantDistinct().apply(plan), Aggregate)
+diff --git a/tests/test_sql_execution.py b/tests/test_sql_execution.py
+index f991e30..df7eecd 100644
+--- a/tests/test_sql_execution.py
++++ b/tests/test_sql_execution.py
+@@ -11,7 +11,19 @@ from veldt.errors import (
+     TableNotFoundError,
+     TypeMismatchError,
+ )
+-from veldt.plan.logical import Aggregate, Filter, Join, Project, Scan, Sort
++from veldt.plan.logical import (
++    Aggregate,
++    Distinct,
++    Except,
++    Filter,
++    Intersect,
++    Join,
++    Limit,
++    Project,
++    Scan,
++    Sort,
++    Union,
++)
+ 
+ 
+ def rows(engine, sql):
+@@ -222,6 +234,133 @@ class TestDistinctAndUnion:
+         assert result.column_names == ["r"]
+ 
+ 
++class TestIntersectAndExcept:
++    def test_intersect_keeps_what_both_sides_produced(self, engine):
++        result = engine.sql(
++            "SELECT region FROM orders WHERE amount > 50 "
++            "INTERSECT SELECT region FROM orders WHERE amount < 50"
++        )
++        assert sorted(result.to_rows()) == [("eu",), ("us",)]
++
++    def test_except_keeps_left_rows_the_right_side_never_produced(self, engine):
++        result = engine.sql(
++            "SELECT region FROM orders EXCEPT SELECT region FROM orders WHERE region = 'eu'"
++        )
++        assert sorted(result.to_rows()) == [("ap",), ("us",)]
++
++    def test_the_plain_spellings_emit_each_row_once(self, engine):
++        assert engine.sql(
++            "SELECT region FROM orders INTERSECT SELECT region FROM orders"
++        ).num_rows == 3
++
++    def test_intersect_all_keeps_the_smaller_count(self, engine):
++        assert engine.sql(
++            "SELECT region FROM orders "
++            "INTERSECT ALL SELECT region FROM orders WHERE region = 'eu'"
++        ).num_rows == 3
++
++    def test_except_all_subtracts_the_counts(self, engine):
++        result = engine.sql(
++            "SELECT region FROM orders "
++            "EXCEPT ALL SELECT region FROM orders WHERE region <> 'eu'"
++        )
++        assert result.to_rows() == [("eu",), ("eu",), ("eu",)]
++
++    def test_except_all_can_leave_a_row_standing(self, engine):
++        result = engine.sql(
++            "SELECT region FROM orders "
++            "EXCEPT ALL SELECT region FROM orders WHERE amount > 100"
++        )
++        assert sorted(result.to_rows()) == [("eu",), ("eu",), ("us",), ("us",)]
++
++    def test_both_take_names_from_the_left(self, engine):
++        result = engine.sql(
++            "SELECT region AS r FROM orders EXCEPT SELECT status FROM orders"
++        )
++        assert result.column_names == ["r"]
++
++    def test_both_unify_the_column_types(self, engine):
++        result = engine.sql("SELECT id FROM orders INTERSECT SELECT amount FROM orders")
++        assert str(result.schema[0].dtype) == "float64"
++
++    def test_nulls_pair_with_each_other(self, engine):
++        result = engine.sql(
++            "SELECT amount FROM orders WHERE amount IS NULL "
++            "INTERSECT SELECT amount FROM orders WHERE id = 3"
++        )
++        assert result.to_rows() == [(None,)]
++
++    @pytest.mark.parametrize("operator", ["INTERSECT", "EXCEPT"])
++    def test_both_require_matching_widths(self, engine, operator):
++        with pytest.raises(PlanningError):
++            engine.sql(f"SELECT region FROM orders {operator} SELECT region, id FROM orders")
++
++    def test_intersect_binds_tighter_than_the_others(self, engine):
++        plan = engine.plan(
++            "SELECT region FROM orders UNION SELECT status FROM orders "
++            "INTERSECT SELECT region FROM orders",
++            optimize=False,
++        )
++        assert isinstance(plan, Distinct)
++        assert isinstance(plan.input, Union)
++        assert isinstance(plan.input.right, Intersect)
++
++    def test_union_and_except_read_left_to_right(self, engine):
++        plan = engine.plan(
++            "SELECT region FROM orders EXCEPT SELECT status FROM orders "
++            "UNION SELECT region FROM orders",
++            optimize=False,
++        )
++        assert isinstance(plan, Distinct) and isinstance(plan.input, Union)
++        assert isinstance(plan.input.left, Except)
++
++    def test_a_trailing_order_by_orders_the_whole_chain(self, engine):
++        result = engine.sql(
++            "SELECT region FROM orders EXCEPT SELECT status FROM orders "
++            "UNION SELECT status FROM orders ORDER BY region DESC"
++        )
++        rows = result.to_rows()
++        assert rows == sorted(rows, reverse=True)
++
++    def test_a_trailing_limit_truncates_the_whole_chain(self, engine):
++        plan = engine.plan(
++            "SELECT region FROM orders INTERSECT SELECT region FROM orders LIMIT 2",
++            optimize=False,
++        )
++        assert isinstance(plan, Limit) and isinstance(plan.input, Intersect)
++        assert engine.sql(
++            "SELECT region FROM orders INTERSECT SELECT region FROM orders LIMIT 2"
++        ).num_rows == 2
++
++    def test_a_trailing_order_by_names_the_combined_output(self, engine):
++        result = engine.sql(
++            "SELECT region AS r FROM orders UNION SELECT status FROM orders ORDER BY r"
++        )
++        assert result.to_rows() == sorted(result.to_rows())
++        with pytest.raises(ColumnNotFoundError):
++            engine.sql(
++                "SELECT region AS r FROM orders UNION SELECT status FROM orders "
++                "ORDER BY status"
++            )
++
++    def test_an_aggregate_cannot_order_a_chain(self, engine):
++        with pytest.raises(PlanningError):
++            engine.sql(
++                "SELECT region FROM orders UNION SELECT status FROM orders "
++                "ORDER BY count(*)"
++            )
++
++    def test_explain_names_the_nodes(self, engine):
++        text = engine.explain(
++            "SELECT region FROM orders INTERSECT SELECT region FROM orders"
++        )
++        assert "Intersect: distinct" in text
++        text = engine.explain(
++            "SELECT region FROM orders EXCEPT ALL SELECT region FROM orders"
++        )
++        assert "Except: all" in text
++
++
+ class TestJoins:
+     def test_inner_join_keeps_matches(self, engine):
+         result = rows(
+diff --git a/tests/test_sql_parser.py b/tests/test_sql_parser.py
+index 03d66dc..9e43afb 100644
+--- a/tests/test_sql_parser.py
++++ b/tests/test_sql_parser.py
+@@ -6,7 +6,13 @@ import pytest
+ 
+ from veldt.errors import ParseError, UnsupportedFeatureError
+ from veldt.expr.ast import AggregateCall, Alias, ColumnRef
+-from veldt.sql.keywords import is_reserved, join_type_for
++from veldt.sql.keywords import (
++    SET_OPERATORS,
++    is_reserved,
++    join_type_for,
++    set_operator_for,
++    set_operator_precedence,
++)
+ from veldt.sql.lexer import describe_tokens, lex, split_statements, strip_terminator
+ from veldt.sql.parser import SelectStatement, parse_select
+ 
+@@ -43,6 +49,22 @@ class TestLexerHelpers:
+         assert join_type_for("LEFT") == "left"
+         assert join_type_for("nope") is None
+ 
++    def test_every_set_operator_is_known(self):
++        assert SET_OPERATORS == {"union", "intersect", "except"}
++        assert set_operator_for("Except") == "except"
++        assert set_operator_for("nope") is None
++
++    def test_intersect_binds_tighter_than_the_others(self):
++        assert set_operator_precedence("INTERSECT") > set_operator_precedence("union")
++        assert set_operator_precedence("union") == set_operator_precedence("except")
++
++    def test_an_unknown_operator_has_no_precedence(self):
++        with pytest.raises(KeyError):
++            set_operator_precedence("nope")
++
++    def test_set_operators_are_reserved_words(self):
++        assert is_reserved("intersect") and is_reserved("except")
++
+ 
+ class TestSelectParsing:
+     def test_parses_a_projection_list(self):
+@@ -199,6 +221,57 @@ class TestSetOperations:
+         )
+         assert statement.set_operation.statement.set_operation is not None
+ 
++    def test_intersect_is_recognised(self):
++        statement = parse_select("SELECT a FROM t INTERSECT SELECT b FROM u")
++        assert statement.set_operation.kind == "intersect"
++        assert statement.set_operation.all is False
++
++    def test_intersect_all_is_recognised(self):
++        statement = parse_select("SELECT a FROM t INTERSECT ALL SELECT b FROM u")
++        assert statement.set_operation.kind == "intersect"
++        assert statement.set_operation.all is True
++
++    def test_except_is_recognised(self):
++        statement = parse_select("SELECT a FROM t EXCEPT SELECT b FROM u")
++        assert statement.set_operation.kind == "except"
++        assert statement.set_operation.all is False
++
++    def test_except_all_is_recognised(self):
++        statement = parse_select("SELECT a FROM t EXCEPT ALL SELECT b FROM u")
++        assert statement.set_operation.all is True
++
++    def test_a_mixed_chain_records_written_order(self):
++        statement = parse_select(
++            "SELECT a FROM t UNION SELECT b FROM u INTERSECT ALL SELECT c FROM v "
++            "EXCEPT SELECT d FROM w"
++        )
++        terms, operations = statement.chain()
++        assert [ref.name for term in terms for ref in term.table_refs()] == [
++            "t",
++            "u",
++            "v",
++            "w",
++        ]
++        assert [(item.kind, item.all) for item in operations] == [
++            ("union", False),
++            ("intersect", True),
++            ("except", False),
++        ]
++
++    def test_a_lone_statement_is_a_chain_of_one(self):
++        terms, operations = parse_select("SELECT a FROM t").chain()
++        assert len(terms) == 1 and operations == []
++
++    def test_tail_clauses_can_be_stripped(self):
++        statement = parse_select("SELECT a FROM t ORDER BY a LIMIT 2 OFFSET 1")
++        stripped = statement.without_tail_clauses()
++        assert stripped.order_by == () and stripped.limit is None
++        assert stripped.offset == 0 and stripped.projections == statement.projections
++
++    def test_set_operators_are_not_table_aliases(self):
++        statement = parse_select("SELECT a FROM t EXCEPT SELECT a FROM u")
++        assert statement.from_table.alias is None
++
+ 
+ class TestDescribe:
+     def test_round_trips_the_important_clauses(self):

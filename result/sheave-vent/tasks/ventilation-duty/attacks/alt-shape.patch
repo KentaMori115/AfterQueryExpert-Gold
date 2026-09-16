@@ -1,0 +1,400 @@
+diff --git a/src/air/index.ts b/src/air/index.ts
+new file mode 100644
+index 0000000..1567b1e
+--- /dev/null
++++ b/src/air/index.ts
+@@ -0,0 +1,299 @@
++/**
++ * The ventilation, written as one module: the airways, the fan that has to
++ * shift air through them, and the duty a colliery asks for.
++ */
++
++import { WindingError } from "../errors.ts";
++import { GRAVITY } from "../units/measure.ts";
++import { type Shaft, BRISK_AIR, airSpeed, freeArea } from "../shaft/index.ts";
++
++const refuse = (says: string, quantity: string): never => {
++  throw new WindingError(says, quantity);
++};
++
++const above = (value: number, quantity: string): number => {
++  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
++    refuse(`${quantity} must be above nought`, quantity);
++  }
++  return value;
++};
++
++const atLeastNought = (value: number, quantity: string): number => {
++  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
++    refuse(`${quantity} cannot be negative`, quantity);
++  }
++  return value;
++};
++
++const toPlaces = (value: number, places: number): number => {
++  const scale = 10 ** places;
++  const found = (value < 0 ? -Math.round(-value * scale) : Math.round(value * scale)) / scale;
++  return found === 0 ? 0 : found;
++};
++
++/** The friction of a lined shaft. */
++export const FRICTION = 0.004;
++
++/** What a man underground wants, a cubic metre a second in ten. */
++export const PER_MAN = 0.1;
++
++/** And a tonne of the day's coal. */
++export const PER_TONNE = 0.05;
++
++/** The share of gas the law will not have passed. */
++export const GAS_LIMIT = 0.0125;
++
++/** The deepest shaft the library takes. */
++export const DEEPEST = 4200;
++
++/** A length of ventilation. */
++export interface Airway {
++  readonly name: string;
++  readonly length: number;
++  readonly area: number;
++  readonly perimeter: number;
++  readonly friction: number;
++}
++
++/** A fan, off its maker's sheet. */
++export interface Fan {
++  readonly name: string;
++  readonly shutoff: number;
++  readonly delivery: number;
++  readonly efficiency: number;
++}
++
++/** Where a fan and a colliery settle. */
++export interface Working {
++  readonly quantity: number;
++  readonly pressure: number;
++}
++
++/** An airway, checked. */
++export const airway = (
++  name: string,
++  length: number,
++  area: number,
++  perimeter: number,
++  friction: number = FRICTION,
++): Airway => {
++  if (name.trim().length === 0) refuse("an airway wants a name", "name");
++  above(length, "length");
++  above(area, "area");
++  above(perimeter, "perimeter");
++  above(friction, "friction");
++  return { name: name.trim(), length, area, perimeter, friction };
++};
++
++/** What the air rubs against over the whole length. */
++export const rubbingSurface = (one: Airway): number => toPlaces(one.perimeter * one.length, 2);
++
++/** The friction, the surface and the cube of the section. */
++export const resistance = (one: Airway): number =>
++  toPlaces((one.friction * one.perimeter * one.length) / one.area ** 3, 6);
++
++/** What a quantity costs against a resistance. */
++export const pressureFor = (resistance0: number, quantity: number): number => {
++  above(resistance0, "resistance");
++  atLeastNought(quantity, "quantity");
++  return toPlaces(resistance0 * quantity ** 2, 2);
++};
++
++/** And the quantity a pressure drives. */
++export const quantityFor = (resistance0: number, pressure: number): number => {
++  above(resistance0, "resistance");
++  atLeastNought(pressure, "pressure");
++  return toPlaces(Math.sqrt(pressure / resistance0), 3);
++};
++
++/** The work in the air, in kilowatts. */
++export const airPower = (pressure: number, quantity: number): number => {
++  atLeastNought(pressure, "pressure");
++  atLeastNought(quantity, "quantity");
++  return toPlaces((pressure * quantity) / 1000, 3);
++};
++
++/** How fast the air goes. */
++export const velocity = (one: Airway, quantity: number): number => {
++  atLeastNought(quantity, "quantity");
++  return toPlaces(quantity / one.area, 3);
++};
++
++/** One road after another. */
++export const inSeries = (resistances: readonly number[]): number => {
++  if (resistances.length === 0) refuse("nothing to put in series", "resistances");
++  let sum = 0;
++  for (const each of resistances) sum += above(each, "resistance");
++  return toPlaces(sum, 6);
++};
++
++/** Roads side by side. */
++export const inParallel = (resistances: readonly number[]): number => {
++  if (resistances.length === 0) refuse("nothing to put in parallel", "resistances");
++  let sum = 0;
++  for (const each of resistances) sum += 1 / Math.sqrt(above(each, "resistance"));
++  return toPlaces(1 / sum ** 2, 6);
++};
++
++/** An obstruction, as the share of the resistance it is. */
++export const withDrag = (resistance0: number, drag: number): number => {
++  above(resistance0, "resistance");
++  atLeastNought(drag, "drag");
++  return toPlaces(resistance0 * (1 + drag), 6);
++};
++
++/** A winding shaft as the air finds it. */
++export const shaftAirway = (
++  one: Shaft,
++  width: number,
++  depthOf = 1.5,
++  pipes = 1.2,
++  friction: number = FRICTION,
++): Airway => airway(one.name, one.depth, freeArea(one, width, depthOf, pipes), Math.PI * one.diameter, friction);
++
++/** A fan, checked. */
++export const fan = (name: string, shutoff = 3500, delivery = 400, efficiency = 0.7): Fan => {
++  if (name.trim().length === 0) refuse("a fan wants a name", "name");
++  above(shutoff, "shutoff");
++  above(delivery, "delivery");
++  above(efficiency, "efficiency");
++  if (efficiency > 1) refuse("an efficiency is a share", "efficiency");
++  return { name: name.trim(), shutoff, delivery, efficiency };
++};
++
++/** What the fan makes at a quantity. */
++export const characteristic = (one: Fan, quantity: number): number => {
++  atLeastNought(quantity, "quantity");
++  const part = quantity / one.delivery;
++  return toPlaces(Math.max(0, one.shutoff * (1 - part * part)), 2);
++};
++
++/** Warm air up one shaft against cold down the other. */
++export const naturalPressure = (depth: number, downcast = 1.2, upcast = 1.1): number => {
++  above(depth, "depth");
++  above(downcast, "downcast");
++  above(upcast, "upcast");
++  return toPlaces((downcast - upcast) * GRAVITY * depth, 2);
++};
++
++/** Where the two curves cross. */
++export const operatingPoint = (one: Fan, resistance0: number, natural = 0): Working => {
++  above(resistance0, "resistance");
++  if (!Number.isFinite(natural)) refuse("a natural pressure has to be a number", "natural");
++  if (one.shutoff + natural <= 0) return { quantity: 0, pressure: 0 };
++  const bend = one.shutoff / one.delivery ** 2;
++  const quantity = Math.sqrt((one.shutoff + natural) / (resistance0 + bend));
++  return { quantity: toPlaces(quantity, 3), pressure: toPlaces(resistance0 * quantity * quantity, 2) };
++};
++
++/** What it costs at the fan shaft. */
++export const fanPower = (one: Fan, resistance0: number, natural = 0): number => {
++  const at = operatingPoint(one, resistance0, natural);
++  return toPlaces(airPower(at.pressure, at.quantity) / one.efficiency, 3);
++};
++
++/** With something in hand. */
++export const motorFor = (one: Fan, resistance0: number, margin = 1.15): number => {
++  above(margin, "margin");
++  return toPlaces(fanPower(one, resistance0) * margin, 1);
++};
++
++/** Whether the pit gets what it asked for. */
++export const willDeliver = (one: Fan, resistance0: number, want: number, natural = 0): boolean => {
++  above(want, "wanted");
++  return operatingPoint(one, resistance0, natural).quantity >= want;
++};
++
++/** The stiffest colliery it would still carry. */
++export const stiffestFor = (one: Fan, want: number, natural = 0): number => {
++  above(want, "wanted");
++  if (want >= one.delivery) refuse("no fan passes its free delivery", "wanted");
++  return toPlaces((characteristic(one, want) + natural) / (want * want), 6);
++};
++
++/** The same fan, run faster. */
++export const atSpeed = (one: Fan, ratio: number): Fan => {
++  above(ratio, "ratio");
++  return fan(one.name, one.shutoff * ratio * ratio, one.delivery * ratio, one.efficiency);
++};
++
++/** The largest of the three demands. */
++export const wanted = (men: number, tonnesADay: number, gasMake: number, limit: number = GAS_LIMIT): number => {
++  if (!Number.isInteger(men) || men < 0) refuse("men are whole men", "men");
++  atLeastNought(tonnesADay, "tonnes");
++  atLeastNought(gasMake, "gas");
++  above(limit, "limit");
++  if (limit > 1) refuse("a limit is a share", "limit");
++  return toPlaces(Math.max(men * PER_MAN, tonnesADay * PER_TONNE, gasMake / limit), 3);
++};
++
++/** Which of them is asking. */
++export const decidedBy = (men: number, tonnesADay: number, gasMake: number, limit: number = GAS_LIMIT): string => {
++  const most = wanted(men, tonnesADay, gasMake, limit);
++  if (gasMake / limit >= most) return "gas";
++  if (tonnesADay * PER_TONNE >= most) return "coal";
++  return "men";
++};
++
++/** The most air men can ride in. */
++export const mostForRiding = (
++  one: Shaft,
++  width: number,
++  depthOf = 1.5,
++  pipes = 1.2,
++  most: number = BRISK_AIR,
++): number => {
++  above(most, "most");
++  return toPlaces(freeArea(one, width, depthOf, pipes) * most, 3);
++};
++
++/** Whether they can. */
++export const ridable = (one: Shaft, quantity: number, width: number, depthOf = 1.5, most: number = BRISK_AIR): boolean =>
++  airSpeed(one, quantity, width, depthOf) <= most;
++
++/** One pressure, and the air divided by the roots. */
++export const splitBetween = (quantity: number, resistances: readonly number[]): number[] => {
++  above(quantity, "quantity");
++  const whole = inParallel(resistances);
++  const pressure = whole * quantity * quantity;
++  const out: number[] = [];
++  for (const each of resistances) out.push(toPlaces(Math.sqrt(pressure / each), 3));
++  return out;
++};
++
++/** The door a road that takes too much wants. */
++export const regulatorFor = (pressure: number, want: number, branch: number): number => {
++  above(pressure, "pressure");
++  above(want, "wanted");
++  above(branch, "branch");
++  return toPlaces(pressure / (want * want) - branch, 6);
++};
++
++/** Whether it wants one at all. */
++export const needsRegulating = (pressure: number, want: number, branch: number): boolean =>
++  regulatorFor(pressure, want, branch) > 0;
++
++/** The deepest shaft of that section the fan still carries. */
++export const deepestVentilated = (
++  one: Fan,
++  section: number,
++  perimeter: number,
++  want: number,
++  workings = 0,
++  friction: number = FRICTION,
++): number => {
++  above(section, "section");
++  above(perimeter, "perimeter");
++  atLeastNought(workings, "workings");
++  above(friction, "friction");
++  const left = stiffestFor(one, want) - workings;
++  if (left <= 0) refuse("that fan will not ventilate those workings at all", "workings");
++  const aMetre = (friction * perimeter) / section ** 3;
++  return Math.floor(Math.min(left / aMetre, DEEPEST));
++};
++
++/** The airway in a line. */
++export const describeAirway = (one: Airway): string => `${one.name}, ${one.length} m of ${one.area} m²`;
++
++/** The fan in a line. */
++export const describeFan = (one: Fan): string => `${one.name}, ${one.shutoff} Pa shut`;
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 2909b45..50fcf32 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -14,6 +14,7 @@ export * from "./rope.ts";
+ export * from "./safety.ts";
+ export * from "./shaft.ts";
+ export * from "./size.ts";
++export * from "./ventilation.ts";
+ export * from "./wear.ts";
+ export * from "./winder.ts";
+ export * from "./works.ts";
+diff --git a/src/cli/commands/ventilation.ts b/src/cli/commands/ventilation.ts
+new file mode 100644
+index 0000000..bd76517
+--- /dev/null
++++ b/src/cli/commands/ventilation.ts
+@@ -0,0 +1,45 @@
++/** `sheave ventilation` — what the air costs once the winding has had its share. */
++
++import type { Args } from "../args.ts";
++import { number, onlyKnown, option, quantity } from "../args.ts";
++import { shaft } from "../../shaft/shaft.ts";
++import {
++  decidedBy,
++  fan,
++  fanPower,
++  inSeries,
++  operatingPoint,
++  resistance,
++  shaftAirway,
++  wanted,
++} from "../../air/index.ts";
++import { heading, line, places } from "../../report/format.ts";
++
++const KNOWN = ["diameter", "depth", "width", "across", "pipes", "men", "tonnes", "gas", "shutoff", "delivery", "workings"];
++
++/** Run it. */
++export function ventilationCommand(args: Args): string[] {
++  onlyKnown(args, KNOWN);
++  const one = shaft(
++    "the downcast",
++    option(args, "diameter") === undefined ? 7.3 : quantity(args, "diameter"),
++    option(args, "depth") === undefined ? 942 : quantity(args, "depth"),
++  );
++  const width = option(args, "width") === undefined ? 2.2 : quantity(args, "width");
++  const across = option(args, "across") === undefined ? 1.5 : quantity(args, "across");
++  const pipes = option(args, "pipes") === undefined ? 1.2 : quantity(args, "pipes");
++  const blowing = fan("the fan", number(args, "shutoff", 3500), number(args, "delivery", 400));
++  const circuit = inSeries([resistance(shaftAirway(one, width, across, pipes)), number(args, "workings", 0.03)]);
++  const at = operatingPoint(blowing, circuit);
++  const men = number(args, "men", 900);
++  const tonnes = number(args, "tonnes", 3000);
++  const gas = number(args, "gas", 1.5);
++  return [
++    ...heading(`${one.name}: ${places(resistance(shaftAirway(one, width, across, pipes)), 6)} of resistance`),
++    line("the fan and the pit settle at", `${places(at.quantity, 1)} m³/s`),
++    line("against a pressure of", `${places(at.pressure, 0)} Pa`),
++    line("which costs at the fan shaft", `${places(fanPower(blowing, circuit), 1)} kW`),
++    line("the pit is asking for", `${places(wanted(men, tonnes, gas), 1)} m³/s`),
++    line("and it is", `the ${decidedBy(men, tonnes, gas)} asking`),
++  ];
++}
+diff --git a/src/cli/main.ts b/src/cli/main.ts
+index 3abefd5..72bd803 100644
+--- a/src/cli/main.ts
++++ b/src/cli/main.ts
+@@ -29,6 +29,7 @@ import { ropeCommand } from "./commands/rope.ts";
+ import { safetyCommand } from "./commands/safety.ts";
+ import { shaftCommand } from "./commands/shaft.ts";
+ import { sizeCommand } from "./commands/size.ts";
++import { ventilationCommand } from "./commands/ventilation.ts";
+ import { wearCommand } from "./commands/wear.ts";
+ import { winderCommand } from "./commands/winder.ts";
+ import { worksCommand } from "./commands/works.ts";
+@@ -54,6 +55,7 @@ const COMMANDS: readonly Command[] = [
+   { name: "conveyance", says: "the cage against the skip, which is an argument about tare", run: conveyanceCommand },
+   { name: "cycle", says: "the wind, and the standing time that beats it", run: cycleCommand },
+   { name: "power", says: "what the engine does, and the r.m.s. that is not the peak", run: powerCommand },
++  { name: "ventilation", says: "what the air costs once the winding has had its share of the shaft", run: ventilationCommand },
+   { name: "safety", says: "the gear that does not trust the engineman", run: safetyCommand },
+   { name: "winder", says: "a whole installation, read from a file", run: winderCommand },
+   { name: "size", says: "an installation for a duty, in one direction", run: sizeCommand },
+diff --git a/src/index.ts b/src/index.ts
+index e976fb0..73ed548 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -17,6 +17,7 @@
+ export * as units from "./units/index.ts";
+ export * as rope from "./rope/index.ts";
+ export * as shaft from "./shaft/index.ts";
++export * as air from "./air/index.ts";
+ export * as drum from "./drum/index.ts";
+ export * as cage from "./cage/index.ts";
+ export * as cycle from "./cycle/index.ts";

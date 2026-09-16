@@ -1,0 +1,33 @@
+watching XK2or0zB11qNuvT5D4OJ every 120s (Ctrl-C to stop)
+08:27:19 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          running
+    qualityCheck       -
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+08:31:22 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       running
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+08:35:24 status=Validation Failed
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       failed / fail
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+== TERMINAL: Validation Failed ==
+   * failedStage=quality_check: Task quality checks failed: behavior in tests.
+   * ciChecks finding [warning] instruction.md is 298 words — aim under 250. Long specs tend to enumerate internals the solver should discover; state the required behavior and stop. (instruction.md)
+   * qualityCheck:behavior_in_tests [fail] The tests broadly cover the requested calculations, limits, public exports, and CLI, but they do not enforce the full stated rejection contract. In particular, an implementation may accept zero settling time and zero or negative discharge time and still pass all f2p tests, despite the instruction requiring the decking figures to refuse nought or less.
+   * qualityCheck: fail

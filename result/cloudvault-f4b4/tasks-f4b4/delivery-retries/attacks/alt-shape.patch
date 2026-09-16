@@ -1,0 +1,574 @@
+diff --git a/app/api/webhooks/endpoints/[id]/route.ts b/app/api/webhooks/endpoints/[id]/route.ts
+index 5e847d6..04cc008 100644
+--- a/app/api/webhooks/endpoints/[id]/route.ts
++++ b/app/api/webhooks/endpoints/[id]/route.ts
+@@ -1,6 +1,6 @@
+ import { NextRequest, NextResponse } from "next/server"
+ import { authenticateRequest } from "@/lib/auth-middleware"
+-import { deleteWebhookEndpoint } from "@/lib/webhook"
++import { deleteWebhookEndpoint, resumeWebhookEndpoint } from "@/lib/webhook"
+ 
+ export async function DELETE(
+     req: NextRequest,
+@@ -23,3 +23,31 @@ export async function DELETE(
+         return NextResponse.json({ error: err.message || "Failed to delete webhook endpoint" }, { status: 500 })
+     }
+ }
++
++export async function PATCH(
++    req: NextRequest,
++    { params }: { params: Promise<{ id: string }> }
++) {
++    const auth = await authenticateRequest(req)
++    if (!auth.authenticated || !auth.userId) {
++        return NextResponse.json({ error: auth.error || "Unauthorized" }, { status: 401 })
++    }
++
++    const { id } = await params
++
++    try {
++        const resumed = await resumeWebhookEndpoint(auth.userId, id)
++        if (!resumed) {
++            return NextResponse.json(
++                { error: "Webhook endpoint not found or access denied" },
++                { status: 404 }
++            )
++        }
++        return NextResponse.json({ success: true, message: "Cooldown cleared" })
++    } catch (err: any) {
++        return NextResponse.json(
++            { error: err.message || "Failed to resume webhook endpoint" },
++            { status: 500 }
++        )
++    }
++}
+diff --git a/app/api/webhooks/queue/route.ts b/app/api/webhooks/queue/route.ts
+new file mode 100644
+index 0000000..3a3774b
+--- /dev/null
++++ b/app/api/webhooks/queue/route.ts
+@@ -0,0 +1,54 @@
++import { NextRequest, NextResponse } from "next/server"
++import { authenticateRequest } from "@/lib/auth-middleware"
++import {
++    drainWebhookQueue,
++    getEndpointHealth,
++    getUserWebhookEndpoints,
++    getWebhookQueue,
++} from "@/lib/webhook"
++import { sweepQueue } from "@/lib/webhook-queue"
++
++export async function GET(req: NextRequest) {
++    const auth = await authenticateRequest(req)
++    if (!auth.authenticated || !auth.userId) {
++        return NextResponse.json({ error: auth.error || "Unauthorized" }, { status: 401 })
++    }
++
++    try {
++        const [queue, endpoints, health] = await Promise.all([
++            getWebhookQueue(auth.userId),
++            getUserWebhookEndpoints(auth.userId),
++            getEndpointHealth(auth.userId),
++        ])
++
++        const plan = sweepQueue(queue, endpoints, health, Date.now())
++        return NextResponse.json({
++            queue,
++            health: plan.health,
++            due: plan.send,
++            spent: plan.abandoned,
++        })
++    } catch (err: any) {
++        return NextResponse.json(
++            { error: err.message || "Failed to read the webhook queue" },
++            { status: 500 }
++        )
++    }
++}
++
++export async function POST(req: NextRequest) {
++    const auth = await authenticateRequest(req)
++    if (!auth.authenticated || !auth.userId) {
++        return NextResponse.json({ error: auth.error || "Unauthorized" }, { status: 401 })
++    }
++
++    try {
++        const summary = await drainWebhookQueue(auth.userId)
++        return NextResponse.json({ summary })
++    } catch (err: any) {
++        return NextResponse.json(
++            { error: err.message || "Failed to drain the webhook queue" },
++            { status: 500 }
++        )
++    }
++}
+diff --git a/lib/webhook-queue.ts b/lib/webhook-queue.ts
+new file mode 100644
+index 0000000..a8cc9b5
+--- /dev/null
++++ b/lib/webhook-queue.ts
+@@ -0,0 +1,156 @@
++// A correct implementation that shares no internal shape with the reference:
++// class based, different member names, extra fields on what it returns.
++import type { WebhookEndpoint } from "./webhook"
++
++export interface QueuedDelivery {
++    id: string
++    endpointId: string
++    event: string
++    attempts: number
++    queuedAt: number
++    nextAttemptAt: number
++    status: string
++}
++
++export interface EndpointHealth {
++    endpointId: string
++    consecutiveFailures: number
++    cooldownLevel: number
++    cooldownUntil: number
++    probeId: string | null
++}
++
++const DAY = 86400 * 1000
++
++class Schedule {
++    static retry(attempts: number): number {
++        let seconds = 30
++        for (let i = 1; i < attempts; i += 1) seconds *= 2
++        return Math.min(seconds, 1800) * 1000
++    }
++
++    static cooldown(level: number): number {
++        let seconds = 900
++        for (let i = 1; i < level; i += 1) seconds *= 2
++        return Math.min(seconds, 14400) * 1000
++    }
++}
++
++function blank(endpointId: string): EndpointHealth {
++    return { endpointId, consecutiveFailures: 0, cooldownLevel: 0, cooldownUntil: 0, probeId: null }
++}
++
++export function sweepQueue(
++    queue: QueuedDelivery[],
++    endpoints: WebhookEndpoint[],
++    health: EndpointHealth[],
++    now: number,
++) {
++    const live: Record<string, WebhookEndpoint> = {}
++    endpoints.forEach((ep) => { live[ep.id] = ep })
++
++    const state: Record<string, EndpointHealth> = {}
++    health.forEach((h) => { state[h.endpointId] = { ...h } })
++    endpoints.forEach((ep) => { if (!state[ep.id]) state[ep.id] = blank(ep.id) })
++
++    const waiting = queue
++        .filter((d) => d.status === "pending")
++        .slice()
++        .sort((x, y) => (x.nextAttemptAt - y.nextAttemptAt) || (x.id > y.id ? 1 : x.id < y.id ? -1 : 0))
++
++    const firstSeen: Record<string, QueuedDelivery> = {}
++    waiting.forEach((d) => {
++        const key = `${d.endpointId}|${d.event}`
++        const held = firstSeen[key]
++        if (!held || d.queuedAt < held.queuedAt
++            || (d.queuedAt === held.queuedAt && d.id < held.id)) {
++            firstSeen[key] = d
++        }
++    })
++
++    const abandoned = waiting
++        .filter((d) => {
++            const ep = live[d.endpointId]
++            if (!ep || ep.isActive === false || d.attempts >= 8 || now - d.queuedAt >= DAY) {
++                return true
++            }
++            return firstSeen[`${d.endpointId}|${d.event}`].id !== d.id
++        })
++        .map((d) => d.id)
++
++    const dropped: Record<string, boolean> = {}
++    abandoned.forEach((id) => { dropped[id] = true })
++
++    const order: string[] = []
++    const lanes: Record<string, QueuedDelivery[]> = {}
++    waiting.forEach((d) => {
++        if (dropped[d.id] || d.nextAttemptAt > now) return
++        const h = state[d.endpointId] || blank(d.endpointId)
++        if (h.cooldownUntil > now) return
++        if (h.cooldownUntil !== 0) {
++            const busy = h.probeId !== null
++                && waiting.some((o) => o.id === h.probeId && !dropped[o.id])
++            if (busy || lanes[d.endpointId]) return
++            h.probeId = d.id
++            order.push(d.endpointId)
++            lanes[d.endpointId] = [d]
++            return
++        }
++        if (!lanes[d.endpointId]) {
++            order.push(d.endpointId)
++            lanes[d.endpointId] = []
++        }
++        if (lanes[d.endpointId].length < 3) lanes[d.endpointId].push(d)
++    })
++
++    const send: string[] = []
++    for (let round = 0; round < 3 && send.length < 6; round += 1) {
++        for (let i = 0; i < order.length && send.length < 6; i += 1) {
++            const lane = lanes[order[i]]
++            if (lane && lane[round]) send.push(lane[round].id)
++        }
++    }
++
++    return {
++        send,
++        abandoned,
++        health: endpoints.map((ep) => state[ep.id]),
++        sweptAt: now,
++    }
++}
++
++export function recordAttempt(
++    delivery: QueuedDelivery,
++    health: EndpointHealth,
++    succeeded: boolean,
++    now: number,
++) {
++    const attempts = delivery.attempts + 1
++    const h: EndpointHealth = { ...health }
++
++    if (succeeded) {
++        return {
++            delivery: { ...delivery, attempts, status: "delivered" },
++            health: blank(h.endpointId),
++            recordedAt: now,
++        }
++    }
++
++    const wasProbe = h.probeId === delivery.id
++    if (wasProbe) h.probeId = null
++
++    if (wasProbe || h.consecutiveFailures + 1 >= 5) {
++        h.cooldownLevel += 1
++        h.cooldownUntil = now + Schedule.cooldown(h.cooldownLevel)
++        h.consecutiveFailures = 0
++    } else {
++        h.consecutiveFailures += 1
++    }
++
++    const finished = attempts >= 8 || now - delivery.queuedAt >= DAY
++    const next = finished
++        ? { ...delivery, attempts, status: "abandoned" }
++        : { ...delivery, attempts, status: "pending", nextAttemptAt: now + Schedule.retry(attempts) }
++
++    return { delivery: next, health: h, recordedAt: now }
++}
+diff --git a/lib/webhook-retry.ts b/lib/webhook-retry.ts
+new file mode 100644
+index 0000000..d7eba18
+--- /dev/null
++++ b/lib/webhook-retry.ts
+@@ -0,0 +1,58 @@
++// Timing arithmetic for the webhook delivery queue.
++//
++// Two independent schedules live here. The per-delivery retry schedule spaces
++// out attempts against one delivery; the per-endpoint cooldown schedule backs
++// off from an endpoint that keeps refusing traffic. They are kept apart on
++// purpose: a delivery that is ready to go again still waits while its endpoint
++// is cooling, and the queue sweep is what reconciles the two.
++
++// Retry: 30 s after the first failed attempt, doubling, never above 30 min.
++export const RETRY_BASE_SECONDS = 30
++export const RETRY_CAP_SECONDS = 1800
++
++// A delivery is given up on after this many attempts, or once it has sat in
++// the queue this long, whichever lands first.
++export const MAX_ATTEMPTS = 8
++export const QUEUE_DEADLINE_SECONDS = 86400
++
++// Cooldown: 15 min for a first cooldown, doubling for each repeat, capped at
++// 4 h. Five consecutive failures against one endpoint start the first one.
++export const FAILURE_THRESHOLD = 5
++export const COOLDOWN_BASE_SECONDS = 900
++export const COOLDOWN_CAP_SECONDS = 14400
++
++// How many of one endpoint's deliveries a single sweep is willing to send,
++// and how many it will send in total. The pair is what makes a sweep fair:
++// endpoints take turns, and one busy endpoint cannot spend the whole sweep.
++export const SWEEP_ENDPOINT_LIMIT = 3
++export const SWEEP_TOTAL_LIMIT = 6
++
++function step(base: number, cap: number, exponent: number): number {
++    if (!Number.isFinite(exponent) || exponent <= 1) return base
++    const raw = base * Math.pow(2, Math.floor(exponent) - 1)
++    return raw > cap ? cap : raw
++}
++
++// Seconds to wait before the next attempt, given how many attempts have
++// already failed. Doubles per attempt from 30 s, held at 30 min.
++export function retryDelaySeconds(attempts: number): number {
++    return step(RETRY_BASE_SECONDS, RETRY_CAP_SECONDS, Number(attempts))
++}
++
++// Seconds an endpoint stays cool at this cooldown level. Level 1 is the first
++// cooldown an endpoint enters, level 2 the one after that, and so on.
++export function cooldownSeconds(level: number): number {
++    return step(COOLDOWN_BASE_SECONDS, COOLDOWN_CAP_SECONDS, Number(level))
++}
++
++// Milliseconds are what the queue records carry, so convert once here rather
++// than sprinkling the factor through the sweep.
++export function retryDelayMs(attempts: number): number {
++    return retryDelaySeconds(attempts) * 1000
++}
++
++export function cooldownMs(level: number): number {
++    return cooldownSeconds(level) * 1000
++}
++
++export const QUEUE_DEADLINE_MS = QUEUE_DEADLINE_SECONDS * 1000
+diff --git a/lib/webhook.ts b/lib/webhook.ts
+index a08dd14..4365852 100644
+--- a/lib/webhook.ts
++++ b/lib/webhook.ts
+@@ -1,5 +1,12 @@
+ import crypto from "crypto"
+ import { getFirestore, FieldValue } from "firebase-admin/firestore"
++import {
++    type EndpointHealth,
++    type QueuedDelivery,
++    freshHealth,
++    recordAttempt,
++    sweepQueue,
++} from "./webhook-queue"
+ 
+ function getAdminDb() {
+     return getFirestore()
+@@ -137,7 +144,15 @@ export async function dispatchWebhookEvent(
+             (ep) => ep.isActive && (ep.events.includes("*") || ep.events.includes(event))
+         )
+ 
++        const health = await getEndpointHealth(userId)
++        const now = Date.now()
++
+         for (const ep of matching) {
++            // An endpoint that is resting keeps its traffic in the queue; the
++            // sweep releases it once the cooldown lapses.
++            const resting = health.find((h) => h.endpointId === ep.id)
++            if (resting && resting.cooldownUntil > now) continue
++
+             const delivery = await sendWebhookDelivery(ep, event, payload)
+             results.push(delivery)
+         }
+@@ -147,6 +162,210 @@ export async function dispatchWebhookEvent(
+     return results
+ }
+ 
++const QUEUE_COLLECTION = "webhook_queue"
++const HEALTH_COLLECTION = "webhook_health"
++
++/**
++ * Queues one event for every endpoint of this user that subscribes to it.
++ * Nothing is sent here: the sweep decides when each queued delivery goes out.
++ */
++export async function queueWebhookEvent(
++    userId: string,
++    event: string,
++    payload: any
++): Promise<QueuedDelivery[]> {
++    const queued: QueuedDelivery[] = []
++    try {
++        const endpoints = await getUserWebhookEndpoints(userId)
++        const matching = endpoints.filter(
++            (ep) => ep.isActive && (ep.events.includes("*") || ep.events.includes(event))
++        )
++
++        const now = Date.now()
++        for (const ep of matching) {
++            const docRef = await getAdminDb().collection(QUEUE_COLLECTION).add({
++                userId,
++                endpointId: ep.id,
++                event,
++                payload,
++                attempts: 0,
++                queuedAt: now,
++                nextAttemptAt: now,
++                status: "pending",
++            })
++
++            queued.push({
++                id: docRef.id,
++                endpointId: ep.id,
++                event,
++                attempts: 0,
++                queuedAt: now,
++                nextAttemptAt: now,
++                status: "pending",
++            })
++        }
++    } catch (err) {
++        console.error("Failed to queue webhook event:", err)
++    }
++    return queued
++}
++
++/**
++ * Reads back the queue rows for a user, newest deadline last.
++ */
++export async function getWebhookQueue(userId: string): Promise<QueuedDelivery[]> {
++    try {
++        const snap = await getAdminDb()
++            .collection(QUEUE_COLLECTION)
++            .where("userId", "==", userId)
++            .get()
++
++        return snap.docs.map((doc) => {
++            const d = doc.data() as any
++            return {
++                id: doc.id,
++                endpointId: d.endpointId || "",
++                event: d.event || "",
++                attempts: d.attempts || 0,
++                queuedAt: d.queuedAt || 0,
++                nextAttemptAt: d.nextAttemptAt || 0,
++                status: d.status || "pending",
++            }
++        })
++    } catch (err) {
++        console.error("Failed to read the webhook queue:", err)
++        return []
++    }
++}
++
++/**
++ * Reads the per-endpoint health records backing the cooldown schedule.
++ */
++export async function getEndpointHealth(userId: string): Promise<EndpointHealth[]> {
++    try {
++        const snap = await getAdminDb()
++            .collection(HEALTH_COLLECTION)
++            .where("userId", "==", userId)
++            .get()
++
++        return snap.docs.map((doc) => {
++            const d = doc.data() as any
++            return {
++                endpointId: d.endpointId || doc.id,
++                consecutiveFailures: d.consecutiveFailures || 0,
++                cooldownLevel: d.cooldownLevel || 0,
++                cooldownUntil: d.cooldownUntil || 0,
++                probeId: d.probeId || null,
++            }
++        })
++    } catch (err) {
++        console.error("Failed to read webhook endpoint health:", err)
++        return []
++    }
++}
++
++async function persistDelivery(delivery: QueuedDelivery): Promise<void> {
++    try {
++        await getAdminDb().collection(QUEUE_COLLECTION).doc(delivery.id).update({
++            attempts: delivery.attempts,
++            nextAttemptAt: delivery.nextAttemptAt,
++            status: delivery.status,
++        })
++    } catch (err) {
++        console.error("Failed to persist a queued delivery:", err)
++    }
++}
++
++async function persistHealth(userId: string, health: EndpointHealth): Promise<void> {
++    try {
++        await getAdminDb()
++            .collection(HEALTH_COLLECTION)
++            .doc(`${userId}_${health.endpointId}`)
++            .set({ userId, ...health }, { merge: true })
++    } catch (err) {
++        console.error("Failed to persist webhook endpoint health:", err)
++    }
++}
++
++export interface SweepSummary {
++    sent: number
++    delivered: number
++    abandoned: number
++}
++
++/**
++ * Runs one sweep of the queue: abandons what is spent, sends what the plan
++ * allows, and folds every result back into the two schedules.
++ */
++export async function drainWebhookQueue(
++    userId: string,
++    now: number = Date.now()
++): Promise<SweepSummary> {
++    const summary: SweepSummary = { sent: 0, delivered: 0, abandoned: 0 }
++    try {
++        const [queue, endpoints, health] = await Promise.all([
++            getWebhookQueue(userId),
++            getUserWebhookEndpoints(userId),
++            getEndpointHealth(userId),
++        ])
++
++        const plan = sweepQueue(queue, endpoints, health, now)
++        const byId = new Map(queue.map((d) => [d.id, d]))
++        const healthById = new Map(plan.health.map((h) => [h.endpointId, h]))
++
++        for (const id of plan.abandoned) {
++            const delivery = byId.get(id)
++            if (!delivery) continue
++            await persistDelivery({ ...delivery, status: "abandoned" })
++            summary.abandoned += 1
++        }
++
++        for (const id of plan.send) {
++            const delivery = byId.get(id)
++            if (!delivery) continue
++            const endpoint = endpoints.find((ep) => ep.id === delivery.endpointId)
++            if (!endpoint) continue
++
++            const attempt = await sendWebhookDelivery(endpoint, delivery.event, {})
++            const before = healthById.get(delivery.endpointId) || freshHealth(delivery.endpointId)
++            const after = recordAttempt(delivery, before, attempt.success, Date.now())
++
++            healthById.set(delivery.endpointId, after.health)
++            await persistDelivery(after.delivery)
++            await persistHealth(userId, after.health)
++
++            summary.sent += 1
++            if (after.delivery.status === "delivered") summary.delivered += 1
++            if (after.delivery.status === "abandoned") summary.abandoned += 1
++        }
++
++        for (const h of plan.health) {
++            await persistHealth(userId, healthById.get(h.endpointId) || h)
++        }
++    } catch (err) {
++        console.error("Failed to drain the webhook queue:", err)
++    }
++    return summary
++}
++
++/**
++ * Clears an endpoint's cooldown so the next sweep treats it as healthy again.
++ */
++export async function resumeWebhookEndpoint(
++    userId: string,
++    endpointId: string
++): Promise<boolean> {
++    try {
++        const endpoints = await getUserWebhookEndpoints(userId)
++        if (!endpoints.some((ep) => ep.id === endpointId)) return false
++        await persistHealth(userId, freshHealth(endpointId))
++        return true
++    } catch (err) {
++        console.error("Failed to resume a webhook endpoint:", err)
++        return false
++    }
++}
++
+ /**
+  * Sends an HTTP POST request to a single webhook endpoint and logs the delivery attempt.
+  */

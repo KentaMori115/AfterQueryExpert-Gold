@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/gap-up-straddles"
+
+[metadata]
+task_id = "gap-up-straddles"
+display_title = "<<EDIT-ME>> One-line title for this task"
+display_description = "<<EDIT-ME>> One or two sentences describing the change."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/62K48OhILrG3idHZAX17"
+base_commit_hash = "7bc88a1c75c331045b5714ee4a411e0321efc5a1"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-sbot-v3-18-62k48o:v2"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

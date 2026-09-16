@@ -1,0 +1,799 @@
+diff --git a/Engine/bot/bot01_engine.py b/Engine/bot/bot01_engine.py
+index ec74ae7..5bbfd27 100644
+--- a/Engine/bot/bot01_engine.py
++++ b/Engine/bot/bot01_engine.py
+@@ -30,11 +30,19 @@ sys.path.append(parent)
+ from Engine.bot_api import *
+ from Engine.schwab_api import *
+ from Engine.config import *
++from Engine.ladder import (
++    DEFAULT_LADDER_STEPS,
++    clamp_steps,
++    package_width,
++    plan_for_payload,
++)
+ 
+ class Bot01Engine:
+     def __init__(self):
+         self.set_bot_info()
+         self.trading_ready = False
++        #Rung schedule per user for the package currently being worked.
++        self.ladder_plans = {}
+ 
+     def set_bot_info(self):
+         self.vix_index_symbol = '$VIX'
+@@ -669,6 +677,83 @@ class Bot01Engine:
+ 
+ 
+ 
++    def quote_symbols(self, payload):
++        """Comma joined symbol list covering every leg of a working payload."""
++        symbols = []
++        for leg in payload.get('orderLegCollection', []):
++            symbol = leg['instrument']['symbol']
++            if symbol not in symbols:
++                symbols.append(symbol)
++        return ','.join(symbols)
++
++
++    def ladder_size(self):
++        """How many rungs the operator asked for.
++
++        Read from the admin settings every time rather than cached at start
++        up, so an operator who edits `ladder_steps` between runs gets the
++        ladder they asked for.
++        """
++        admin_info = getattr(self, 'admin_info', None) or {}
++        return clamp_steps(admin_info.get('ladder_steps', BOT1_LADDER_STEPS))
++
++
++    def working_plan(self, payload, quotes, symbol, steps, width=None):
++        """The rung schedule for one package at the given quotes."""
++        return plan_for_payload(payload, quotes, steps, get_ticksize(symbol), width)
++
++
++    def working_ladder(self, payload, quotes, symbol, steps, width=None):
++        """The prices this bot will quote for a package, opening rung first.
++
++        Every phase of the working loop goes through here, so the list is
++        what the order actually walks: rung 0 leaves with the opening order
++        and each replacement takes the next one. A defined risk package
++        passes its strike `width`, which holds the whole ladder a tick below
++        what the spread can pay out.
++        """
++        return list(self.working_plan(payload, quotes, symbol, steps, width).prices)
++
++
++    def build_ladder(self, payload, username, trading_symbol, spread_diff):
++        """Re-price the ladder for one package against the live quotes.
++
++        This runs again at every replacement, so a rung always reflects the
++        book as it stands rather than the book at the opening order. Returns
++        None when the quote call comes back empty, which the callers treat
++        exactly like the old `limit_price is None` branch did.
++        """
++        token_type = 'Bearer'
++        access_token = self.access_token_info.get(username)
++        if access_token is None:
++            return None
++
++        quotes = get_list_quote(token_type, access_token, self.quote_symbols(payload))
++        if quotes is None:
++            return None
++
++        width = spread_diff if spread_diff is not None else package_width(payload)
++        plan = self.working_plan(payload, quotes, trading_symbol,
++                                 self.ladder_size(), width)
++        if plan.opening_price is None:
++            return None
++        return plan
++
++
++    def apply_rung(self, user_payload, plan, rung_index):
++        """Stamp the rung for this replacement onto a payload.
++
++        Returns False once the ladder has no rung left at `rung_index`, which
++        is the engine's signal that the package belongs on a market order now
++        rather than on another replacement at a price it already quoted.
++        """
++        price = plan.price_at(rung_index)
++        if price is None:
++            return False
++        user_payload['price'] = price
++        return True
++
++
+     def execute_strategy(self):
+         """
+         Execute the automated trading strategy.
+@@ -695,7 +780,8 @@ class Bot01Engine:
+         vix_automatic_mode = self.admin_info.get('vix_automatic_mode', False)
+         vix_gap_lower = (vix_today_open > 0 and vix_today_open < vix_previous_close) if vix_automatic_mode else self.admin_info.get('vix_gap_lower', False)
+         order_gap_sec = self.admin_info.get('order_gap_sec', 10)
+-        print(f"vix automatic mode:{vix_automatic_mode}  |  vix gap lower:{vix_gap_lower}  |  order gap sec:{order_gap_sec}")
++        ladder_steps = self.ladder_size()
++        print(f"vix automatic mode:{vix_automatic_mode}  |  vix gap lower:{vix_gap_lower}  |  order gap sec:{order_gap_sec}  |  ladder steps:{ladder_steps}")
+ 
+ 
+ 
+@@ -728,7 +814,7 @@ class Bot01Engine:
+ 
+             signal_info = {}
+             for trading_group in trading_groups.keys():
+-                #trading_symbol = trading_group.split('-')[0]
++                trading_symbol = trading_group.split('-')[0]
+                 user_names = trading_groups[trading_group]
+                 payload, spread_diff =  self.find_order_payload(trading_group)
+                 lot_sizes = []
+@@ -749,10 +835,19 @@ class Bot01Engine:
+                         balance_headers = get_access_headers(token_type, access_token)
+                         acc_balance = schwab_api_get_account_balance(balance_headers)
+                         #print(acc_balance, risk_percentage)
+-                        debit_to_use = acc_balance* (risk_percentage/100)
+-
+-                        premium = payload['price']
+-                        lot_size = math.floor(debit_to_use / (premium*100))
++                        #The ladder can walk the debit up, so size against the
++                        #rung the account would settle for rather than the mid
++                        #it opens at. A package worked all the way to the far
++                        #touch still has to fit inside the same budget.
++                        sizing_plan = self.build_ladder(payload, username, trading_symbol, spread_diff)
++                        if sizing_plan is not None and sizing_plan.final_price is not None:
++                            lot_size = sizing_plan.lot_size(acc_balance, risk_percentage)
++                        else:
++                            #No ladder to read, so fall back to the midpoint
++                            #the payload already carries.
++                            debit_to_use = acc_balance* (risk_percentage/100)
++                            premium = payload['price']
++                            lot_size = math.floor(debit_to_use / (premium*100))
+                         #print(acc_balance, risk_percentage, debit_to_use, premium, lot_size)
+ 
+                         '''
+@@ -779,16 +874,20 @@ class Bot01Engine:
+             self.send_init_order(signal_info)
+ 
+ 
+-            repeat_cnt = 3
++            #Walk the rest of the ladder. Rung 0 went out with the opening
++            #order, so replacements start at rung 1 and stop as soon as every
++            #package has run out of rungs; a ladder that collapsed to a single
++            #rung goes straight to the market step.
+             repeat_gap_sec = order_gap_sec
+-            repeat_num = 0
++            rung_index = 1
+ 
+-            #modfy order price
+-            while repeat_num < repeat_cnt:
+-                repeat_num += 1
++            while rung_index < ladder_steps:
+                 time.sleep(repeat_gap_sec)
+-                print(f'====================   Bot1: {repeat_num}.Modify Order Price  =====================')
+-                self.modify_order_price(signal_info)
++                print(f'====================   Bot1: {rung_index}.Modify Order Price  =====================')
++                if not self.modify_order_price(signal_info, rung_index):
++                    print('Bot1: every ladder is spent, going to market')
++                    break
++                rung_index += 1
+ 
+             #modify order to market
+             time.sleep(repeat_gap_sec)
+@@ -839,18 +938,17 @@ class Bot01Engine:
+                 account_id = self.account_info[username]
+ 
+ 
+-                limit_price = get_new_limit_price(token_type, access_token, user_payload, strategy_type)
+-                if limit_price is None:
+-                    print(f"We stop sending the init order of {username} becase limit price is None.")
++                plan = self.build_ladder(user_payload, username, trading_symbol, spread_diff)
++                if plan is None:
++                    print(f"We stop sending the init order of {username} becase the ladder came back empty.")
+                 else:
+-                    limit_price = get_valid_price(limit_price, trading_symbol)
+-                    print(f'SPREAD DIFF: {spread_diff}')
+-                    if spread_diff is not None:
+-                        tick_size = get_ticksize(trading_symbol)
+-                        limit_price = min(limit_price, spread_diff - tick_size)
+-
+-                    user_payload['price'] = limit_price
++                    print(f'SPREAD DIFF: {spread_diff}  |  {plan.describe()}')
++                    self.ladder_plans[username] = plan
+ 
++                    #The opening order always goes out at rung 0, the midpoint.
++                    if not self.apply_rung(user_payload, plan, 0):
++                        print(f"We stop sending the init order of {username} becase the ladder came back empty.")
++                        continue
+ 
+                     process = Thread(target = send_order, args = [token_type, access_token, account_id, user_payload, trading_symbol, strategy_type, order_result_dict, username])
+                     process.start()
+@@ -863,8 +961,15 @@ class Bot01Engine:
+ 
+ 
+ 
+-    def modify_order_price(self, signal_info):
++    def modify_order_price(self, signal_info, rung_index):
++        """Replace every unfilled order at rung `rung_index` of its ladder.
++
++        Returns True when at least one package still had a rung left to
++        quote, so the caller knows whether another replacement round is worth
++        waiting out or the market step should come next.
++        """
+         threads = []
++        worked_a_rung = False
+         order_result_dict = self.order_result_dict
+         trading_group_list = signal_info.keys()
+         
+@@ -926,18 +1031,19 @@ class Bot01Engine:
+                 account_id = self.account_info[username]
+ 
+ 
+-                limit_price = get_new_limit_price(token_type, access_token, user_payload, strategy_type)
+-                if limit_price is None:
+-                    print(f"We stop modifying the order of {username} because limit price is None.")
++                plan = self.build_ladder(user_payload, username, trading_symbol, spread_diff)
++                if plan is None:
++                    print(f"We stop modifying the order of {username} because the ladder came back empty.")
+                 else:
+-                    #limit_price = limit_price/2.0
+-                    limit_price = get_valid_price(limit_price, trading_symbol)
+-                    print(f'SPREAD DIFF: {spread_diff}')
+-                    if spread_diff is not None:
+-                        tick_size = get_ticksize(trading_symbol)
+-                        limit_price = min(limit_price, spread_diff - tick_size)
++                    print(f'SPREAD DIFF: {spread_diff}  |  {plan.describe()}')
++                    self.ladder_plans[username] = plan
+ 
+-                    user_payload['price'] = limit_price
++                    if not self.apply_rung(user_payload, plan, rung_index):
++                        #Nothing left to concede for this package. Leave it
++                        #working where it is; the market step will take it.
++                        print(f"{username} has walked the whole ladder.")
++                        continue
++                    worked_a_rung = True
+ 
+ 
+                     if order_id is None or order_status =='REJECTED':
+@@ -953,6 +1059,7 @@ class Bot01Engine:
+ 
+         order_result_dict.update(new_order_result_dict)
+         self.order_result_dict = order_result_dict
++        return worked_a_rung
+ 
+ 
+     def modify_order_market(self, signal_info):
+diff --git a/Engine/bot_api.py b/Engine/bot_api.py
+index a89b571..1b4d7e1 100644
+--- a/Engine/bot_api.py
++++ b/Engine/bot_api.py
+@@ -1,5 +1,6 @@
+ from Engine.config import *
+ from Engine.schwab_api import *
++from Engine.pricing import snap, snap_in_favour
+ from Engine.offline import (
+     cancel_paper_order,
+     is_offline,
+@@ -33,10 +34,56 @@ def get_ticksize(p_symbol):
+     return 0.01
+ 
+ def get_valid_price(p_price, p_symbol):
++    """Pull a price down onto the tick grid of the index being traded.
++
++    This used to be `math.floor(p_price/tick)*tick`, which walks a price that
++    was already valid down by a whole tick: 0.29/0.01 comes out of binary
++    floating point as 28.999999999999996, so a perfectly good 0.29 was being
++    quoted at 0.28, and 1.15 on the nickel grid at 1.10. Snapping goes
++    through exact decimal arithmetic now, so a price already on the grid is
++    returned untouched and everything else still rounds down.
++    """
+     tick_size = get_ticksize(p_symbol)
+-    valid_price = math.floor(p_price/tick_size)*tick_size
+-    valid_price = round(valid_price, 2)
+-    return valid_price
++    valid_price = snap(p_price, tick_size, False)
++    if valid_price is None:
++        return p_price
++    return round(valid_price, 2)
++
++
++def get_favourable_price(p_price, p_symbol, credit):
++    """Snap toward the side of the grid the account would rather be on.
++
++    Money coming in rounds up and money going out rounds down, so the snapped
++    price is never worse for the account than the raw one. Working orders use
++    this; the older single sided callers keep `get_valid_price`.
++    """
++    tick_size = get_ticksize(p_symbol)
++    favourable = snap_in_favour(p_price, tick_size, credit)
++    if favourable is None:
++        return p_price
++    return round(favourable, 2)
++
++
++def get_package_quote(token_type, access_token, payload):
++    """Quote map covering every leg of a combo payload, or None.
++
++    The working loop re-prices the whole package at each replacement, so it
++    needs one call carrying every leg rather than the per strategy pairs the
++    limit price helpers ask for.
++    """
++    if not isinstance(payload, dict):
++        return None
++    symbols = []
++    for leg in payload.get('orderLegCollection') or []:
++        try:
++            symbol = leg['instrument']['symbol']
++        except (KeyError, TypeError):
++            continue
++        if symbol not in symbols:
++            symbols.append(symbol)
++    if not symbols:
++        return None
++    return get_list_quote(token_type, access_token, ','.join(symbols))
+ 
+ 
+ def get_one_valid_access_token(headers, refresh_token_info):
+diff --git a/Engine/config.py b/Engine/config.py
+index 84396c6..2b10b77 100644
+--- a/Engine/config.py
++++ b/Engine/config.py
+@@ -45,4 +45,14 @@ BOT2_TIME_ZONE = "US/Eastern"
+ BOT2_RUN_HOUR = 12
+ BOT2_RUN_MIN = 53
+ BOT2_PRE_TRADING_MIN = 1
+-BOT2_CHECK_MIN = 10
+\ No newline at end of file
++BOT2_CHECK_MIN = 10
++
++#bot1 order working ladder
++#The bot opens at the package midpoint and then replaces the order a few
++#times before it gives up and pays the market. BOT1_LADDER_STEPS counts the
++#opening quote as well as the replacements, so 4 means one opening order plus
++#three replacements, which is the cadence the old fixed repeat count ran on.
++#An operator can override it per run from the admin settings file; anything
++#outside 1..BOT1_LADDER_MAX_STEPS is pulled back into range.
++BOT1_LADDER_STEPS = 4
++BOT1_LADDER_MAX_STEPS = 8
+diff --git a/Engine/ladder.py b/Engine/ladder.py
+new file mode 100644
+index 0000000..ff750e7
+--- /dev/null
++++ b/Engine/ladder.py
+@@ -0,0 +1,277 @@
++"""Concession ladder for a working combo order.
++
++The bots open at the midpoint and then replace the order a few times before
++falling back to a market order. Replacing it at the same midpoint every time
++is not a concession, so nothing about the order gets more likely to fill; the
++ladder here walks the working price from that midpoint toward the far touch
++in even steps, and hands the engine the rung it should be quoting.
++
++Two rules shape every rung. It sits on the tick grid of the index being
++traded, snapped toward whichever side favours the account, so a rung is never
++worse than the arithmetic asked for and the last rung never reaches past the
++far touch. And a rung that repeats the one before it is not a replacement at
++all, so it is dropped and the ladder simply comes out shorter.
++"""
++
++import math
++
++from .pricing import (
++    is_credit,
++    leg_is_short,
++    leg_symbol,
++    net_touches,
++    snap,
++)
++
++# What the engines fall back to when the admin settings carry no ladder size:
++# the opening quote plus three replacements, which is the cadence the older
++# hard coded `repeat_cnt = 3` loop already ran on.
++DEFAULT_LADDER_STEPS = 4
++
++# The widest ladder an operator is allowed to ask for. Each rung costs a
++# cancel/replace round trip against the broker, and the whole ladder has to
++# finish inside the opening minutes of the session.
++MAX_LADDER_STEPS = 8
++
++
++def net_quote(payload, quotes):
++    """``(mid, far)`` for one order payload against a quote map.
++
++    ``mid`` is the package valued leg by leg at each leg's own midpoint.
++    ``far`` is the same package valued at whichever side of every leg's
++    spread pays the account least, which is the worst price the ladder is
++    ever willing to work. Child order strategies are not part of the working
++    price and are ignored.
++
++    Both come back as ``None`` when the payload has no legs or when any leg's
++    symbol is missing from ``quotes``.
++    """
++    return net_touches(payload, quotes)
++
++
++def ladder_prices(mid, far, steps, tick, credit, cap=None):
++    """The rungs a working order walks, opening rung first.
++
++    The rungs divide the span from ``mid`` to ``far`` evenly: with ``steps``
++    rungs asked for, rung ``k`` sits ``k / (steps - 1)`` of the way across,
++    so the first is the midpoint and the last reaches the far touch. Each is
++    then snapped onto the ``tick`` grid toward the side that favours the
++    account, up for a credit and down for a debit, which also keeps the last
++    rung on the near side of the far touch whenever that touch is off grid.
++
++    A ``cap`` is an upper bound on what the package may be worked at, which
++    is how a defined risk spread stays cheaper than the width it can pay out.
++    Both ends of the span are pulled down to it before any rung is computed,
++    so a cap under the midpoint collapses the ladder to the cap itself.
++
++    A rung that is not strictly positive is dropped, and so is one that
++    repeats the rung before it, so the list is strictly monotonic and can be
++    shorter than ``steps``. An empty list means there is nothing to work.
++    """
++    if mid is None or far is None or tick is None or steps is None:
++        return []
++    try:
++        steps = int(steps)
++        span_start = float(mid)
++        span_end = float(far)
++        tick = float(tick)
++    except (TypeError, ValueError):
++        return []
++    if steps < 1 or tick <= 0:
++        return []
++
++    if cap is not None:
++        try:
++            ceiling = float(cap)
++        except (TypeError, ValueError):
++            return []
++        span_start = min(span_start, ceiling)
++        span_end = min(span_end, ceiling)
++
++    favour_up = bool(credit)
++    rungs = []
++    for index in range(steps):
++        if steps == 1:
++            raw = span_start
++        else:
++            raw = span_start + (span_end - span_start) * index / float(steps - 1)
++        price = snap(raw, tick, favour_up)
++        if price is None or price <= 0:
++            continue
++        if rungs and price == rungs[-1]:
++            continue
++        rungs.append(price)
++    return rungs
++
++
++def ladder_lot_size(prices, balance, risk_percentage):
++    """How many lots the account can carry across the whole ladder.
++
++    Sizing happens at the last rung rather than the opening one. That rung is
++    the worst price the package will be worked at, so it is the one the
++    budget has to cover; sizing on the midpoint leaves an account short the
++    moment the ladder concedes. The budget is ``risk_percentage`` of
++    ``balance``, and a lot costs the rung times the hundred multiplier.
++
++    Returns 0 whenever the ladder is empty or either figure works out non
++    positive, which is the same signal the engines already read as "skip this
++    user".
++    """
++    if not prices:
++        return 0
++    try:
++        worst = float(prices[-1])
++        balance = float(balance)
++        risk_percentage = float(risk_percentage)
++    except (TypeError, ValueError, IndexError):
++        return 0
++
++    budget = balance * risk_percentage / 100.0
++    if budget <= 0:
++        return 0
++    cost_per_lot = worst * 100.0
++    if cost_per_lot <= 0:
++        return 0
++    lots = int(math.floor(budget / cost_per_lot))
++    return lots if lots > 0 else 0
++
++
++def ladder_concession(prices):
++    """How far the ladder is willing to move off its opening rung.
++
++    Zero for a ladder that collapsed to one rung, which is the engine's cue
++    that there is nothing to work and the package may as well go to market.
++    """
++    if not prices or len(prices) < 2:
++        return 0.0
++    return abs(float(prices[-1]) - float(prices[0]))
++
++
++# ---------------------------------------------------------------------------
++# What the engine drives the ladder with.
++# ---------------------------------------------------------------------------
++
++
++def clamp_steps(value):
++    """Coerce an operator supplied ladder size into the supported range."""
++    try:
++        steps = int(value)
++    except (TypeError, ValueError):
++        return DEFAULT_LADDER_STEPS
++    if steps < 1:
++        return 1
++    if steps > MAX_LADDER_STEPS:
++        return MAX_LADDER_STEPS
++    return steps
++
++
++class LadderPlan(object):
++    """One package's rungs plus the bookkeeping the working loop needs."""
++
++    def __init__(self, credit, mid, far, prices, width=None, cap=None):
++        self.credit = bool(credit)
++        self.mid = mid
++        self.far = far
++        self.prices = list(prices or [])
++        self.width = width
++        self.cap = cap
++
++    def __len__(self):
++        return len(self.prices)
++
++    @property
++    def opening_price(self):
++        return self.prices[0] if self.prices else None
++
++    @property
++    def final_price(self):
++        return self.prices[-1] if self.prices else None
++
++    def price_at(self, index):
++        """The rung for replacement ``index``, or None once the ladder ends."""
++        if index < 0 or index >= len(self.prices):
++            return None
++        return self.prices[index]
++
++    def market_after(self):
++        """The replacement index at which the order becomes a market order."""
++        return len(self.prices)
++
++    def lot_size(self, balance, risk_percentage):
++        return ladder_lot_size(self.prices, balance, risk_percentage)
++
++    def concession(self):
++        return ladder_concession(self.prices)
++
++    def describe(self):
++        """One line for the run log: side, span, cap and every rung."""
++        side = 'credit' if self.credit else 'debit'
++        span = 'no quote'
++        if self.mid is not None and self.far is not None:
++            span = f'mid {self.mid:.4f} -> far {self.far:.4f}'
++        cap = 'none' if self.cap is None else f'{self.cap:.2f}'
++        rungs = ', '.join(f'{price:.2f}' for price in self.prices) or 'none'
++        return (f'{side} ladder | {span} | cap {cap} | '
++                f'concession {self.concession():.2f} | rungs [{rungs}]')
++
++
++def width_cap(width, tick):
++    """Highest price a defined risk package may be worked at.
++
++    A spread that can only ever pay out its strike width is not worth paying
++    the width for, so the working price stops one tick short of it. Packages
++    with no width, the naked ones, carry no cap.
++    """
++    if width is None or tick is None:
++        return None
++    try:
++        return float(width) - float(tick)
++    except (TypeError, ValueError):
++        return None
++
++
++def plan_for_payload(payload, quotes, steps, tick, width=None):
++    """Build the :class:`LadderPlan` for one payload at the current quotes."""
++    mid, far = net_quote(payload, quotes)
++    credit = is_credit(payload)
++    cap = width_cap(width, tick)
++    prices = ladder_prices(mid, far, clamp_steps(steps), tick, credit, cap)
++    return LadderPlan(credit, mid, far, prices, width, cap)
++
++
++def package_width(payload):
++    """Strike width of a defined risk package, or None when it has none.
++
++    A package is defined risk when it carries both a long and a short leg;
++    the width is the widest gap between a short strike and a long strike,
++    read straight off the option symbols.
++    """
++    if not isinstance(payload, dict):
++        return None
++    legs = payload.get("orderLegCollection")
++    if not isinstance(legs, list):
++        return None
++    shorts, longs = [], []
++    for leg in legs:
++        symbol = leg_symbol(leg)
++        strike = strike_of(symbol)
++        if strike is None:
++            continue
++        if leg_is_short(leg):
++            shorts.append(strike)
++        else:
++            longs.append(strike)
++    if not shorts or not longs:
++        return None
++    return max(abs(long_strike - short_strike)
++               for short_strike in shorts for long_strike in longs)
++
++
++def strike_of(option_symbol):
++    """Strike price encoded in an OCC style option symbol, or None."""
++    if not isinstance(option_symbol, str) or len(option_symbol) < 14:
++        return None
++    try:
++        return float(option_symbol[13:]) / 1000.0
++    except ValueError:
++        return None
+diff --git a/Engine/pricing.py b/Engine/pricing.py
+new file mode 100644
+index 0000000..7efa388
+--- /dev/null
++++ b/Engine/pricing.py
+@@ -0,0 +1,143 @@
++"""Tick grid arithmetic and per leg net quoting for working orders.
++
++Every price this bot sends has to sit on the tick grid of the index it
++trades, and the grid is coarse enough that a naive ``floor(price / tick)``
++lands on the wrong rung: ``0.29 / 0.01`` is ``28.999999999999996`` in binary
++floating point, so flooring it walks a price that was already valid down by a
++full cent. Snapping goes through ``decimal`` here for that reason, and a price
++that already sits on the grid is returned untouched.
++
++The other half of the module turns an order payload plus a quote map into the
++two prices a working order cares about: the midpoint it opens at, and the far
++touch it is willing to walk to.
++"""
++
++from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
++
++# Quote arithmetic runs in floats, so a value that should be exactly on the
++# grid can arrive a few ULPs away. Fold that noise away before the decimal
++# conversion; option prices never carry more than a few real decimals.
++_NOISE_PLACES = 10
++
++
++def _dec(value):
++    """float -> Decimal, with binary float noise folded away first."""
++    return Decimal(str(round(float(value), _NOISE_PLACES)))
++
++
++def snap(price, tick, up):
++    """Snap ``price`` onto the ``tick`` grid, ceiling when ``up`` else floor.
++
++    A price already on the grid comes back unchanged, which is the whole
++    reason this does not go through ``math.floor``.
++    """
++    if tick is None or price is None:
++        return None
++    step = _dec(tick)
++    if step <= 0:
++        return None
++    rule = ROUND_CEILING if up else ROUND_FLOOR
++    rungs = (_dec(price) / step).quantize(Decimal(1), rounding=rule)
++    return float(rungs * step)
++
++
++def snap_in_favour(price, tick, credit):
++    """Snap toward the side of the grid that favours the trader.
++
++    A credit is money coming in, so it rounds up; a debit is money going out,
++    so it rounds down. Either way the snapped price is never worse for the
++    account than the raw one.
++    """
++    return snap(price, tick, bool(credit))
++
++
++def is_credit(payload):
++    """True for an order whose fill pays the account.
++
++    Reads ``orderType``; anything that is not a net credit is treated as a
++    debit, which is what the older single leg LIMIT and NET_DEBIT payloads
++    want anyway.
++    """
++    if not isinstance(payload, dict):
++        return False
++    return str(payload.get("orderType") or "").strip().upper() == "NET_CREDIT"
++
++
++def leg_is_short(leg):
++    """True when the leg sells to open or sells to close."""
++    if not isinstance(leg, dict):
++        return False
++    return str(leg.get("instruction") or "").strip().upper().startswith("SELL")
++
++
++def leg_symbol(leg):
++    if not isinstance(leg, dict):
++        return None
++    instrument = leg.get("instrument")
++    if not isinstance(instrument, dict):
++        return None
++    symbol = instrument.get("symbol")
++    return symbol if isinstance(symbol, str) and symbol else None
++
++
++def leg_touches(symbol, quotes):
++    """(bid, ask) for ``symbol``, or None when the quote map cannot serve it."""
++    if not isinstance(quotes, dict):
++        return None
++    row = quotes.get(symbol)
++    if not isinstance(row, dict):
++        return None
++    quote = row.get("quote")
++    if not isinstance(quote, dict):
++        return None
++    bid = quote.get("bidPrice")
++    ask = quote.get("askPrice")
++    if bid is None or ask is None:
++        return None
++    try:
++        return float(bid), float(ask)
++    except (TypeError, ValueError):
++        return None
++
++
++def net_touches(payload, quotes):
++    """Aggregate one payload's legs into ``(mid, far)``.
++
++    Short legs pay the account and long legs cost it, so a credit package is
++    worth ``shorts - longs`` and a debit package ``longs - shorts``. The
++    midpoint values every leg at its own midpoint. The far touch values every
++    leg at whichever side of its spread pays the account least: shorts at
++    their bid, longs at their ask.
++
++    Returns ``(None, None)`` when any leg is missing from ``quotes`` or the
++    payload carries no legs at all, since a partial package has no price.
++    """
++    if not isinstance(payload, dict):
++        return None, None
++    legs = payload.get("orderLegCollection")
++    if not isinstance(legs, list) or not legs:
++        return None, None
++
++    credit = is_credit(payload)
++    short_mid = short_far = 0.0
++    long_mid = long_far = 0.0
++
++    for leg in legs:
++        symbol = leg_symbol(leg)
++        if symbol is None:
++            return None, None
++        touches = leg_touches(symbol, quotes)
++        if touches is None:
++            return None, None
++        bid, ask = touches
++        mid = (bid + ask) / 2.0
++        if leg_is_short(leg):
++            short_mid += mid
++            short_far += bid
++        else:
++            long_mid += mid
++            long_far += ask
++
++    if credit:
++        return short_mid - long_mid, short_far - long_far
++    return long_mid - short_mid, long_far - short_far
+diff --git a/Engine/setting/bot1_admin_settings.json b/Engine/setting/bot1_admin_settings.json
+index 88e7f06..3c8b901 100644
+--- a/Engine/setting/bot1_admin_settings.json
++++ b/Engine/setting/bot1_admin_settings.json
+@@ -1,5 +1,6 @@
+ {
+     "vix_automatic_mode": false,
+     "vix_gap_lower": false,
+-    "order_gap_sec": 10
++    "order_gap_sec": 10,
++    "ladder_steps": 4
+ }
+\ No newline at end of file

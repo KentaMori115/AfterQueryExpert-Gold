@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/index-scans"
+
+[metadata]
+task_id = "index-scans"
+display_title = "Let the planner reach for an index"
+display_description = "SlateQL ships hash and sorted indexes that nothing ever consults. Give a session a way to build, list and drop them, then teach the physical planner to answer lookups, ranges and a single ORDER BY key through one of them without moving a single row of any answer."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/HJkKKkPJZJW1HJNijy50"
+base_commit_hash = "54f89d40389ec4ee4123a5681e13ed224a2d2f90"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-kukarepo-hjkkkk:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

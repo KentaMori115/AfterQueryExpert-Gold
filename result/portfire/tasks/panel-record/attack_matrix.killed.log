@@ -1,0 +1,141 @@
+built chai-tamper: 1 file(s)
+built fake-heldout: 2 file(s)
+built config-and-setup: 3 file(s)
+built node-modules: 1 file(s)
+built report-rewrite: 1 file(s)
+built own-support: 1 file(s)
+built solution-edits-base-test: 13 file(s)
+built solution-wrong-clock: 12 file(s)
+
+=== staging the base tree
+local base commit: 92f1bc437de71a5a7cbecdb139fce116e29e28a3
+
+=== building the environment image
+
+=== building the verifier image
+
+=== oracle run (reference solution applied)
+oracle     reward.json = {"reward": 1, "f2p_total": 73, "f2p_passed": 73, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== nop run (base state, nothing applied)
+nop        reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 0.0, "p2p": 1.0, "partial": 0.9666666666666667}
+
+=== chai-tamper run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/chai-tamper.patch)
+chai-tamper reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 0.0, "p2p": 1.0, "partial": 0.9666666666666667}
+
+=== fake-heldout run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/fake-heldout.patch)
+fake-heldout reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 0.0, "p2p": 1.0, "partial": 0.9666666666666667}
+
+=== config-and-setup run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/config-and-setup.patch)
+config-and-setup reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== node-modules run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/node-modules.patch)
+node-modules reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0, "apply_failed": 1}
+
+=== report-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/report-rewrite.patch)
+report-rewrite reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 0.0, "p2p": 1.0, "partial": 0.9666666666666667}
+
+=== own-support run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/own-support.patch)
+own-support reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== solution-edits-base-test run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/solution-edits-base-test.patch)
+solution-edits-base-test reward.json = {"reward": 1, "f2p_total": 73, "f2p_passed": 73, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== solution-wrong-clock run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/solution-wrong-clock.patch)
+solution-wrong-clock reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 67, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 0.9178082191780822, "p2p": 1.0, "partial": 0.9972602739726028}
+
+=== summary
+--- oracle
+P2P 2117/2117 pass 0 fail; F2P 73/73 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- nop
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > does not call that stray burnt without the first walk
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a burnt stray found with both walks
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a dead cue found with both walks, as an error
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin still reads connected
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin was never walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > passes a walk on which every match burnt
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans a refire only onto a pin the after walk read open
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans no refire onto a pin nobody walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > refuses to read a walk against a show that does not compile
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > reports an after walk it cannot read
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > stops on an after walk that will not parse
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > works without the first walk
+--- chai-tamper
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > does not call that stray burnt without the first walk
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a burnt stray found with both walks
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a dead cue found with both walks, as an error
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin still reads connected
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin was never walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > passes a walk on which every match burnt
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans a refire only onto a pin the after walk read open
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans no refire onto a pin nobody walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > refuses to read a walk against a show that does not compile
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > reports an after walk it cannot read
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > stops on an after walk that will not parse
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > works without the first walk
+--- fake-heldout
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > does not call that stray burnt without the first walk
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a burnt stray found with both walks
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a dead cue found with both walks, as an error
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin still reads connected
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin was never walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > passes a walk on which every match burnt
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans a refire only onto a pin the after walk read open
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans no refire onto a pin nobody walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > refuses to read a walk against a show that does not compile
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > reports an after walk it cannot read
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > stops on an after walk that will not parse
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > works without the first walk
+--- config-and-setup
+[verifier] ERROR: model.patch touches tests/setup.ts vitest.config.ts; every declared id will report failed
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > carries on past an unresolved name
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > still runs the load check on what did resolve
+--- node-modules
+[verifier] ERROR: submitted model.patch failed to apply
+--- report-rewrite
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > does not call that stray burnt without the first walk
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a burnt stray found with both walks
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a dead cue found with both walks, as an error
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin still reads connected
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin was never walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > passes a walk on which every match burnt
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans a refire only onto a pin the after walk read open
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans no refire onto a pin nobody walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > refuses to read a walk against a show that does not compile
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > reports an after walk it cannot read
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > stops on an after walk that will not parse
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > works without the first walk
+--- own-support
+[verifier] ERROR: model.patch touches tests/support/frozenExpect.ts; every declared id will report failed
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > carries on past an unresolved name
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > still runs the load check on what did resolve
+--- solution-edits-base-test
+P2P 2117/2117 pass 0 fail; F2P 73/73 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- solution-wrong-clock
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.rehearse --log > lets one frame pass without a word
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.rehearse --log > passes a log that matches the table on the panel's clock
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.rehearse --log > skips a row that will not read and grades the rest
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.rehearse --log > takes a tolerance in milliseconds
+[verifier] ✗ [f2p] tests/timeline/panelClock.test.ts.gradeLog on the panel's clock > reads a log written in show time as early by the whole pre roll
+[verifier] ✗ [f2p] tests/timeline/panelClock.test.ts.gradeLog on the panel's clock > takes the pre roll off a log time before comparing
+P2P 2117/2117 pass 0 fail; F2P 67/73 pass 6 fail; PARTIAL 0.9972602739726028; BINARY 0
+
+logs kept under /root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/work-attacks/

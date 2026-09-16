@@ -1,0 +1,688 @@
+diff --git a/__tests__/metering-fold.test.ts b/__tests__/metering-fold.test.ts
+new file mode 100644
+index 0000000..d378c0e
+--- /dev/null
++++ b/__tests__/metering-fold.test.ts
+@@ -0,0 +1,331 @@
++import { periodByIndex, periodAt, type BillingAnchor } from "../lib/billing-period"
++import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
++
++const day = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
++const iso = (n: number) => new Date(n).toISOString().slice(0, 10)
++
++// Anchored on the 31st, which no short month can hold.
++const long: BillingAnchor = { anchorDay: 31, startedAt: day(2025, 1, 31) }
++// Anchored on the 10th, every month holds it.
++const even: BillingAnchor = { anchorDay: 10, startedAt: day(2025, 1, 10) }
++
++const upload = (at: number, size: number, success = true): UsageEvent =>
++    ({ type: "upload", fileSize: size, at, success })
++const download = (at: number, size: number, success = true): UsageEvent =>
++    ({ type: "download", fileSize: size, at, success })
++const listing = (at: number, size = 0): UsageEvent => ({ type: "list", fileSize: size, at, success: true })
++
++const starts = (anchor: BillingAnchor, i: number) => iso(periodByIndex(anchor, i).startsAt)
++
++const stored = (fileId: string, size: number, from: number, until?: number): FileRecord =>
++    until === undefined ? { fileId, size, uploadedAt: from } : { fileId, size, uploadedAt: from, deletedAt: until }
++
++describe("anchor clamping", () => {
++    it("settles a 31st anchor onto the end of February", () => {
++        expect(starts(long, 1)).toBe("2025-02-28")
++    })
++
++    it("leaves an anchor the month can hold alone", () => {
++        expect(starts(long, 2)).toBe("2025-03-31")
++    })
++
++    it("settles onto the leap day in a leap February", () => {
++        const leapJan: BillingAnchor = { anchorDay: 31, startedAt: day(2024, 1, 31) }
++        expect(starts(leapJan, 1)).toBe("2024-02-29")
++    })
++
++    it("settles a 30th anchor in February and leaves it in April", () => {
++        const thirtieth: BillingAnchor = { anchorDay: 30, startedAt: day(2025, 1, 30) }
++        expect(starts(thirtieth, 1)).toBe("2025-02-28")
++        expect(starts(thirtieth, 3)).toBe("2025-04-30")
++    })
++
++    it("treats an anchor day below 1 as 1", () => {
++        const odd: BillingAnchor = { anchorDay: 0, startedAt: day(2025, 1, 15) }
++        expect(starts(odd, 0)).toBe("2025-01-01")
++    })
++})
++
++describe("period boundaries", () => {
++    it("opens period 0 on the anchor when the subscription began there", () => {
++        expect(starts(long, 0)).toBe("2025-01-31")
++    })
++
++    it("opens period 0 in the month before when the anchor had not yet come", () => {
++        const mid: BillingAnchor = { anchorDay: 31, startedAt: day(2025, 1, 15) }
++        expect(starts(mid, 0)).toBe("2024-12-31")
++    })
++
++    it("does not let a settled boundary drag the anchor down", () => {
++        expect(starts(long, 1)).toBe("2025-02-28")
++        expect(starts(long, 2)).toBe("2025-03-31")
++    })
++
++    it("keeps returning to the original anchor after every short month", () => {
++        expect(starts(long, 3)).toBe("2025-04-30")
++        expect(starts(long, 4)).toBe("2025-05-31")
++    })
++
++    it("closes a period where the next one opens", () => {
++        const first = periodByIndex(long, 0)
++        expect(first.endsAt).toBe(periodByIndex(long, 1).startsAt)
++    })
++
++    it("carries the index it was asked for", () => {
++        expect(periodByIndex(even, 7).index).toBe(7)
++    })
++})
++
++describe("locating a period", () => {
++    it("finds the period holding an instant inside it", () => {
++        expect(periodAt(long, day(2025, 2, 10))!.index).toBe(0)
++    })
++
++    it("puts an instant exactly on a boundary in the period it opens", () => {
++        expect(periodAt(long, day(2025, 2, 28))!.index).toBe(1)
++    })
++
++    it("puts the instant one millisecond earlier in the period before", () => {
++        expect(periodAt(long, day(2025, 2, 28) - 1)!.index).toBe(0)
++    })
++
++    it("answers with nothing before the subscription opened", () => {
++        expect(periodAt(long, day(2024, 12, 1))).toBeNull()
++    })
++
++    it("reaches periods far from the start", () => {
++        expect(periodAt(even, day(2026, 1, 15))!.index).toBe(12)
++    })
++})
++
++describe("the stored level", () => {
++    // Read through the ledger: a period's peak is the highest the level reached
++    // inside it, so placing changes on boundaries pins inclusive and exclusive.
++    const peaks = (files: FileRecord[], upTo: number) =>
++        buildLedger(even, [], files, upTo).map((p) => p.peakStoredBytes)
++
++    it("shows nothing in the period before a file arrives", () => {
++        expect(peaks([stored("a", 100, day(2025, 2, 10))], day(2025, 2, 20))).toEqual([0, 100])
++    })
++
++    it("counts a file from the very instant it was uploaded", () => {
++        expect(peaks([stored("a", 100, day(2025, 2, 10) - 1)], day(2025, 2, 20))).toEqual([100, 100])
++    })
++
++    it("stops counting a file at the instant it was deleted", () => {
++        expect(peaks([stored("a", 100, day(2025, 1, 15), day(2025, 2, 10))], day(2025, 2, 20))).toEqual([100, 0])
++    })
++
++    it("never counts a file deleted the instant it arrived", () => {
++        expect(peaks([stored("z", 90, day(2025, 1, 15), day(2025, 1, 15))], day(2025, 1, 20))).toEqual([0])
++    })
++
++    it("adds up several files held at once", () => {
++        const files = [
++            stored("a", 100, day(2025, 1, 12)),
++            stored("b", 200, day(2025, 1, 13)),
++            stored("c", 300, day(2025, 1, 14)),
++        ]
++        expect(peaks(files, day(2025, 1, 20))).toEqual([600])
++    })
++
++    it("falls back to nothing once every file has gone", () => {
++        const files = [
++            stored("a", 100, day(2025, 1, 12), day(2025, 2, 10)),
++            stored("b", 200, day(2025, 1, 13), day(2025, 2, 10)),
++        ]
++        const ledger = buildLedger(even, [], files, day(2025, 2, 20))
++        expect(ledger[1].peakStoredBytes).toBe(0)
++        expect(ledger[1].closingStoredBytes).toBe(0)
++    })
++
++    it("ignores a file reporting a size of zero", () => {
++        expect(peaks([stored("a", 0, day(2025, 1, 12))], day(2025, 1, 20))).toEqual([0])
++    })
++
++    it("counts nothing at all when no file has been stored", () => {
++        expect(peaks([], day(2025, 1, 20))).toEqual([0])
++    })
++})
++
++describe("metering a period", () => {
++    it("counts every event, failed ones included", () => {
++        const events = [upload(day(2025, 2, 1), 10), download(day(2025, 2, 2), 10, false), listing(day(2025, 2, 3))]
++        const ledger = buildLedger(even, events, [], day(2025, 2, 5))
++        expect(ledger[0].requests).toBe(3)
++    })
++
++    it("sums bandwidth over successful uploads and downloads only", () => {
++        const events = [upload(day(2025, 1, 15), 10), download(day(2025, 1, 16), 25), download(day(2025, 1, 17), 60, false)]
++        const ledger = buildLedger(even, events, [], day(2025, 1, 20))
++        expect(ledger[0].bandwidthBytes).toBe(35)
++    })
++
++    it("moves no bandwidth on a listing that reports a size anyway", () => {
++        const ledger = buildLedger(even, [listing(day(2025, 1, 15), 700)], [], day(2025, 1, 20))
++        expect(ledger[0].bandwidthBytes).toBe(0)
++    })
++
++    it("moves no bandwidth on a deletion whatever size it reports", () => {
++        const events: UsageEvent[] = [{ type: "delete", fileSize: 800, at: day(2025, 1, 15), success: true }]
++        const ledger = buildLedger(even, events, [], day(2025, 1, 20))
++        expect(ledger[0].requests).toBe(1)
++        expect(ledger[0].bandwidthBytes).toBe(0)
++    })
++
++    it("adds nothing to bandwidth when an upload reports no bytes", () => {
++        const events: UsageEvent[] = [{ type: "upload", at: day(2025, 1, 15), success: true }]
++        expect(buildLedger(even, events, [], day(2025, 1, 20))[0].bandwidthBytes).toBe(0)
++    })
++
++    it("sorts events into periods however they arrive", () => {
++        const events = [upload(day(2025, 3, 15), 5), upload(day(2025, 1, 15), 5), upload(day(2025, 2, 15), 5)]
++        const ledger = buildLedger(even, events, [], day(2025, 3, 20))
++        expect(ledger.map((p) => p.requests)).toEqual([1, 1, 1])
++    })
++})
++
++describe("storage across periods", () => {
++    it("carries a level into a period that saw no events at all", () => {
++        const files = [stored("a", 300, day(2025, 1, 15))]
++        const ledger = buildLedger(even, [], files, day(2025, 3, 20))
++        expect(ledger.map((p) => p.peakStoredBytes)).toEqual([300, 300, 300])
++    })
++
++    it("takes the peak rather than the closing level", () => {
++        const files = [stored("a", 300, day(2025, 1, 15), day(2025, 1, 20))]
++        const ledger = buildLedger(even, [], files, day(2025, 1, 25))
++        expect(ledger[0].peakStoredBytes).toBe(300)
++        expect(ledger[0].closingStoredBytes).toBe(0)
++    })
++
++    it("reports the level the period closed on", () => {
++        const files = [
++            stored("a", 300, day(2025, 1, 15)),
++            stored("b", 50, day(2025, 1, 20), day(2025, 1, 25)),
++            stored("c", 70, day(2025, 2, 10)),
++        ]
++        const ledger = buildLedger(even, [], files, day(2025, 1, 28))
++        expect(ledger[0].peakStoredBytes).toBe(350)
++        expect(ledger[0].closingStoredBytes).toBe(300)
++    })
++
++    it("counts a level that only rose in an earlier period as this period's peak", () => {
++        const files = [stored("a", 400, day(2025, 1, 15)), stored("b", 100, day(2025, 2, 15))]
++        const ledger = buildLedger(even, [], files, day(2025, 2, 20))
++        expect(ledger[1].peakStoredBytes).toBe(500)
++    })
++
++    it("drops the level for a file deleted in an earlier period", () => {
++        const files = [stored("a", 400, day(2025, 1, 15), day(2025, 1, 25))]
++        const ledger = buildLedger(even, [], files, day(2025, 2, 20))
++        expect(ledger[1].peakStoredBytes).toBe(0)
++    })
++
++    it("meters one period per boundary crossed up to the closing instant", () => {
++        const ledger = buildLedger(even, [], [], day(2025, 4, 1))
++        expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
++    })
++
++    it("includes the period a closing instant opens", () => {
++        const ledger = buildLedger(even, [], [], day(2025, 3, 10))
++        expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
++    })
++
++    it("leaves an event after the closing instant out of the count", () => {
++        const ledger = buildLedger(even, [listing(day(2025, 5, 1))], [], day(2025, 2, 20))
++        expect(ledger.map((p) => p.requests)).toEqual([0, 0])
++    })
++})
++
++describe("a year of boundaries", () => {
++    it("walks a 15th anchor through every month of a common year", () => {
++        const mid: BillingAnchor = { anchorDay: 15, startedAt: day(2025, 1, 15) }
++        const walk = Array.from({ length: 12 }, (_, i) => starts(mid, i))
++        expect(walk[1]).toBe("2025-02-15")
++        expect(walk[11]).toBe("2025-12-15")
++    })
++
++    it("carries an anchor across the turn of the year", () => {
++        const yearEnd: BillingAnchor = { anchorDay: 31, startedAt: day(2025, 12, 31) }
++        expect(starts(yearEnd, 1)).toBe("2026-01-31")
++        expect(starts(yearEnd, 2)).toBe("2026-02-28")
++    })
++
++    it("keeps a 29th anchor through a leap February and a common one", () => {
++        const leap: BillingAnchor = { anchorDay: 29, startedAt: day(2024, 1, 29) }
++        expect(starts(leap, 1)).toBe("2024-02-29")
++        const common: BillingAnchor = { anchorDay: 29, startedAt: day(2025, 1, 29) }
++        expect(starts(common, 1)).toBe("2025-02-28")
++    })
++
++    it("gives every month of a leap year a boundary of its own", () => {
++        const mid: BillingAnchor = { anchorDay: 15, startedAt: day(2024, 1, 15) }
++        const walk = Array.from({ length: 12 }, (_, i) => starts(mid, i))
++        expect(new Set(walk).size).toBe(12)
++        expect(walk[1]).toBe("2024-02-15")
++    })
++})
++
++describe("more of the stored level", () => {
++    it("counts a file uploaded exactly when a period opens", () => {
++        const files = [stored("a", 250, day(2025, 2, 10))]
++        const ledger = buildLedger(even, [], files, day(2025, 2, 20))
++        expect(ledger[1].peakStoredBytes).toBe(250)
++        expect(ledger[0].peakStoredBytes).toBe(0)
++    })
++
++    it("counts requests separately in each period", () => {
++        const events = [listing(day(2025, 1, 15)), listing(day(2025, 1, 16)), listing(day(2025, 2, 15))]
++        const ledger = buildLedger(even, events, [], day(2025, 2, 20))
++        expect(ledger.map((p) => p.requests)).toEqual([2, 1])
++    })
++
++    it("adds uploads and downloads into one bandwidth figure", () => {
++        const events = [upload(day(2025, 1, 15), 40), download(day(2025, 1, 16), 60)]
++        expect(buildLedger(even, events, [], day(2025, 1, 20))[0].bandwidthBytes).toBe(100)
++    })
++
++    it("meters only the opening period when nothing has closed yet", () => {
++        const ledger = buildLedger(even, [], [], day(2025, 1, 11))
++        expect(ledger.map((p) => p.index)).toEqual([0])
++    })
++})
++
++describe("the stretch of period 0 before the subscription", () => {
++    // anchorDay 31 with a mid-month start: period 0 opens 2024-12-31, well
++    // before the subscription began on 2025-01-15.
++    const late: BillingAnchor = { anchorDay: 31, startedAt: day(2025, 1, 15) }
++
++    it("opens period 0 before the subscription began", () => {
++        expect(starts(late, 0)).toBe("2024-12-31")
++    })
++
++    it("leaves an event on that earlier stretch out of the count", () => {
++        const ledger = buildLedger(late, [listing(day(2025, 1, 5))], [], day(2025, 1, 20))
++        expect(ledger[0].requests).toBe(0)
++    })
++
++    it("counts an event landing exactly on the opening instant", () => {
++        const ledger = buildLedger(late, [listing(day(2025, 1, 15))], [], day(2025, 1, 20))
++        expect(ledger[0].requests).toBe(1)
++    })
++
++    it("leaves bandwidth moved before the subscription out of the sum", () => {
++        const events = [download(day(2025, 1, 3), 500), download(day(2025, 1, 16), 70)]
++        const ledger = buildLedger(late, events, [], day(2025, 1, 20))
++        expect(ledger[0].bandwidthBytes).toBe(70)
++    })
++
++    it("takes the peak from the subscription onward, not from the boundary", () => {
++        const files = [stored("a", 400, day(2025, 1, 2), day(2025, 1, 10))]
++        const ledger = buildLedger(late, [], files, day(2025, 1, 20))
++        expect(ledger[0].peakStoredBytes).toBe(0)
++    })
++
++    it("still counts a file that was already stored when the subscription began", () => {
++        const files = [stored("a", 400, day(2025, 1, 2))]
++        const ledger = buildLedger(late, [], files, day(2025, 1, 20))
++        expect(ledger[0].peakStoredBytes).toBe(400)
++    })
++})
+diff --git a/__tests__/plan-balances.test.ts b/__tests__/plan-balances.test.ts
+new file mode 100644
+index 0000000..e6d8625
+--- /dev/null
++++ b/__tests__/plan-balances.test.ts
+@@ -0,0 +1,345 @@
++import { type BillingAnchor } from "../lib/billing-period"
++import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
++import { foldBalances, type Plan } from "../lib/allowance"
++import { decideRequest, retryAfterSeconds } from "../lib/quota-decision"
++
++const day = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
++const iso = (n: number) => new Date(n).toISOString().slice(0, 10)
++
++// Anchored on the 31st, which no short month can hold.
++const long: BillingAnchor = { anchorDay: 31, startedAt: day(2025, 1, 31) }
++// Anchored on the 10th, every month holds it.
++const even: BillingAnchor = { anchorDay: 10, startedAt: day(2025, 1, 10) }
++
++const upload = (at: number, size: number, success = true): UsageEvent =>
++    ({ type: "upload", fileSize: size, at, success })
++const download = (at: number, size: number, success = true): UsageEvent =>
++    ({ type: "download", fileSize: size, at, success })
++const listing = (at: number, size = 0): UsageEvent => ({ type: "list", fileSize: size, at, success: true })
++
++const stored = (fileId: string, size: number, from: number, until?: number): FileRecord =>
++    until === undefined ? { fileId, size, uploadedAt: from } : { fileId, size, uploadedAt: from, deletedAt: until }
++
++const plan: Plan = {
++    requestAllowance: 100,
++    bandwidthAllowance: 1000,
++    storageLimitBytes: 500,
++    carryPeriods: 1,
++}
++
++describe("allowances and the bank", () => {
++    const ledgerOf = (events: UsageEvent[], files: FileRecord[], upTo: number) =>
++        buildLedger(even, events, files, upTo)
++
++    it("opens the first period with an empty bank", () => {
++        const balances = foldBalances(plan, ledgerOf([], [], day(2025, 1, 20)))
++        expect(balances[0].carriedInRequests).toBe(0)
++        expect(balances[0].requestCredit).toBe(100)
++    })
++
++    it("banks what a quiet period left unspent", () => {
++        const balances = foldBalances(plan, ledgerOf([listing(day(2025, 1, 15))], [], day(2025, 2, 20)))
++        expect(balances[0].requestsUsed).toBe(1)
++        expect(balances[1].carriedInRequests).toBe(99)
++        expect(balances[1].requestCredit).toBe(199)
++    })
++
++    it("holds the bank down to the plan's carry ceiling", () => {
++        const balances = foldBalances(plan, ledgerOf([], [], day(2025, 3, 20)))
++        expect(balances[1].requestCredit).toBe(200)
++        expect(balances[2].carriedInRequests).toBe(100)
++    })
++
++    it("banks bandwidth the same way and to its own ceiling", () => {
++        const balances = foldBalances(plan, ledgerOf([download(day(2025, 1, 15), 400)], [], day(2025, 2, 20)))
++        expect(balances[0].bandwidthUsed).toBe(400)
++        expect(balances[1].carriedInBandwidth).toBe(600)
++        expect(balances[1].bandwidthCredit).toBe(1600)
++    })
++
++    it("reports how far past its credit each counter ran", () => {
++        const events: UsageEvent[] = [
++            ...Array.from({ length: 105 }, (_, i) => listing(day(2025, 1, 15) + i)),
++            download(day(2025, 1, 16), 1500),
++        ]
++        const balances = foldBalances(plan, ledgerOf(events, [], day(2025, 1, 20)))
++        expect(balances[0].requestOverage).toBe(6)
++        expect(balances[0].bandwidthOverage).toBe(500)
++    })
++
++    it("banks nothing out of a period that ran past its credit", () => {
++        const events = Array.from({ length: 105 }, (_, i) => listing(day(2025, 1, 15) + i))
++        const balances = foldBalances(plan, ledgerOf(events, [], day(2025, 2, 20)))
++        expect(balances[1].carriedInRequests).toBe(0)
++        expect(balances[1].requestCredit).toBe(100)
++    })
++
++    it("lets the bank cover a period that would otherwise have run over", () => {
++        const heavy = Array.from({ length: 150 }, (_, i) => listing(day(2025, 2, 15) + i))
++        const balances = foldBalances(plan, ledgerOf(heavy, [], day(2025, 2, 20)))
++        expect(balances[1].requestsUsed).toBe(150)
++        expect(balances[1].requestOverage).toBe(0)
++    })
++
++    it("measures storage against the ceiling and not against a bank", () => {
++        const files = [stored("a", 700, day(2025, 1, 15))]
++        const balances = foldBalances(plan, ledgerOf([], files, day(2025, 3, 20)))
++        expect(balances.map((b) => b.storageOverBytes)).toEqual([200, 200, 200])
++    })
++
++    it("calls a period clear when nothing ran past its limit", () => {
++        const balances = foldBalances(plan, ledgerOf([listing(day(2025, 1, 15))], [], day(2025, 1, 20)))
++        expect(balances[0].withinPlan).toBe(true)
++    })
++
++    it("calls a period unclear on storage alone", () => {
++        const files = [stored("a", 900, day(2025, 1, 15))]
++        const balances = foldBalances(plan, ledgerOf([], files, day(2025, 1, 20)))
++        expect(balances[0].requestOverage).toBe(0)
++        expect(balances[0].withinPlan).toBe(false)
++    })
++
++    it("places an instant in the period a boundary opens, not the one it closes", () => {
++        const balances = foldBalances(plan, ledgerOf([], [], day(2025, 3, 20)))
++        const idx = (at: number) => decideRequest(plan, balances, [], { type: "list", at }).periodIndex
++        expect(idx(day(2025, 2, 15))).toBe(1)
++        expect(idx(day(2025, 2, 10))).toBe(1)
++        expect(idx(day(2025, 2, 10) - 1)).toBe(0)
++    })
++
++    it("covers no instant before the subscription opened", () => {
++        const balances = foldBalances(plan, ledgerOf([], [], day(2025, 1, 20)))
++        const decision = decideRequest(plan, balances, [], { type: "list", at: day(2024, 6, 1) })
++        expect(decision.periodIndex).toBe(-1)
++        expect(decision.reason).toBe("outside_subscription")
++        expect(decision.bandwidthRemaining).toBe(0)
++    })
++
++    it("leaves the next period on its bare allowance when nothing may bank", () => {
++        const strict: Plan = { ...plan, carryPeriods: 0 }
++        const balances = foldBalances(strict, ledgerOf([], [], day(2025, 2, 20)))
++        expect(balances[1].carriedInRequests).toBe(0)
++        expect(balances[1].requestCredit).toBe(100)
++    })
++
++    it("lets a wider carry ceiling bank more than one period of allowance", () => {
++        const roomy: Plan = { ...plan, carryPeriods: 3 }
++        const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
++        expect(balances[2].carriedInRequests).toBe(200)
++        expect(balances[3].carriedInRequests).toBe(300)
++    })
++
++    it("folds one balance per ledger entry, in the order they were metered", () => {
++        expect(foldBalances(plan, [])).toEqual([])
++        const balances = foldBalances(plan, ledgerOf([], [], day(2025, 3, 20)))
++        expect(balances.map((b) => b.index)).toEqual([0, 1, 2])
++    })
++})
++
++describe("admitting the next request", () => {
++    const at = day(2025, 1, 15)
++    const balancesFor = (events: UsageEvent[], files: FileRecord[]) =>
++        foldBalances(plan, buildLedger(even, events, files, at))
++
++    it("admits a request that trips nothing", () => {
++        const decision = decideRequest(plan, balancesFor([], []), [], { type: "list", at })
++        expect(decision.verdict).toBe("admit")
++        expect(decision.reason).toBe("within_plan")
++    })
++
++    it("reports the period it judged the request in", () => {
++        expect(decideRequest(plan, balancesFor([], []), [], { type: "list", at }).periodIndex).toBe(0)
++    })
++
++    it("denies a request landing outside every period", () => {
++        const decision = decideRequest(plan, balancesFor([], []), [], { type: "list", at: day(2024, 6, 1) })
++        expect(decision.verdict).toBe("deny")
++        expect(decision.reason).toBe("outside_subscription")
++        expect(decision.periodIndex).toBe(-1)
++    })
++
++    it("leaves every remaining figure at zero outside every period", () => {
++        const files = [stored("a", 120, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([], files), files, { type: "list", at: day(2024, 6, 1) })
++        expect(decision.requestsRemaining).toBe(0)
++        expect(decision.bandwidthRemaining).toBe(0)
++        expect(decision.storageRemainingBytes).toBe(0)
++    })
++
++    it("denies an upload the remaining storage cannot hold", () => {
++        const files = [stored("a", 450, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([], files), files, { type: "upload", sizeBytes: 90, at })
++        expect(decision.verdict).toBe("deny")
++        expect(decision.reason).toBe("storage_full")
++        expect(decision.storageRemainingBytes).toBe(50)
++    })
++
++    it("admits an upload that exactly fills the remaining storage", () => {
++        const files = [stored("a", 450, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([], files), files, { type: "upload", sizeBytes: 50, at })
++        expect(decision.verdict).toBe("admit")
++    })
++
++    it("does not weigh a download against storage", () => {
++        const files = [stored("a", 500, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([], files), files, { type: "download", sizeBytes: 90, at })
++        expect(decision.reason).not.toBe("storage_full")
++    })
++
++    it("denies a transfer larger than the bandwidth left", () => {
++        const decision = decideRequest(plan, balancesFor([download(day(2025, 1, 12), 950)], []), [], {
++            type: "download", sizeBytes: 90, at,
++        })
++        expect(decision.verdict).toBe("deny")
++        expect(decision.reason).toBe("bandwidth_exhausted")
++        expect(decision.bandwidthRemaining).toBe(50)
++    })
++
++    it("throttles once the request credit is spent", () => {
++        const events = Array.from({ length: 100 }, (_, i) => listing(day(2025, 1, 12) + i))
++        const decision = decideRequest(plan, balancesFor(events, []), [], { type: "list", at })
++        expect(decision.verdict).toBe("throttle")
++        expect(decision.reason).toBe("requests_exhausted")
++        expect(decision.requestsRemaining).toBe(0)
++    })
++
++    it("reports storage first when storage and bandwidth both stand in the way", () => {
++        const files = [stored("a", 480, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([download(day(2025, 1, 12), 990)], files), files, {
++            type: "upload", sizeBytes: 60, at,
++        })
++        expect(decision.reason).toBe("storage_full")
++    })
++
++    it("reports bandwidth before requests when both stand in the way", () => {
++        const events: UsageEvent[] = [
++            ...Array.from({ length: 100 }, (_, i) => listing(day(2025, 1, 12) + i)),
++            download(day(2025, 1, 13), 990),
++        ]
++        const decision = decideRequest(plan, balancesFor(events, []), [], { type: "download", sizeBytes: 60, at })
++        expect(decision.reason).toBe("bandwidth_exhausted")
++    })
++
++    it("throttles a listing even when storage is full, since it moves nothing", () => {
++        const files = [stored("a", 900, day(2025, 1, 12))]
++        const events = Array.from({ length: 100 }, (_, i) => listing(day(2025, 1, 12) + i))
++        const decision = decideRequest(plan, balancesFor(events, files), files, { type: "list", at })
++        expect(decision.verdict).toBe("throttle")
++    })
++
++    it("measures the wait to the next boundary", () => {
++        const balances = balancesFor([], [])
++        const seconds = retryAfterSeconds(balances, day(2025, 2, 9) + 1500)
++        expect(seconds).toBe(86399)
++    })
++
++    it("offers no wait when nothing covers the instant", () => {
++        expect(retryAfterSeconds(balancesFor([], []), day(2024, 6, 1))).toBe(0)
++    })
++
++    it("weighs an upload against bandwidth once storage has room for it", () => {
++        const decision = decideRequest(plan, balancesFor([download(day(2025, 1, 12), 960)], []), [], {
++            type: "upload", sizeBytes: 60, at,
++        })
++        expect(decision.reason).toBe("bandwidth_exhausted")
++    })
++
++    it("reports every remaining figure on an admitted request", () => {
++        const files = [stored("a", 200, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([download(day(2025, 1, 12), 300)], files), files, {
++            type: "list", at,
++        })
++        expect(decision.requestsRemaining).toBe(99)
++        expect(decision.bandwidthRemaining).toBe(700)
++        expect(decision.storageRemainingBytes).toBe(300)
++    })
++})
++
++describe("more of the bank", () => {
++    const ledgerOf = (events: UsageEvent[], files: FileRecord[], upTo: number) =>
++        buildLedger(even, events, files, upTo)
++
++    it("stacks two quiet periods against a wider carry ceiling", () => {
++        const roomy: Plan = { ...plan, carryPeriods: 2 }
++        const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
++        expect(balances.map((b) => b.carriedInRequests)).toEqual([0, 100, 200, 200])
++    })
++
++    it("empties the bank after a period runs over and refills it after a quiet one", () => {
++        const heavy = Array.from({ length: 250 }, (_, i) => listing(day(2025, 2, 15) + i))
++        const balances = foldBalances(plan, ledgerOf(heavy, [], day(2025, 4, 20)))
++        expect(balances[1].requestOverage).toBeGreaterThan(0)
++        expect(balances[2].carriedInRequests).toBe(0)
++        expect(balances[3].carriedInRequests).toBe(100)
++    })
++
++    it("keeps a storage overrun out of the next period's reckoning", () => {
++        const files = [stored("a", 900, day(2025, 1, 15), day(2025, 1, 20))]
++        const balances = foldBalances(plan, ledgerOf([], files, day(2025, 2, 20)))
++        expect(balances[0].storageOverBytes).toBe(400)
++        expect(balances[1].storageOverBytes).toBe(0)
++    })
++
++    it("banks requests and bandwidth independently of each other", () => {
++        const events = [download(day(2025, 1, 15), 1000)]
++        const balances = foldBalances(plan, ledgerOf(events, [], day(2025, 2, 20)))
++        expect(balances[1].carriedInBandwidth).toBe(0)
++        expect(balances[1].carriedInRequests).toBe(99)
++    })
++
++    it("calls a period unclear on a request overrun alone", () => {
++        const events = Array.from({ length: 101 }, (_, i) => listing(day(2025, 1, 15) + i))
++        const balances = foldBalances(plan, ledgerOf(events, [], day(2025, 1, 20)))
++        expect(balances[0].storageOverBytes).toBe(0)
++        expect(balances[0].withinPlan).toBe(false)
++    })
++
++    it("calls a period unclear on a bandwidth overrun alone", () => {
++        const balances = foldBalances(plan, ledgerOf([download(day(2025, 1, 15), 1500)], [], day(2025, 1, 20)))
++        expect(balances[0].requestOverage).toBe(0)
++        expect(balances[0].bandwidthOverage).toBe(500)
++        expect(balances[0].withinPlan).toBe(false)
++    })
++})
++
++describe("more of the decision", () => {
++    const at = day(2025, 1, 15)
++    const balancesFor = (events: UsageEvent[], files: FileRecord[]) =>
++        foldBalances(plan, buildLedger(even, events, files, at))
++
++    it("admits a transfer that exactly spends the bandwidth left", () => {
++        const decision = decideRequest(plan, balancesFor([download(day(2025, 1, 12), 900)], []), [], {
++            type: "download", sizeBytes: 100, at,
++        })
++        expect(decision.verdict).toBe("admit")
++    })
++
++    it("never denies a deletion for want of storage", () => {
++        const files = [stored("a", 900, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([], files), files, { type: "delete", sizeBytes: 900, at })
++        expect(decision.verdict).toBe("admit")
++    })
++
++    it("treats an upload with no size as moving nothing", () => {
++        const files = [stored("a", 500, day(2025, 1, 12))]
++        const decision = decideRequest(plan, balancesFor([], files), files, { type: "upload", at })
++        expect(decision.verdict).toBe("admit")
++        expect(decision.storageRemainingBytes).toBe(0)
++    })
++
++    it("judges the last millisecond of a period inside that period", () => {
++        const balances = foldBalances(plan, buildLedger(even, [], [], day(2025, 2, 20)))
++        const decision = decideRequest(plan, balances, [], { type: "list", at: day(2025, 2, 10) - 1 })
++        expect(decision.periodIndex).toBe(0)
++    })
++
++    it("spans a full January to February gap from the opening instant", () => {
++        const balances = foldBalances(plan, buildLedger(even, [], [], day(2025, 2, 20)))
++        expect(retryAfterSeconds(balances, day(2025, 1, 10))).toBe(31 * 86400)
++    })
++
++    it("rounds a part second up to a whole one", () => {
++        const balances = foldBalances(plan, buildLedger(even, [], [], day(2025, 2, 20)))
++        expect(retryAfterSeconds(balances, day(2025, 2, 10) - 1000)).toBe(1)
++    })
++})

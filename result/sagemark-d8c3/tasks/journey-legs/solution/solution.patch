@@ -1,0 +1,759 @@
+diff --git a/src/core/rules/journey.ts b/src/core/rules/journey.ts
+new file mode 100644
+index 0000000..7e16a48
+--- /dev/null
++++ b/src/core/rules/journey.ts
+@@ -0,0 +1,236 @@
++// Overland travel resolved one day at a time.
++//
++// estimateTravel next door answers "roughly how long is this trip", which is
++// the right question at the table right up until the party is four days into a
++// swamp on half rations. This module walks the road instead: a route made of
++// legs, one weather roll a day, food out of the packs every evening, and the
++// exhaustion that a forced march and an empty stomach leave behind.
++//
++// Nothing here puts exhaustion back. Sleeping it off belongs to rest, not to
++// the road.
++
++import type { RandomSource } from '../dice/roll'
++import { type CalendarDay, type CalendarShape, advanceDays } from '../lib/inworld-calendar'
++
++import { type ExhaustionLevel, clampExhaustion } from './conditions'
++import { type SupplyState, drawRations, loseRations, startingSupply } from './supply'
++import {
++  type Climate,
++  type Season,
++  type TravelPace,
++  type WeatherSeverity,
++  paceMultiplier,
++  rollWeather,
++} from './weather'
++
++/** One stretch of road walked at one pace, under one sky. */
++export interface JourneyLeg {
++  name: string
++  /** How long the stretch is, in miles. */
++  miles: number
++  /** What a mile of it costs against the day's march. Open road is 1. */
++  costPerMile: number
++  climate: Climate
++  season: Season
++  pace: TravelPace
++}
++
++/** Who is walking, how fast, and what they carry. */
++export interface JourneyParty {
++  /** Mouths at the fire. Each eats one ration a day. */
++  size: number
++  /** Miles of open road the party covers on a clear day at normal pace. */
++  milesPerDay: number
++  /** Whole rations in the packs at the trailhead. */
++  rations: number
++  /** Exhaustion the party sets out carrying. */
++  exhaustion: ExhaustionLevel
++}
++
++export interface JourneyPlan {
++  legs: ReadonlyArray<JourneyLeg>
++  party: JourneyParty
++  /** In world date of the first day on the road. */
++  start: CalendarDay
++  calendar: CalendarShape
++  /**
++   * Where the weather comes from. One source for the whole walk, drawn once a
++   * day, so a seeded one replays the same journey every time.
++   */
++  rng?: RandomSource
++}
++
++/** One day on the road, as it happened. */
++export interface JourneyDay {
++  date: CalendarDay
++  /** The leg the party woke up on. */
++  legName: string
++  /** Label of the weather that day, straight off the climate table. */
++  weather: string
++  severity: WeatherSeverity
++  /** Miles of open road the day was worth once weather and exhaustion bit. */
++  allowance: number
++  /** Miles actually walked, which the rough ground can make far fewer. */
++  covered: number
++  rationsLeft: number
++  /** True when the packs could not feed everyone. */
++  hungry: boolean
++  /** Exhaustion the party goes to sleep on. */
++  exhaustion: ExhaustionLevel
++}
++
++export interface JourneyReport {
++  days: ReadonlyArray<JourneyDay>
++  /** True when every leg is behind the party. */
++  arrived: boolean
++  /** True when a day covered no ground at all, which ends the walk. */
++  stalled: boolean
++  /** The day the last leg ran out, or null for a walk that never finished. */
++  arrivalDate: CalendarDay | null
++  /** Miles of road still ahead. */
++  milesLeft: number
++  rationsLeft: number
++  hungryDays: number
++  exhaustion: ExhaustionLevel
++}
++
++// A walk that neither arrives nor stalls cannot happen: an unfed party runs
++// itself to a standstill, and a fed one keeps a constant pace. The cap is here
++// so a nonsense plan cannot hang a browser tab.
++const MAX_DAYS = 3650
++
++/**
++ * Walk a route and report every day of it.
++ *
++ * The day is always the same shape. Roll the weather for the leg the party
++ * wakes up on. Work out what the day is worth: the party's open road pace,
++ * times the pace of that leg, times what the weather leaves, times what
++ * exhaustion leaves. Spend it along the route, rough ground eating it faster
++ * than open road, and let it run on into the next leg if the leg ends before
++ * the day does. Then eat, count what the weather spoiled, and add up what the
++ * march cost.
++ */
++export function planJourney(plan: JourneyPlan): JourneyReport {
++  const rng = plan.rng ?? Math.random
++  const legs = plan.legs ?? []
++  const remaining = legs.map((leg) => positiveMiles(leg.miles))
++  const mouths = Math.max(0, Math.floor(plan.party.size))
++  const openRoad = Math.max(0, plan.party.milesPerDay)
++
++  let supply: SupplyState = startingSupply(plan.party.rations)
++  let exhaustion = clampExhaustion(plan.party.exhaustion)
++  let index = firstUnwalked(remaining, 0)
++  let stalled = false
++  const days: JourneyDay[] = []
++
++  while (index < legs.length && days.length < MAX_DAYS) {
++    const leg = legs[index]!
++    const date = advanceDays(plan.start, days.length, plan.calendar)
++    const weather = rollWeather(leg.climate, leg.season, rng)
++
++    const allowance = round1(
++      openRoad *
++        paceMultiplier(leg.pace) *
++        (1 - Math.min(0.9, weather.travelPenalty)) *
++        marchFactor(exhaustion),
++    )
++
++    let left = allowance
++    let covered = 0
++    while (left > 0 && index < legs.length) {
++      const ahead = remaining[index]!
++      const cost = ahead * positiveCost(legs[index]!.costPerMile)
++      if (cost <= left + 1e-9) {
++        covered += ahead
++        left -= cost
++        remaining[index] = 0
++        index = firstUnwalked(remaining, index + 1)
++        continue
++      }
++      const walked = left / positiveCost(legs[index]!.costPerMile)
++      remaining[index] = ahead - walked
++      covered += walked
++      left = 0
++    }
++
++    const fed = drawRations(supply, mouths)
++    supply = weather.severity === 'severe' ? loseRations(fed.state, 1) : fed.state
++    const hungry = fed.short > 0
++    exhaustion = clampExhaustion(
++      exhaustion + (leg.pace === 'forced' ? 1 : 0) + (hungry ? 1 : 0),
++    )
++
++    days.push({
++      date,
++      legName: leg.name,
++      weather: weather.label,
++      severity: weather.severity,
++      allowance,
++      covered: round1(covered),
++      rationsLeft: supply.rations,
++      hungry,
++      exhaustion,
++    })
++
++    if (round1(covered) <= 0) {
++      stalled = true
++      break
++    }
++  }
++
++  const arrived = !stalled && index >= legs.length
++  return {
++    days,
++    arrived,
++    stalled,
++    arrivalDate: arrivalDate(arrived, days, plan.start),
++    milesLeft: round1(remaining.reduce((sum, miles) => sum + Math.max(0, miles), 0)),
++    rationsLeft: supply.rations,
++    hungryDays: supply.hungryDays,
++    exhaustion,
++  }
++}
++
++/** What exhaustion leaves of a day's march: half at 2, nothing at 5. */
++export function marchFactor(level: ExhaustionLevel): number {
++  if (level >= 5) return 0
++  if (level >= 2) return 0.5
++  return 1
++}
++
++/** Total cost of a route, in miles of open road. */
++export function routeCost(legs: ReadonlyArray<JourneyLeg>): number {
++  return round1(
++    legs.reduce((sum, leg) => sum + positiveMiles(leg.miles) * positiveCost(leg.costPerMile), 0),
++  )
++}
++
++function arrivalDate(
++  arrived: boolean,
++  days: ReadonlyArray<JourneyDay>,
++  start: CalendarDay,
++): CalendarDay | null {
++  if (!arrived) return null
++  if (days.length === 0) return start
++  return days[days.length - 1]!.date
++}
++
++function firstUnwalked(remaining: ReadonlyArray<number>, from: number): number {
++  let i = Math.max(0, from)
++  while (i < remaining.length && remaining[i]! <= 0) i++
++  return i
++}
++
++function positiveMiles(miles: number): number {
++  if (!Number.isFinite(miles) || miles <= 0) return 0
++  return miles
++}
++
++function positiveCost(cost: number): number {
++  if (!Number.isFinite(cost) || cost <= 0) return 0
++  return cost
++}
++
++function round1(value: number): number {
++  return Math.round((value + Number.EPSILON) * 10) / 10
++}
+diff --git a/src/core/rules/supply.ts b/src/core/rules/supply.ts
+new file mode 100644
+index 0000000..4a4f142
+--- /dev/null
++++ b/src/core/rules/supply.ts
+@@ -0,0 +1,68 @@
++// Trail rations for a party on the road. A ration is one person for one day,
++// counted whole: half a ration feeds nobody. The ledger only ever goes down
++// here, since restocking happens in town and that is the campaign's business,
++// not the road's.
++
++export interface SupplyState {
++  /** Whole rations still in the packs. Never negative. */
++  rations: number
++  /** How many days ended with fewer rations than mouths at the fire. */
++  hungryDays: number
++}
++
++export interface SupplyDraw {
++  /** The ledger after the draw. */
++  state: SupplyState
++  /** Rations that actually came out of the packs. */
++  drawn: number
++  /** Mouths the packs could not cover. */
++  short: number
++}
++
++/** A fresh ledger. Fractions and nonsense round down to a whole ration. */
++export function startingSupply(rations: number): SupplyState {
++  return { rations: wholeRations(rations), hungryDays: 0 }
++}
++
++/**
++ * Feed `mouths` people for one day. The packs give what they have; anything
++ * they cannot cover is short, and a day short by any amount is one hungry day,
++ * not one per empty stomach.
++ */
++export function drawRations(state: SupplyState, mouths: number): SupplyDraw {
++  const wanted = Math.max(0, Math.floor(mouths))
++  const have = wholeRations(state.rations)
++  const drawn = Math.min(have, wanted)
++  const short = wanted - drawn
++  return {
++    state: {
++      rations: have - drawn,
++      hungryDays: state.hungryDays + (short > 0 ? 1 : 0),
++    },
++    drawn,
++    short,
++  }
++}
++
++/**
++ * Days the packs can feed `mouths`, rounded down. A party of nobody eats
++ * nothing and can sit on the road forever, which is reported as zero days
++ * rather than an infinity nobody can render.
++ */
++export function daysOfFood(state: SupplyState, mouths: number): number {
++  const wanted = Math.max(0, Math.floor(mouths))
++  if (wanted === 0) return 0
++  return Math.floor(wholeRations(state.rations) / wanted)
++}
++
++/** Take rations out of the packs without feeding anyone: spoilage, theft, a river. */
++export function loseRations(state: SupplyState, count: number): SupplyState {
++  const lost = Math.max(0, Math.floor(count))
++  if (lost === 0) return state
++  return { ...state, rations: Math.max(0, wholeRations(state.rations) - lost) }
++}
++
++function wholeRations(value: number): number {
++  if (!Number.isFinite(value) || value <= 0) return 0
++  return Math.floor(value)
++}
+diff --git a/src/core/rules/weather.ts b/src/core/rules/weather.ts
+index fdecb60..8570f09 100644
+--- a/src/core/rules/weather.ts
++++ b/src/core/rules/weather.ts
+@@ -165,6 +165,11 @@ export function estimateTravel(plan: TravelPlan): TravelEstimate {
+   }
+ }
+ 
++/** What a pace does to a day's distance. Normal is 1, a forced march is half again. */
++export function paceMultiplier(pace: TravelPace): number {
++  return PACE_MULTIPLIER[pace]
++}
++
+ export function paceDescription(p: TravelPace): string {
+   return PACE_DESCRIPTION[p]
+ }
+diff --git a/src/features/travel/components/JourneyLog.vue b/src/features/travel/components/JourneyLog.vue
+new file mode 100644
+index 0000000..40ab1e2
+--- /dev/null
++++ b/src/features/travel/components/JourneyLog.vue
+@@ -0,0 +1,91 @@
++<script setup lang="ts">
++import { computed } from 'vue'
++
++import { exhaustionLabel } from '@core/rules/conditions'
++import type { JourneyReport } from '@core/rules/journey'
++import { daysOfFood, startingSupply } from '@core/rules/supply'
++import { formatDayShort } from '@core/lib/inworld-calendar'
++import { severityTone } from '@core/rules/weather'
++
++import EmptyState from '@ui/primitives/EmptyState.vue'
++import StatusBadge from '@ui/primitives/StatusBadge.vue'
++
++const props = defineProps<{ report: JourneyReport; mouths: number }>()
++
++const outcome = computed(() => {
++  if (props.report.stalled) return { tone: 'danger' as const, text: 'stalled on the road' }
++  if (props.report.arrived) return { tone: 'success' as const, text: 'arrived' }
++  return { tone: 'warning' as const, text: 'still walking' }
++})
++
++const hungryCount = computed(() => props.report.days.filter((d) => d.hungry).length)
++
++// What is left in the packs, read the way the trailhead reads it: whole days
++// for the party that is actually walking, not a raw ration count.
++const larderDays = computed(() =>
++  daysOfFood(startingSupply(props.report.rationsLeft), props.mouths),
++)
++
++const worstDay = computed(() => {
++  let worst: (typeof props.report.days)[number] | null = null
++  for (const day of props.report.days) {
++    if (!worst || day.covered < worst.covered) worst = day
++  }
++  return worst
++})
++</script>
++
++<template>
++  <div class="space-y-3">
++    <div class="flex flex-wrap items-center gap-2 text-sm">
++      <StatusBadge :tone="outcome.tone" :soft="false">{{ outcome.text }}</StatusBadge>
++      <span class="text-ink-500">{{ report.days.length }} days</span>
++      <span class="text-ink-500">{{ report.rationsLeft }} rations left</span>
++      <span v-if="report.milesLeft > 0" class="text-ink-500">
++        {{ report.milesLeft }} miles short
++      </span>
++      <span v-if="hungryCount > 0" class="text-ink-500">{{ hungryCount }} hungry days</span>
++      <span class="text-ink-500">{{ exhaustionLabel(report.exhaustion) }}</span>
++      <span v-if="worstDay" class="text-ink-500">
++        worst day {{ worstDay.covered }} mi under {{ worstDay.weather }}
++      </span>
++      <span class="text-ink-500">packs cover {{ larderDays }} more days</span>
++    </div>
++
++    <EmptyState v-if="report.days.length === 0" title="Nothing to walk">
++      Add a leg and the party can set out.
++    </EmptyState>
++
++    <table v-else class="w-full text-sm">
++      <thead class="text-xs uppercase text-ink-500">
++        <tr>
++          <th class="text-left py-1">Day</th>
++          <th class="text-left py-1">Leg</th>
++          <th class="text-left py-1">Sky</th>
++          <th class="text-right py-1">Worth</th>
++          <th class="text-right py-1">Walked</th>
++          <th class="text-right py-1">Rations</th>
++          <th class="text-left py-1">Wear</th>
++        </tr>
++      </thead>
++      <tbody>
++        <tr
++          v-for="(day, i) in report.days"
++          :key="i"
++          class="border-t border-parchment-200"
++          :class="day.hungry ? 'bg-amber-50' : ''"
++        >
++          <td class="py-1">{{ formatDayShort(day.date) }}</td>
++          <td class="py-1">{{ day.legName }}</td>
++          <td class="py-1">
++            <StatusBadge :tone="severityTone(day.severity)">{{ day.weather }}</StatusBadge>
++          </td>
++          <td class="py-1 text-right tabular-nums">{{ day.allowance }}</td>
++          <td class="py-1 text-right tabular-nums">{{ day.covered }}</td>
++          <td class="py-1 text-right tabular-nums">{{ day.rationsLeft }}</td>
++          <td class="py-1">{{ day.exhaustion }}</td>
++        </tr>
++      </tbody>
++    </table>
++  </div>
++</template>
+diff --git a/src/features/travel/pages/TravelPlannerPage.vue b/src/features/travel/pages/TravelPlannerPage.vue
+index 447b137..c411572 100644
+--- a/src/features/travel/pages/TravelPlannerPage.vue
++++ b/src/features/travel/pages/TravelPlannerPage.vue
+@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
+ import { useRoute } from 'vue-router'
+ 
+ import { buildSeededRng } from '@core/dice/roll'
++import type { CampaignId } from '@core/ids'
++import type { JourneyLeg, JourneyParty } from '@core/rules/journey'
+ import {
+   CLIMATES,
+   SEASONS,
+@@ -20,6 +22,9 @@ import {
+ 
+ import { useCampaignStore } from '@features/campaigns/store'
+ 
++import JourneyLog from '../components/JourneyLog.vue'
++import { emptyRoute, useTravelStore } from '../store'
++
+ import BaseButton from '@ui/primitives/BaseButton.vue'
+ import BreadcrumbTrail from '@ui/primitives/BreadcrumbTrail.vue'
+ import PageHeader from '@ui/primitives/PageHeader.vue'
+@@ -28,6 +33,7 @@ import SurfaceCard from '@ui/primitives/SurfaceCard.vue'
+ 
+ const route = useRoute()
+ const campaigns = useCampaignStore()
++const travel = useTravelStore()
+ 
+ const campaignIdFromRoute = computed(() => route.params.campaignId as string)
+ const campaign = computed(() => campaigns.all.find((c) => c.id === campaignIdFromRoute.value))
+@@ -58,6 +64,39 @@ function rerollWeather(): void {
+   seed.value = Math.floor(Math.random() * 1_000_000)
+ }
+ 
++const campaignKey = computed(() => (campaign.value ? (campaign.value.id as CampaignId) : null))
++
++const storedRoute = computed(() => (campaignKey.value ? travel.routeFor(campaignKey.value) : emptyRoute()))
++
++const journey = computed(() => (campaignKey.value ? travel.walk(campaignKey.value) : null))
++
++const routeCostMiles = computed(() => (campaignKey.value ? travel.cost(campaignKey.value) : 0))
++
++function addLeg(): void {
++  if (!campaignKey.value) return
++  travel.addLeg(campaignKey.value, { climate: climate.value, season: season.value, pace: pace.value })
++}
++
++function dropLeg(index: number): void {
++  if (!campaignKey.value) return
++  travel.removeLeg(campaignKey.value, index)
++}
++
++function editLeg(index: number, patch: Partial<JourneyLeg>): void {
++  if (!campaignKey.value) return
++  travel.updateLeg(campaignKey.value, index, patch)
++}
++
++function editParty(patch: Partial<JourneyParty>): void {
++  if (!campaignKey.value) return
++  travel.setParty(campaignKey.value, patch)
++}
++
++function rerollJourney(): void {
++  if (!campaignKey.value) return
++  travel.reroll(campaignKey.value)
++}
++
+ const crumbs = computed(() => [
+   { to: '/', label: 'Home' },
+   { to: '/campaigns', label: 'Campaigns' },
+@@ -171,6 +210,88 @@ const crumbs = computed(() => [
+         </dl>
+       </SurfaceCard>
+ 
++      <SurfaceCard title="The road ahead" hint="Legs walked in order, one weather roll a day">
++        <div class="flex flex-wrap items-end gap-3 mb-3 text-xs text-ink-500">
++          <label>
++            Party
++            <input
++              :value="storedRoute.party.size"
++              type="number"
++              min="1"
++              max="20"
++              class="mt-1 w-20 border border-parchment-300 rounded-soft px-2 py-1 text-sm bg-white"
++              @change="editParty({ size: Number(($event.target as HTMLInputElement).value) })"
++            />
++          </label>
++          <label>
++            Open road mi/day
++            <input
++              :value="storedRoute.party.milesPerDay"
++              type="number"
++              min="1"
++              max="80"
++              class="mt-1 w-24 border border-parchment-300 rounded-soft px-2 py-1 text-sm bg-white"
++              @change="editParty({ milesPerDay: Number(($event.target as HTMLInputElement).value) })"
++            />
++          </label>
++          <label>
++            Rations
++            <input
++              :value="storedRoute.party.rations"
++              type="number"
++              min="0"
++              max="500"
++              class="mt-1 w-24 border border-parchment-300 rounded-soft px-2 py-1 text-sm bg-white"
++              @change="editParty({ rations: Number(($event.target as HTMLInputElement).value) })"
++            />
++          </label>
++          <span class="ml-auto">route costs {{ routeCostMiles }} mi of open road</span>
++          <BaseButton size="sm" @click="addLeg">add leg</BaseButton>
++          <BaseButton size="sm" @click="rerollJourney">reroll skies</BaseButton>
++        </div>
++
++        <ul class="space-y-2">
++          <li
++            v-for="(leg, i) in storedRoute.legs"
++            :key="i"
++            class="flex flex-wrap items-center gap-2 text-sm border-t border-parchment-200 pt-2"
++          >
++            <input
++              :value="leg.name"
++              class="border border-parchment-300 rounded-soft px-2 py-1 bg-white w-40"
++              @change="editLeg(i, { name: ($event.target as HTMLInputElement).value })"
++            />
++            <input
++              :value="leg.miles"
++              type="number"
++              min="0"
++              class="border border-parchment-300 rounded-soft px-2 py-1 bg-white w-24"
++              @change="editLeg(i, { miles: Number(($event.target as HTMLInputElement).value) })"
++            />
++            <input
++              :value="leg.costPerMile"
++              type="number"
++              min="0.1"
++              step="0.1"
++              class="border border-parchment-300 rounded-soft px-2 py-1 bg-white w-24"
++              @change="editLeg(i, { costPerMile: Number(($event.target as HTMLInputElement).value) })"
++            />
++            <select
++              :value="leg.pace"
++              class="border border-parchment-300 rounded-soft px-2 py-1 bg-white"
++              @change="editLeg(i, { pace: ($event.target as HTMLSelectElement).value as TravelPace })"
++            >
++              <option v-for="p in TRAVEL_PACES" :key="p" :value="p">{{ p }}</option>
++            </select>
++            <BaseButton size="sm" @click="dropLeg(i)">drop</BaseButton>
++          </li>
++        </ul>
++      </SurfaceCard>
++
++      <SurfaceCard v-if="journey" title="Day by day">
++        <JourneyLog :report="journey" :mouths="storedRoute.party.size" />
++      </SurfaceCard>
++
+       <SurfaceCard title="What you might see this stretch" hint="The table you are rolling on">
+         <ul class="text-sm space-y-1">
+           <li v-for="opt in tableForRegion" :key="opt.label" class="flex items-center gap-2">
+diff --git a/src/features/travel/store.ts b/src/features/travel/store.ts
+new file mode 100644
+index 0000000..8cf2238
+--- /dev/null
++++ b/src/features/travel/store.ts
+@@ -0,0 +1,164 @@
++import { defineStore } from 'pinia'
++import { computed, ref } from 'vue'
++
++import { buildSeededRng } from '@core/dice/roll'
++import type { CampaignId } from '@core/ids'
++import type { CalendarDay, CalendarShape } from '@core/lib/inworld-calendar'
++import { getStore } from '@core/persistence/storage'
++import {
++  type JourneyLeg,
++  type JourneyParty,
++  type JourneyReport,
++  planJourney,
++  routeCost,
++} from '@core/rules/journey'
++import type { Climate, Season, TravelPace } from '@core/rules/weather'
++
++const STORAGE_KEY = 'travel:routes:v1'
++
++export interface StoredRoute {
++  legs: JourneyLeg[]
++  party: JourneyParty
++  start: CalendarDay
++  calendar: CalendarShape
++  seed: number
++}
++
++interface SerialState {
++  byCampaign: Record<string, StoredRoute>
++}
++
++export function emptyRoute(): StoredRoute {
++  return {
++    legs: [],
++    party: { size: 4, milesPerDay: 24, rations: 40, exhaustion: 0 },
++    start: { year: 1, month: 1, day: 1 },
++    calendar: { monthsPerYear: 12, daysPerMonth: 30 },
++    seed: 1,
++  }
++}
++
++function newLeg(): JourneyLeg {
++  return {
++    name: 'New leg',
++    miles: 30,
++    costPerMile: 1,
++    climate: 'temperate',
++    season: 'autumn',
++    pace: 'normal',
++  }
++}
++
++function load(): SerialState {
++  const raw = getStore().get(STORAGE_KEY)
++  if (!raw) return { byCampaign: {} }
++  try {
++    const parsed = JSON.parse(raw) as SerialState
++    if (parsed && parsed.byCampaign) return parsed
++  } catch {
++    return { byCampaign: {} }
++  }
++  return { byCampaign: {} }
++}
++
++function persist(state: SerialState): void {
++  getStore().set(STORAGE_KEY, JSON.stringify(state))
++}
++
++export const useTravelStore = defineStore('travel', () => {
++  const state = ref<SerialState>(load())
++
++  function routeFor(id: CampaignId): StoredRoute {
++    return state.value.byCampaign[id] ?? emptyRoute()
++  }
++
++  function setRoute(id: CampaignId, route: StoredRoute): void {
++    state.value = { byCampaign: { ...state.value.byCampaign, [id]: route } }
++    persist(state.value)
++  }
++
++  function addLeg(id: CampaignId, leg: Partial<JourneyLeg> = {}): JourneyLeg {
++    const route = routeFor(id)
++    const added: JourneyLeg = { ...newLeg(), ...leg }
++    setRoute(id, { ...route, legs: [...route.legs, added] })
++    return added
++  }
++
++  function updateLeg(id: CampaignId, index: number, patch: Partial<JourneyLeg>): void {
++    const route = routeFor(id)
++    if (index < 0 || index >= route.legs.length) return
++    const legs = route.legs.map((leg, i) => (i === index ? { ...leg, ...patch } : leg))
++    setRoute(id, { ...route, legs })
++  }
++
++  function removeLeg(id: CampaignId, index: number): void {
++    const route = routeFor(id)
++    if (index < 0 || index >= route.legs.length) return
++    setRoute(id, { ...route, legs: route.legs.filter((_, i) => i !== index) })
++  }
++
++  function setParty(id: CampaignId, patch: Partial<JourneyParty>): void {
++    const route = routeFor(id)
++    setRoute(id, { ...route, party: { ...route.party, ...patch } })
++  }
++
++  function setSeed(id: CampaignId, seed: number): void {
++    setRoute(id, { ...routeFor(id), seed: Math.max(0, Math.floor(seed)) })
++  }
++
++  function reroll(id: CampaignId): void {
++    setSeed(id, Math.floor(Math.random() * 1_000_000))
++  }
++
++  function setStart(id: CampaignId, start: CalendarDay): void {
++    setRoute(id, { ...routeFor(id), start })
++  }
++
++  function walk(id: CampaignId): JourneyReport {
++    const route = routeFor(id)
++    return planJourney({
++      legs: route.legs,
++      party: route.party,
++      start: route.start,
++      calendar: route.calendar,
++      rng: buildSeededRng(route.seed),
++    })
++  }
++
++  function cost(id: CampaignId): number {
++    return routeCost(routeFor(id).legs)
++  }
++
++  function clear(id: CampaignId): void {
++    const next = { byCampaign: { ...state.value.byCampaign } }
++    delete next.byCampaign[id]
++    state.value = next
++    persist(state.value)
++  }
++
++  const routedCampaigns = computed(() => Object.keys(state.value.byCampaign))
++
++  function $reset(): void {
++    state.value = { byCampaign: {} }
++    persist(state.value)
++  }
++
++  return {
++    routedCampaigns,
++    routeFor,
++    setRoute,
++    addLeg,
++    updateLeg,
++    removeLeg,
++    setParty,
++    setSeed,
++    setStart,
++    reroll,
++    walk,
++    cost,
++    clear,
++    $reset,
++  }
++})
++
++export type { Climate, Season, TravelPace }

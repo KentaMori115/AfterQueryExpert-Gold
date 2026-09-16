@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/suspension-serving"
+
+[metadata]
+task_id = "suspension-serving"
+display_title = "Serve bans over played games and read who may not play"
+display_description = "Discipline prices cards but never works out which games a suspended player sat out. Add a serving ledger per player, a matchday eligibility reading per fixture, and make the record standing follow what is still outstanding."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/5I1rE8Y77wrdN5fMGbYP"
+base_commit_hash = "dcb5ed4892e0875ce4929893411d2eb565c6c567"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-touchline-league-api-5i1re8:v8"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

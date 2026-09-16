@@ -1,0 +1,55 @@
+{
+  "name": "sheave",
+  "version": "0.5.0",
+  "description": "Colliery winding arithmetic: the rope that has to lift itself before it lifts anything, the drum it coils on, the cycle it works to, and the depth at which all three run out",
+  "license": "MIT",
+  "author": "Redacted Author",
+  "keywords": [
+    "winding",
+    "colliery",
+    "wire-rope",
+    "hoist",
+    "koepe",
+    "mining"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "sheave": "./dist/cli/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "types": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "watch": "vitest",
+    "cli": "node --experimental-strip-types src/cli/main.ts",
+    "check": "npm run types && npm test && npm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/redacted-owner/sheave.git"
+  },
+  "bugs": {
+    "url": "https://github.com/redacted-owner/sheave/issues"
+  },
+  "homepage": "https://github.com/redacted-owner/sheave#readme"
+}

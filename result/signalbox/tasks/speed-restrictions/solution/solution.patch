@@ -1,0 +1,1062 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ff216eb..1514cfd 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,8 @@ The release that made the thing usable by somebody who did not write it.
+ 
+ ### The plan
+ 
++- Temporary speed restrictions, and the braking they impose on the approach.
++- Signal spacing and headway worked at the speeds a slack actually permits.
+ - Slips, single and double, called by the interlocking the way points are.
+ - A formatter, so a plan comes out the same shape whoever edited it.
+ - The offending line printed under an error, with a mark under it.
+@@ -27,7 +29,7 @@ The release that made the thing usable by somebody who did not write it.
+ 
+ ### Checking it
+ 
+-- Fifty four rules, each with a written explanation, generated into
++- Fifty five rules, each with a written explanation, generated into
+   `docs/rules.md` so it cannot go stale.
+ - Waivers, `--strict`, `--since` and JSON findings, which is everything a build
+   needs to say what is new.
+diff --git a/docs/design.md b/docs/design.md
+index 0562d91..d3bf7d2 100644
+--- a/docs/design.md
++++ b/docs/design.md
+@@ -28,6 +28,12 @@ only place that knows what a scheme plan looks like.
+ has one way of walking, in `topology.traverse`, and everything that walks the
+ graph uses it. Nothing here knows what a signal is.
+ 
++Speed restrictions sit across two of these. What a slack covers is a question
++about the graph, so the extent is worked out when the scheme is built and the
++permissible speed at a place is asked of the scheme itself. What it costs a
++train is a question about braking, so the approach and its warning board live
++in `signalling.restriction` with everything else that knows what a train does.
++
+ `signalling` is where the interlocking is worked out. Routes are found by
+ walking forward from each signal, overlaps beyond each exit signal, flanks by
+ walking back from the ends a route does not use, and locking from the sub routes
+diff --git a/docs/language.md b/docs/language.md
+index 1b55662..6aa5442 100644
+--- a/docs/language.md
++++ b/docs/language.md
+@@ -137,6 +137,44 @@ trap TP1 on E1 at 800 facing backward
+ Crossings take `type mcb`, `mcb_od`, `ahb`, `uwc` or `open`. A trap catches a
+ movement running the way it faces.
+ 
++## Temporary speed restrictions
++
++```sbx
++node A boundary
++node B boundary
++edge E1 from A to B length 1200 speed 90 direction down
++section TA over E1
++
++restriction TSR1 on E1 at 400 for 500 speed 20 reason "renewals"
++```
++
++A restriction starts where it says and runs the length it says, over as many
++pieces of track as that takes, following the road the points lie for. `at` is
++metres from the start of the named edge, `for` is how long the slack is, and
++`speed` is the mph a train may do inside it. Anything written after the speed is
++kept as an attribute, so a slack can carry the reason it is there. Where two
++restrictions cover the same metre of track the slower one governs, and an
++extent that runs out of track stops there.
++
++Both ends are marks on the ground rather than boundaries of a range: a slack
++written `at 400 for 500` covers the 400 metre mark, the 900 metre mark, and
++everything in between. Two of them may meet at a mark without a metre of line
++speed between them.
++
++Trains have to be brought down to it. The braking run is worked back from the
++first metre of the restriction, from the line speed of the track it sits on,
++using the scheme's braking rate and reaction time and the gradients a train
++meets on the way, and the `restriction-room` rule reports a slack the scheme
++has no room to brake for.
++
++The rest of the toolkit reads the restricted speeds rather than the line speed
++wherever the answer depends on how fast a train is going. Signal spacing is
++checked at the fastest speed a train may be doing over a route, which only
++drops where a slack covers the whole of a piece of track. Headway is worked at
++the slowest speed anywhere in the block, since one slow stretch decides the run
++time over all of it. A driver in a simulation keeps to whatever is permitted
++where the front of the train is standing.
++
+ ## Splitting a plan up
+ 
+ ```sbx
+diff --git a/docs/rules.md b/docs/rules.md
+index 9b3f069..b0eded6 100644
+--- a/docs/rules.md
++++ b/docs/rules.md
+@@ -40,6 +40,7 @@ it fires. This file is generated from the rules themselves by
+ | `points-lock` | error | facing points are locked |
+ | `points-slow` | advice | points throw quickly enough |
+ | `points-unused` | advice | every set of points is used by something |
++| `restriction-room` | error | there is room to brake for a restriction |
+ | `reversible-direction` | error | one way track is not signalled against itself |
+ | `reversible-unused` | advice | bidirectional track is used both ways |
+ | `route-duplicate` | warning | no two routes are the same route twice |
+@@ -333,6 +334,14 @@ Nothing runs over these points, holds them, or calls them for flank.
+ 
+ **What to do:** Usually a leftover from an earlier stage of the drawing.
+ 
++## restriction-room
++
++*error: there is room to brake for a restriction*
++
++A train cannot be brought down to this restriction inside the scheme. The braking wanted, from line speed on the gradients the train meets, is longer than the track behind it.
++
++**What to do:** Move the restriction, raise the speed it is written at, or take the approach into the scheme next door and agree the warning board with whoever signals it.
++
+ ## reversible-direction
+ 
+ *error: one way track is not signalled against itself*
+diff --git a/src/signalbox/cli/commands/restrictions.py b/src/signalbox/cli/commands/restrictions.py
+new file mode 100644
+index 0000000..926ded3
+--- /dev/null
++++ b/src/signalbox/cli/commands/restrictions.py
+@@ -0,0 +1,80 @@
++"""The restrictions command: what is slacked, and where the boards go."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import typer
++
++from ...signalling.restriction import approach_for
++from ..common import EXIT_FINDINGS, EXIT_OK, console, grid, load
++
++
++def restrictions(
++    plan: Path = typer.Argument(..., help="the scheme plan to read"),
++    boards: bool = typer.Option(
++        False, "--boards", help="print the warning boards on their own"
++    ),
++) -> None:
++    """List the temporary speed restrictions and the braking each one needs."""
++    scheme = load(plan)
++    if not scheme.restrictions:
++        console.print("nothing is restricted")
++        raise typer.Exit(EXIT_OK)
++
++    rows = []
++    short = 0
++    for name in sorted(scheme.restrictions):
++        restriction = scheme.restriction(name)
++        approach = approach_for(scheme, restriction)
++        if not approach.has_room:
++            short += 1
++        where = str(approach.board) if approach.board is not None else "no room"
++        rows.append(
++            [
++                name,
++                restriction.edge,
++                f"{restriction.offset.metres:.0f}m",
++                f"{restriction.covered.metres:.0f}m",
++                str(restriction.speed),
++                ", ".join(restriction.edges),
++                f"{approach.distance.metres:.0f}m",
++                where,
++                restriction.reason,
++            ]
++        )
++
++    if boards:
++        console.print(
++            grid(
++                f"warning boards in {plan.name}",
++                ["restriction", "speed", "braking", "board"],
++                [[row[0], row[4], row[6], row[7]] for row in rows],
++            )
++        )
++    else:
++        console.print(
++            grid(
++                f"restrictions in {plan.name}",
++                [
++                    "name",
++                    "edge",
++                    "at",
++                    "length",
++                    "speed",
++                    "over",
++                    "braking",
++                    "board",
++                    "reason",
++                ],
++                rows,
++            )
++        )
++
++    if short:
++        console.print(f"{short} of {len(rows)} have no room to brake")
++        raise typer.Exit(EXIT_FINDINGS)
++
++
++def register(app: typer.Typer) -> None:
++    app.command()(restrictions)
+diff --git a/src/signalbox/cli/main.py b/src/signalbox/cli/main.py
+index f98c672..9820bc9 100644
+--- a/src/signalbox/cli/main.py
++++ b/src/signalbox/cli/main.py
+@@ -35,6 +35,7 @@ from .commands import (
+     panel,
+     points,
+     report,
++    restrictions,
+     route,
+     routes,
+     rules,
+@@ -127,5 +128,6 @@ for module in (
+     rules,
+     route,
+     setting,
++    restrictions,
+ ):
+     module.register(app)
+diff --git a/src/signalbox/layout/ast.py b/src/signalbox/layout/ast.py
+index 7a706ef..5016756 100644
+--- a/src/signalbox/layout/ast.py
++++ b/src/signalbox/layout/ast.py
+@@ -172,6 +172,24 @@ class TrapDecl:
+     attributes: dict[str, str] = field(default_factory=dict)
+ 
+ 
++@dataclass
++class RestrictionDecl:
++    """A temporary speed restriction, written where it starts and how long it is.
++
++    A slack is handed over as a place and a length, not as a pair of offsets,
++    because it rarely stops where a piece of track does. Whether it runs over
++    one edge or five is a question for the graph, not for the plan.
++    """
++
++    name: str
++    edge: str
++    offset_metres: float
++    length_metres: float
++    speed_mph: float
++    line: int = 0
++    attributes: dict[str, str] = field(default_factory=dict)
++
++
+ @dataclass
+ class SchemeDecl:
+     """Everything a plan file declares, in the order it was written."""
+@@ -186,6 +204,7 @@ class SchemeDecl:
+     signals: list[SignalDecl] = field(default_factory=list)
+     crossings: list[CrossingDecl] = field(default_factory=list)
+     traps: list[TrapDecl] = field(default_factory=list)
++    restrictions: list[RestrictionDecl] = field(default_factory=list)
+     includes: list[str] = field(default_factory=list)
+     standards: dict[str, float] = field(default_factory=dict)
+ 
+@@ -219,6 +238,12 @@ class SchemeDecl:
+                 return decl
+         return None
+ 
++    def restriction(self, name: str) -> RestrictionDecl | None:
++        for decl in self.restrictions:
++            if decl.name == name:
++                return decl
++        return None
++
+     def merge(self, other: SchemeDecl) -> None:
+         """Take everything another plan declares into this one.
+ 
+@@ -236,6 +261,7 @@ class SchemeDecl:
+         self.signals.extend(other.signals)
+         self.crossings.extend(other.crossings)
+         self.traps.extend(other.traps)
++        self.restrictions.extend(other.restrictions)
+         for name, value in other.standards.items():
+             self.standards.setdefault(name, value)
+ 
+diff --git a/src/signalbox/layout/format.py b/src/signalbox/layout/format.py
+index 6e76898..0cdb89e 100644
+--- a/src/signalbox/layout/format.py
++++ b/src/signalbox/layout/format.py
+@@ -17,6 +17,7 @@ from .ast import (
+     EdgeDecl,
+     Facing,
+     NodeDecl,
++    RestrictionDecl,
+     SchemeDecl,
+     SectionDecl,
+     SectionKind,
+@@ -106,6 +107,15 @@ def format_trap(decl: TrapDecl, width: int = 0) -> str:
+     return line + _attributes(decl.attributes)
+ 
+ 
++def format_restriction(decl: RestrictionDecl, width: int = 0) -> str:
++    line = (
++        f"restriction {decl.name.ljust(width)} on {decl.edge} "
++        f"at {_number(decl.offset_metres)} for {_number(decl.length_metres)} "
++        f"speed {_number(decl.speed_mph)}"
++    )
++    return line + _attributes(decl.attributes)
++
++
+ def _width(names: list[str]) -> int:
+     return max((len(name) for name in names), default=0)
+ 
+@@ -137,6 +147,10 @@ def format_scheme(scheme: SchemeDecl) -> str:
+         width = _width([decl.name for decl in scheme.traps])
+         blocks.append([format_trap(decl, width) for decl in scheme.traps])
+ 
++    if scheme.restrictions:
++        width = _width([decl.name for decl in scheme.restrictions])
++        blocks.append([format_restriction(decl, width) for decl in scheme.restrictions])
++
+     if not blocks:
+         return ""
+     return "\n\n".join("\n".join(block) for block in blocks) + "\n"
+diff --git a/src/signalbox/layout/parser.py b/src/signalbox/layout/parser.py
+index 4010ac2..f542df6 100644
+--- a/src/signalbox/layout/parser.py
++++ b/src/signalbox/layout/parser.py
+@@ -33,6 +33,7 @@ from .ast import (
+     Facing,
+     NodeDecl,
+     NodeKind,
++    RestrictionDecl,
+     SchemeDecl,
+     SectionDecl,
+     SectionKind,
+@@ -128,6 +129,7 @@ class Parser:
+             "signal": self.signal_decl,
+             "crossing": self.crossing_decl,
+             "trap": self.trap_decl,
++            "restriction": self.restriction_decl,
+             "include": self.include_decl,
+             "standards": self.standards_block,
+         }.get(token.text)
+@@ -342,6 +344,25 @@ class Parser:
+         self.end_of_line()
+         self.scheme.traps.append(TrapDecl(name, edge, offset, facing, line, attributes))
+ 
++    def restriction_decl(self) -> None:
++        line = self.current.line
++        self.expect(Kind.IDENT, "restriction")
++        name = self.ident()
++        self.expect(Kind.IDENT, "on")
++        edge = self.ident()
++        self.expect(Kind.IDENT, "at")
++        offset = self.number()
++        self.expect(Kind.IDENT, "for")
++        length = self.number()
++        self.expect(Kind.IDENT, "speed")
++        speed = self.number()
++
++        attributes = self.trailing_attributes(set())
++        self.end_of_line()
++        self.scheme.restrictions.append(
++            RestrictionDecl(name, edge, offset, length, speed, line, attributes)
++        )
++
+     def trailing_attributes(self, known: set[str]) -> dict[str, str]:
+         attributes: dict[str, str] = {}
+         while self.at(Kind.IDENT):
+diff --git a/src/signalbox/layout/validate.py b/src/signalbox/layout/validate.py
+index c62c218..832bed8 100644
+--- a/src/signalbox/layout/validate.py
++++ b/src/signalbox/layout/validate.py
+@@ -53,6 +53,7 @@ def validate(scheme: SchemeDecl) -> None:
+     _check_directions(scheme)
+     _check_crossings(scheme)
+     _check_traps(scheme)
++    _check_restrictions(scheme)
+ 
+ 
+ def _fail(error: type[LayoutError], scheme: SchemeDecl, line: int, message: str) -> LayoutError:
+@@ -68,6 +69,7 @@ def _check_unique_names(scheme: SchemeDecl) -> None:
+         ("signal", scheme.signals),
+         ("crossing", scheme.crossings),
+         ("trap", scheme.traps),
++        ("restriction", scheme.restrictions),
+     ):
+         for decl in declarations:
+             if decl.name in seen:
+@@ -260,6 +262,43 @@ def _check_traps(scheme: SchemeDecl) -> None:
+             )
+ 
+ 
++def _check_restrictions(scheme: SchemeDecl) -> None:
++    """A slack has to sit on track that exists, and cover some of it."""
++    for restriction in scheme.restrictions:
++        edge = scheme.edge(restriction.edge)
++        if edge is None:
++            raise _fail(
++                UnknownReferenceError,
++                scheme,
++                restriction.line,
++                f"restriction {restriction.name} is on unknown edge {restriction.edge}",
++            )
++        if restriction.length_metres <= 0.0:
++            raise _fail(
++                LayoutError,
++                scheme,
++                restriction.line,
++                f"restriction {restriction.name} is {restriction.length_metres}m long, "
++                "which covers no track",
++            )
++        if not 0.0 <= restriction.offset_metres <= edge.length_metres:
++            raise _fail(
++                LayoutError,
++                scheme,
++                restriction.line,
++                f"restriction {restriction.name} starts {restriction.offset_metres}m "
++                f"along edge {edge.name} which is only {edge.length_metres}m long",
++            )
++        if restriction.speed_mph <= 0.0:
++            raise _fail(
++                LayoutError,
++                scheme,
++                restriction.line,
++                f"restriction {restriction.name} is at {restriction.speed_mph} mph, "
++                "which is not a speed a train can be given",
++            )
++
++
+ def _check_directions(scheme: SchemeDecl) -> None:
+     """A signal may not point against the only direction its track is worked in."""
+     for signal in scheme.signals:
+diff --git a/src/signalbox/signalling/braking.py b/src/signalbox/signalling/braking.py
+index f3538f1..836301a 100644
+--- a/src/signalbox/signalling/braking.py
++++ b/src/signalbox/signalling/braking.py
+@@ -50,8 +50,18 @@ class BrakingModel:
+ 
+     def stopping_distance(self, speed: Speed, gradient: Gradient = LEVEL) -> Distance:
+         """Reaction distance plus braking distance from ``speed`` to a stand."""
++        return self.distance_to_slow(speed, Speed(0.0), gradient)
++
++    def distance_to_slow(self, speed: Speed, to: Speed, gradient: Gradient = LEVEL) -> Distance:
++        """Reaction distance plus the braking to come down to ``to``.
++
++        Stopping is the case where the lower speed is zero, and a train already
++        doing the lower speed has nothing to do.
++        """
++        if to.mps >= speed.mps:
++            return Distance(0.0)
+         reaction = speed.mps * self.reaction
+-        braking = (speed.mps**2) / (2.0 * self.effective_rate(gradient))
++        braking = (speed.mps**2 - to.mps**2) / (2.0 * self.effective_rate(gradient))
+         return Distance(reaction + braking)
+ 
+     def speed_after(self, speed: Speed, over: Distance, gradient: Gradient = LEVEL) -> Speed:
+@@ -60,6 +70,22 @@ class BrakingModel:
+         squared = speed.mps**2 - 2.0 * rate * max(over.metres, 0.0)
+         return Speed(squared**0.5) if squared > 0 else Speed(0.0)
+ 
++    def speed_before(self, speed: Speed, over: Distance, gradient: Gradient = LEVEL) -> Speed:
++        """The speed a train must have been doing ``over`` back to be at ``speed`` now.
++
++        The inverse of :meth:`speed_after`, which is what working a braking run
++        backwards from where it has to end needs.
++        """
++        rate = self.effective_rate(gradient)
++        return Speed((speed.mps**2 + 2.0 * rate * max(over.metres, 0.0)) ** 0.5)
++
++    def distance_from(self, speed: Speed, to: Speed, gradient: Gradient = LEVEL) -> Distance:
++        """How much of one stretch it takes to brake from ``speed`` down to ``to``."""
++        if to.mps >= speed.mps:
++            return Distance(0.0)
++        rate = self.effective_rate(gradient)
++        return Distance((speed.mps**2 - to.mps**2) / (2.0 * rate))
++
+     def time_to_stop(self, speed: Speed, gradient: Gradient = LEVEL) -> float:
+         return self.reaction + speed.mps / self.effective_rate(gradient)
+ 
+diff --git a/src/signalbox/signalling/headway.py b/src/signalbox/signalling/headway.py
+index 14b5e8c..795aa6c 100644
+--- a/src/signalbox/signalling/headway.py
++++ b/src/signalbox/signalling/headway.py
+@@ -81,7 +81,13 @@ def legs(
+ 
+ 
+ def _slowest(scheme: Scheme, edges: tuple[str, ...]) -> Speed | None:
+-    speeds = [scheme.graph.edge(name).speed for name in edges]
++    """The slowest a train is held to anywhere over a run of track.
++
++    A restriction anywhere in a block decides the run time over the whole of
++    it, which is why the service a scheme carries drops the moment a slack goes
++    on and comes back when it comes off.
++    """
++    speeds = [scheme.slowest_on(name) for name in edges]
+     known = [speed for speed in speeds if speed is not None]
+     return min(known, key=lambda s: s.mps) if known else None
+ 
+diff --git a/src/signalbox/signalling/restriction.py b/src/signalbox/signalling/restriction.py
+new file mode 100644
+index 0000000..0a2c9e0
+--- /dev/null
++++ b/src/signalbox/signalling/restriction.py
+@@ -0,0 +1,351 @@
++"""Temporary speed restrictions, what they cover, and the braking they impose.
++
++A slack is a piece of track worth less than the line speed for as long as
++somebody says so. It is written in the plan as a place and a length, and the
++length is what makes it awkward: a restriction rarely stops where a piece of
++track does, so working out what it actually covers means walking the graph from
++where it starts until the length is used up or the track runs out.
++
++Two things follow from one. A train may not exceed the restricted speed
++anywhere inside the extent, and a train has to be brought down to it before the
++first metre of it, which needs a warning board far enough back for the braking
++to be done at the rate the scheme is drawn to.
++
++How far back is not one number. Braking distance depends on the gradient of the
++track a train brakes over, and a run of any length is over several gradients, so
++the answer is worked backwards a stretch at a time: at the far end of each piece
++of track the train has to be doing whatever leaves it at the right speed by the
++near end, and the braking begins wherever that reaches line speed.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass, field
++from itertools import pairwise
++from typing import TYPE_CHECKING
++
++from ..layout.ast import RestrictionDecl
++from ..topology.graph import Sense, TrackGraph
++from ..topology.position import Position, advance
++from ..topology.traverse import walk
++from ..units import Distance, Gradient, Speed
++from .braking import BrakingModel
++
++if TYPE_CHECKING:  # pragma: no cover
++    from ..topology.scheme import Scheme
++
++#: How far back to look for room to brake before giving up on a restriction.
++APPROACH_SEARCH = Distance(6000.0)
++
++
++@dataclass(frozen=True)
++class Piece:
++    """The part of one edge a restriction covers, in that edge's own metres."""
++
++    edge: str
++    start: Distance
++    end: Distance
++
++    @property
++    def length(self) -> Distance:
++        return Distance(self.end.metres - self.start.metres)
++
++    def holds(self, edge: str, offset: Distance) -> bool:
++        if edge != self.edge:
++            return False
++        return self.start.metres <= offset.metres <= self.end.metres
++
++    def whole_of(self, length: Distance) -> bool:
++        """Whether this piece is the whole of an edge that long."""
++        return self.start.metres <= 0.0 and self.end.metres >= length.metres
++
++    def __str__(self) -> str:
++        return f"{self.edge} {self.start.metres:.0f}m to {self.end.metres:.0f}m"
++
++
++@dataclass(frozen=True)
++class Restriction:
++    """One temporary speed restriction, and the track it turned out to cover."""
++
++    name: str
++    edge: str
++    offset: Distance
++    length: Distance
++    speed: Speed
++    pieces: tuple[Piece, ...] = ()
++    attributes: dict[str, str] = field(default_factory=dict)
++
++    @property
++    def reason(self) -> str:
++        return self.attributes.get("reason", "")
++
++    @property
++    def edges(self) -> tuple[str, ...]:
++        return tuple(piece.edge for piece in self.pieces)
++
++    @property
++    def covered(self) -> Distance:
++        """How much track the extent actually reached, which is less where it ran out."""
++        return Distance(sum(piece.length.metres for piece in self.pieces))
++
++    @property
++    def truncated(self) -> bool:
++        return self.covered.metres + 1e-9 < self.length.metres
++
++    def covers(self, edge: str, offset: Distance) -> bool:
++        """Whether a place on the layout is inside the restricted stretch."""
++        return any(piece.holds(edge, offset) for piece in self.pieces)
++
++    def entry(self) -> Position:
++        """Where a train running the way the edge is drawn meets the slack."""
++        return Position(self.edge, self.offset, Sense.NOMINAL)
++
++    def __str__(self) -> str:
++        return (
++            f"{self.name}: {self.edge} at {self.offset.metres:.0f}m for "
++            f"{self.length.metres:.0f}m at {self.speed}"
++        )
++
++
++def extent(
++    graph: TrackGraph, edge: str, offset: Distance, length: Distance
++) -> tuple[Piece, ...]:
++    """The pieces of track a restriction covers, in the order a train meets them.
++
++    The walk runs the way the first edge is drawn, over as much track as the
++    length asks for, following the points as they lie normal. Where the track
++    runs out first the extent stops there.
++    """
++    pieces: list[Piece] = []
++    start = Position(edge, offset, Sense.NOMINAL)
++
++    for step in walk(graph, start, limit=length):
++        left = length.metres - step.travelled.metres
++        if left <= 0.0:
++            break
++        here = step.position
++        reach = min(here.remaining(graph).metres, left)
++        if reach <= 0.0:
++            continue
++        if here.sense is Sense.NOMINAL:
++            piece = Piece(here.edge, here.offset, Distance(here.offset.metres + reach))
++        else:
++            piece = Piece(here.edge, Distance(here.offset.metres - reach), here.offset)
++        pieces.append(piece)
++
++    return tuple(pieces)
++
++
++def restriction_from(decl: RestrictionDecl, graph: TrackGraph) -> Restriction:
++    """Read a restriction off its declaration and work out what it covers."""
++    offset = Distance(decl.offset_metres)
++    length = Distance(decl.length_metres)
++    return Restriction(
++        name=decl.name,
++        edge=decl.edge,
++        offset=offset,
++        length=length,
++        speed=Speed.from_mph(decl.speed_mph),
++        pieces=extent(graph, decl.edge, offset, length),
++        attributes=dict(decl.attributes),
++    )
++
++
++def over(
++    restrictions: dict[str, Restriction], edge: str, offset: Distance
++) -> list[Restriction]:
++    """Every restriction covering one place, slowest first then by name."""
++    found = [r for r in restrictions.values() if r.covers(edge, offset)]
++    return sorted(found, key=lambda r: (r.speed.mps, r.name))
++
++
++def restricted_speed(
++    restrictions: dict[str, Restriction],
++    edge: str,
++    offset: Distance,
++    line: Speed | None = None,
++) -> Speed | None:
++    """The lowest of the line speed and every restriction over one place."""
++    speeds = [r.speed for r in over(restrictions, edge, offset)]
++    if line is not None:
++        speeds.append(line)
++    if not speeds:
++        return None
++    return min(speeds, key=lambda s: s.mps)
++
++
++def _cuts(restrictions: dict[str, Restriction], edge: str, length: Distance) -> list[float]:
++    """Where the permissible speed along one edge can change."""
++    marks = {0.0, length.metres}
++    for restriction in restrictions.values():
++        for piece in restriction.pieces:
++            if piece.edge != edge:
++                continue
++            marks.add(min(max(piece.start.metres, 0.0), length.metres))
++            marks.add(min(max(piece.end.metres, 0.0), length.metres))
++    return sorted(marks)
++
++
++def _along(
++    restrictions: dict[str, Restriction], edge: str, length: Distance, line: Speed | None
++) -> list[Speed]:
++    """The permissible speed of each stretch of one edge, in order."""
++    found: list[Speed] = []
++    for before, after in pairwise(_cuts(restrictions, edge, length)):
++        if after <= before:
++            continue
++        middle = Distance((before + after) / 2.0)
++        here = restricted_speed(restrictions, edge, middle, line)
++        if here is not None:
++            found.append(here)
++    return found
++
++
++def fastest_on(
++    restrictions: dict[str, Restriction],
++    edge: str,
++    length: Distance,
++    line: Speed | None,
++) -> Speed | None:
++    """The highest speed permitted anywhere along one edge.
++
++    A restriction over part of an edge leaves the rest of it at line speed, so
++    this only drops where the restrictions between them cover the whole of it.
++    """
++    stretches = _along(restrictions, edge, length, line)
++    if not stretches:
++        return line
++    return max(stretches, key=lambda s: s.mps)
++
++
++def slowest_on(
++    restrictions: dict[str, Restriction],
++    edge: str,
++    length: Distance,
++    line: Speed | None,
++) -> Speed | None:
++    """The lowest speed permitted anywhere along one edge."""
++    stretches = _along(restrictions, edge, length, line)
++    if not stretches:
++        return line
++    return min(stretches, key=lambda s: s.mps)
++
++
++@dataclass(frozen=True)
++class Approach:
++    """The braking run a train makes on its way into a restriction."""
++
++    restriction: str
++    from_speed: Speed
++    to_speed: Speed
++    distance: Distance
++    gradient: Gradient
++    board: Position | None = None
++
++    @property
++    def has_room(self) -> bool:
++        """Whether the scheme holds enough track in rear to do the braking."""
++        return self.board is not None
++
++    @property
++    def needed(self) -> bool:
++        """Whether the restriction asks a train to slow down at all."""
++        return self.to_speed.mps < self.from_speed.mps
++
++    def describe(self) -> str:
++        where = str(self.board) if self.board is not None else "off the end of the scheme"
++        return (
++            f"{self.from_speed} to {self.to_speed} in "
++            f"{self.distance.metres:.0f}m at {self.gradient}, board at {where}"
++        )
++
++    def __str__(self) -> str:
++        return f"{self.restriction}: {self.describe()}"
++
++
++def _met_by_a_train(edge_gradient: Gradient, walked: Sense) -> Gradient:
++    """The gradient a train meets, given the sense the walk back used.
++
++    Gradients are written for the down direction, so a train running against the
++    way an edge was drawn climbs where the edge falls. The walk goes the
++    opposite way to the train, which puts the train on the sense the step did
++    not use.
++    """
++    if walked is Sense.REVERSE or edge_gradient.one_in == float("inf"):
++        return edge_gradient
++    return Gradient(-edge_gradient.one_in)
++
++
++def _worse(first: Gradient, second: Gradient) -> Gradient:
++    """Of two gradients, the one that helps braking least."""
++    return second if second.per_mille < first.per_mille else first
++
++
++def approach_for(
++    scheme: Scheme,
++    restriction: Restriction,
++    *,
++    model: BrakingModel | None = None,
++    search: Distance = APPROACH_SEARCH,
++) -> Approach:
++    """Work out the braking run into ``restriction`` and where its board goes.
++
++    The braking is worked backwards from the first restricted metre over the
++    track a train actually runs on. At the far end of each stretch the train has
++    to be doing whatever leaves it at the right speed by the near end, which is
++    what the stretch's own gradient decides, and the run ends inside the stretch
++    where that speed reaches line speed. A reaction allowance at line speed goes
++    in rear of all that, and the board stands at the end of it.
++
++    Where the track behind runs out before the train is back at line speed there
++    is nowhere to put a board, and the approach says so.
++    """
++    graph = scheme.graph
++    model = model or BrakingModel(
++        rate=scheme.standards.braking, reaction=scheme.standards.reaction
++    )
++    line = graph.edge(restriction.edge).speed
++    entry = restriction.entry()
++
++    if line is None or line.mps <= restriction.speed.mps:
++        return Approach(
++            restriction=restriction.name,
++            from_speed=line or restriction.speed,
++            to_speed=restriction.speed,
++            distance=Distance(0.0),
++            gradient=Gradient.level(),
++            board=entry,
++        )
++
++    here = restriction.speed
++    worst = Gradient.level()
++    braking = 0.0
++
++    for step in walk(graph, entry.reversed, limit=search):
++        gradient = _met_by_a_train(graph.edge(step.edge).gradient, step.sense)
++        worst = _worse(worst, gradient)
++        stretch = step.remaining(graph)
++        reached = model.speed_before(here, stretch, gradient)
++        if reached.mps >= line.mps:
++            braking += model.distance_from(line, here, gradient).metres
++            wanted = Distance(braking + line.mps * model.reaction)
++            board = advance(graph, entry.reversed, wanted)
++            return Approach(
++                restriction=restriction.name,
++                from_speed=line,
++                to_speed=restriction.speed,
++                distance=wanted,
++                gradient=worst,
++                board=board.reversed if board is not None else None,
++            )
++        braking += stretch.metres
++        here = reached
++
++    return Approach(
++        restriction=restriction.name,
++        from_speed=line,
++        to_speed=restriction.speed,
++        distance=Distance(braking + line.mps * model.reaction),
++        gradient=worst,
++        board=None,
++    )
+diff --git a/src/signalbox/sim/world.py b/src/signalbox/sim/world.py
+index bda502e..efd9ac5 100644
+--- a/src/signalbox/sim/world.py
++++ b/src/signalbox/sim/world.py
+@@ -81,8 +81,13 @@ class World:
+         return Sighting(name, distance, self.machine.showing(name))
+ 
+     def line_speed(self, train: Train) -> Speed:
+-        edge = self.scheme.graph.edge(train.front.edge)
+-        limit = edge.speed or train.max_speed
++        """The fastest this train may be doing where its front is now.
++
++        Line speed, held down to any restriction over that place, and never
++        more than the train itself is good for.
++        """
++        permitted = self.scheme.permissible_speed(train.front.edge, train.front.offset)
++        limit = permitted or train.max_speed
+         return Speed(min(limit.mps, train.max_speed.mps))
+ 
+     # running ----------------------------------------------------------
+diff --git a/src/signalbox/topology/scheme.py b/src/signalbox/topology/scheme.py
+index be82172..927d55a 100644
+--- a/src/signalbox/topology/scheme.py
++++ b/src/signalbox/topology/scheme.py
+@@ -14,10 +14,17 @@ from ..layout.ast import CrossingDecl, Facing, NodeKind, SchemeDecl, SignalDecl
+ from ..layout.loader import load_path, load_text
+ from ..signalling.crossing import DEFAULT_STRIKE_IN, Crossing
+ from ..signalling.points import PointsMachine, machine_from
++from ..signalling.restriction import (
++    Restriction,
++    fastest_on,
++    restricted_speed,
++    restriction_from,
++    slowest_on,
++)
+ from ..signalling.signal import Signal, SignalType
+ from ..signalling.trap import Trap, trap_from
+ from ..standards import Standards
+-from ..units import Distance
++from ..units import Distance, Speed
+ from .graph import Sense, TrackGraph, build_graph
+ from .position import Position
+ from .section import SectionMap, build_sections
+@@ -47,6 +54,7 @@ class Scheme:
+     crossings: dict[str, Crossing] = field(default_factory=dict)
+     machines: dict[str, PointsMachine] = field(default_factory=dict)
+     traps: dict[str, Trap] = field(default_factory=dict)
++    restrictions: dict[str, Restriction] = field(default_factory=dict)
+     mileages: dict[str, Distance] = field(default_factory=dict)
+     standards: Standards = field(default_factory=Standards)
+     _by_edge: dict[str, list[Signal]] | None = field(default=None, repr=False, compare=False)
+@@ -77,6 +85,36 @@ class Scheme:
+         except KeyError:
+             raise InterlockingError(f"no crossing called {name}") from None
+ 
++    def restriction(self, name: str) -> Restriction:
++        try:
++            return self.restrictions[name]
++        except KeyError:
++            raise InterlockingError(f"no restriction called {name}") from None
++
++    def restrictions_on(self, edge: str) -> list[Restriction]:
++        """Every restriction whose extent reaches this piece of track."""
++        found = [r for r in self.restrictions.values() if edge in r.edges]
++        return sorted(found, key=lambda r: (r.speed.mps, r.name))
++
++    def permissible_speed(self, edge: str, offset: Distance) -> Speed | None:
++        """The fastest a train may run at one place on the layout.
++
++        Line speed, lowered by every restriction covering that place. Track
++        with no line speed of its own is worth whatever the restrictions on it
++        say, and nothing at all when there are none.
++        """
++        return restricted_speed(self.restrictions, edge, offset, self.graph.edge(edge).speed)
++
++    def fastest_on(self, edge: str) -> Speed | None:
++        """The fastest a train may run anywhere along one edge."""
++        track = self.graph.edge(edge)
++        return fastest_on(self.restrictions, edge, track.length, track.speed)
++
++    def slowest_on(self, edge: str) -> Speed | None:
++        """The slowest a train is held to anywhere along one edge."""
++        track = self.graph.edge(edge)
++        return slowest_on(self.restrictions, edge, track.length, track.speed)
++
+     def crossings_on(self, edge: str) -> list[Crossing]:
+         found = [c for c in self.crossings.values() if c.position.edge == edge]
+         return sorted(found, key=lambda c: c.position.offset.metres)
+@@ -161,6 +199,8 @@ def build_scheme(decl: SchemeDecl) -> Scheme:
+         signals[signal_decl.name] = _signal_from(signal_decl)
+     crossings = {c.name: _crossing_from(c) for c in decl.crossings}
+     traps = {t.name: trap_from(t) for t in decl.traps}
++    graph = build_graph(decl)
++    restrictions = {r.name: restriction_from(r, graph) for r in decl.restrictions}
+     mileages = {}
+     for edge in decl.edges:
+         written = edge.attributes.get("mileage")
+@@ -173,12 +213,13 @@ def build_scheme(decl: SchemeDecl) -> Scheme:
+     }
+     return Scheme(
+         name=decl.name,
+-        graph=build_graph(decl),
++        graph=graph,
+         sections=build_sections(decl),
+         signals=signals,
+         crossings=crossings,
+         machines=machines,
+         traps=traps,
++        restrictions=restrictions,
+         mileages=mileages,
+         standards=Standards.from_settings(decl.standards),
+         area=decl.area,
+diff --git a/src/signalbox/verify/checks/__init__.py b/src/signalbox/verify/checks/__init__.py
+index bc8c98f..9b90f98 100644
+--- a/src/signalbox/verify/checks/__init__.py
++++ b/src/signalbox/verify/checks/__init__.py
+@@ -17,6 +17,7 @@ from . import (
+     overlap,
+     points,
+     protection,
++    restriction,
+     reversible,
+     route,
+     setting,
+@@ -37,6 +38,7 @@ __all__ = [
+     "overlap",
+     "points",
+     "protection",
++    "restriction",
+     "reversible",
+     "route",
+     "setting",
+diff --git a/src/signalbox/verify/checks/restriction.py b/src/signalbox/verify/checks/restriction.py
+new file mode 100644
+index 0000000..86aaf45
+--- /dev/null
++++ b/src/signalbox/verify/checks/restriction.py
+@@ -0,0 +1,36 @@
++"""Temporary speed restrictions, and whether a train can be got down to one.
++
++A slack is only as good as its approach. Put one on a scheme and the braking
++that clears it has to happen on track that is inside the scheme, at the rate
++the scheme is drawn to, on the gradient the train is actually on. A restriction
++with less track behind it than that is one a driver cannot honour.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterator
++
++from ...signalling.restriction import approach_for
++from ..report import Finding, Severity
++from ..rules import Context, rule
++
++
++@rule("restriction-room", "there is room to brake for a restriction", Severity.ERROR)
++def restrictions_have_room_to_brake(context: Context) -> Iterator[Finding]:
++    scheme = context.scheme
++    for name in sorted(scheme.restrictions):
++        restriction = scheme.restriction(name)
++        approach = approach_for(scheme, restriction, model=context.braking)
++        if approach.has_room:
++            continue
++        yield Finding(
++            rule="restriction-room",
++            severity=Severity.ERROR,
++            subject=name,
++            message=(
++                f"{approach.distance.metres:.0f}m wanted to come from "
++                f"{approach.from_speed} to {approach.to_speed}, and the scheme "
++                f"runs out first"
++            ),
++            detail=f"braking worked at {approach.gradient}",
++        )
+diff --git a/src/signalbox/verify/checks/spacing.py b/src/signalbox/verify/checks/spacing.py
+index 5f87fcf..a73c33a 100644
+--- a/src/signalbox/verify/checks/spacing.py
++++ b/src/signalbox/verify/checks/spacing.py
+@@ -27,7 +27,12 @@ def _worst_gradient(scheme: Scheme, edges: tuple[str, ...]) -> Gradient:
+ 
+ 
+ def _line_speed(scheme: Scheme, edges: tuple[str, ...]) -> Speed | None:
+-    speeds = [scheme.graph.edge(name).speed for name in edges]
++    """The fastest a train may be doing anywhere over a run of track.
++
++    Line speed, except where a restriction covers the whole of a piece of it,
++    since a slack over part of an edge leaves the rest at line speed.
++    """
++    speeds = [scheme.fastest_on(name) for name in edges]
+     known = [speed for speed in speeds if speed is not None]
+     return max(known, key=lambda s: s.mps) if known else None
+ 
+diff --git a/src/signalbox/verify/guidance.py b/src/signalbox/verify/guidance.py
+index 2cf4fcb..b74fa49 100644
+--- a/src/signalbox/verify/guidance.py
++++ b/src/signalbox/verify/guidance.py
+@@ -243,6 +243,15 @@ GUIDANCE: dict[str, Guidance] = dict(
+             "This signal has no route, so it can never do anything but stop trains.",
+             "Check what is in front of it and which way it faces.",
+         ),
++        _g(
++            "restriction-room",
++            "A train cannot be brought down to this restriction inside the "
++            "scheme. The braking wanted, from line speed on the gradients the "
++            "train meets, is longer than the track behind it.",
++            "Move the restriction, raise the speed it is written at, or take "
++            "the approach into the scheme next door and agree the warning "
++            "board with whoever signals it.",
++        ),
+         _g(
+             "route-duplicate",
+             "The same move is signalled twice under two names.",

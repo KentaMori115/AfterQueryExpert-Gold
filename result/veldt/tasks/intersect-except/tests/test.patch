@@ -1,0 +1,766 @@
+diff --git a/tests/test_chain_folding.py b/tests/test_chain_folding.py
+new file mode 100644
+index 0000000..188dab8
+--- /dev/null
++++ b/tests/test_chain_folding.py
+@@ -0,0 +1,437 @@
++"""How a chain of set operations is folded, ordered and printed.
++
++A statement may carry several set operators in a row, and the answer depends
++entirely on which pairing is taken first. These cases pick data where the two
++pairings disagree, so a chain folded the wrong way round cannot slip past. The
++rest of the file covers what a chain publishes to the caller: the clauses
++written after its last select, the plan `EXPLAIN` renders, and the promise that
++neither the optimizer nor the batch size may move an answer.
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from veldt import Engine, PlanningError
++from veldt.execution.physical import create_physical_plan
++from veldt.plan.stats import estimate
++
++
++@pytest.fixture
++def sets() -> Engine:
++    """Three integer columns arranged so every pairing gives a different answer."""
++    engine = Engine()
++    engine.register_rows("one", [{"x": value} for value in [1, 2, 3]])
++    engine.register_rows("two", [{"x": value} for value in [2, 3, 4]])
++    engine.register_rows("three", [{"x": value} for value in [3, 4, 5]])
++    return engine
++
++
++def column(engine: Engine, sql: str, name: str = "x", **options):
++    """Run a statement and return one output column as a list."""
++    return engine.sql(sql, **options).column(name)
++
++
++class TestIntersectBindsTightest:
++    """An intersection is folded before the operators around it."""
++
++    def test_a_union_before_an_intersection(self, sets):
++        # one UNION (two INTERSECT three) is {1,2,3} plus {3,4}.
++        query = "SELECT x FROM one UNION SELECT x FROM two INTERSECT SELECT x FROM three"
++        assert sorted(column(sets, query)) == [1, 2, 3, 4]
++
++    def test_a_union_after_an_intersection(self, sets):
++        # (one INTERSECT two) UNION three is {2,3} plus {3,4,5}.
++        query = "SELECT x FROM one INTERSECT SELECT x FROM two UNION SELECT x FROM three"
++        assert sorted(column(sets, query)) == [2, 3, 4, 5]
++
++    def test_a_difference_before_an_intersection(self, sets):
++        # one EXCEPT (two INTERSECT three) is {1,2,3} less {3,4}.
++        query = "SELECT x FROM one EXCEPT SELECT x FROM two INTERSECT SELECT x FROM three"
++        assert column(sets, query) == [1, 2]
++
++    def test_a_difference_after_an_intersection(self, sets):
++        # (one INTERSECT two) EXCEPT three is {2,3} less {3,4,5}.
++        query = "SELECT x FROM one INTERSECT SELECT x FROM two EXCEPT SELECT x FROM three"
++        assert column(sets, query) == [2]
++
++    def test_two_intersections_still_narrow_step_by_step(self, sets):
++        query = (
++            "SELECT x FROM one INTERSECT SELECT x FROM two "
++            "INTERSECT SELECT x FROM three"
++        )
++        assert column(sets, query) == [3]
++
++    def test_an_intersection_between_two_unions(self, sets):
++        # one UNION (two INTERSECT three) UNION three.
++        query = (
++            "SELECT x FROM one UNION SELECT x FROM two "
++            "INTERSECT SELECT x FROM three UNION SELECT x FROM three"
++        )
++        assert sorted(column(sets, query)) == [1, 2, 3, 4, 5]
++
++
++class TestUnionAndExceptReadLeftToRight:
++    """The two level operators fold from the left, not from the right."""
++
++    def test_two_differences_in_a_row(self, sets):
++        # (one EXCEPT two) EXCEPT three is {1}; folded from the right it is {1,3}.
++        query = "SELECT x FROM one EXCEPT SELECT x FROM two EXCEPT SELECT x FROM three"
++        assert column(sets, query) == [1]
++
++    def test_a_union_then_a_difference(self, sets):
++        # (one UNION two) EXCEPT three is {1,2,3,4} less {3,4,5}.
++        query = "SELECT x FROM one UNION SELECT x FROM two EXCEPT SELECT x FROM three"
++        assert sorted(column(sets, query)) == [1, 2]
++
++    def test_a_difference_then_a_union(self, sets):
++        # (one EXCEPT two) UNION three is {1} plus {3,4,5}.
++        query = "SELECT x FROM one EXCEPT SELECT x FROM two UNION SELECT x FROM three"
++        assert sorted(column(sets, query)) == [1, 3, 4, 5]
++
++    def test_a_run_of_unions_agrees_whichever_way_it_folds(self, sets):
++        query = (
++            "SELECT x FROM one UNION SELECT x FROM two "
++            "UNION SELECT x FROM three UNION SELECT x FROM one"
++        )
++        assert sorted(column(sets, query)) == [1, 2, 3, 4, 5]
++        # The same run with a difference on the end folds from the left, so
++        # everything three carries goes.
++        with_tail = query + " EXCEPT SELECT x FROM three"
++        assert sorted(column(sets, with_tail)) == [1, 2]
++
++    def test_a_counted_difference_folds_from_the_left_too(self):
++        engine = Engine()
++        engine.register_rows("alpha", [{"x": "a"}, {"x": "a"}, {"x": "a"}])
++        engine.register_rows("beta", [{"x": "a"}])
++        engine.register_rows("gamma", [{"x": "a"}])
++        query = (
++            "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta "
++            "EXCEPT ALL SELECT x FROM gamma"
++        )
++        assert column(engine, query) == ["a"]
++
++    def test_all_applies_to_the_operator_it_was_written_on(self, sets):
++        query = "SELECT x FROM one UNION ALL SELECT x FROM two EXCEPT SELECT x FROM three"
++        # (one UNION ALL two) is [1,2,3,2,3,4]; the difference then dedupes.
++        assert column(sets, query) == [1, 2]
++
++
++class TestClausesAfterTheLastSelect:
++    """A trailing order or row count belongs to the whole chain."""
++
++    @pytest.fixture
++    def unsorted(self) -> Engine:
++        engine = Engine()
++        engine.register_rows("one", [{"x": value} for value in [3, 1, 2]])
++        engine.register_rows("two", [{"x": value} for value in [2, 5]])
++        return engine
++
++    def test_order_by_sorts_the_combined_result(self, unsorted):
++        query = "SELECT x FROM one UNION SELECT x FROM two ORDER BY x"
++        assert column(unsorted, query) == [1, 2, 3, 5]
++
++    def test_order_by_descending_reaches_across_both_branches(self, unsorted):
++        query = "SELECT x FROM one UNION SELECT x FROM two ORDER BY x DESC"
++        assert column(unsorted, query) == [5, 3, 2, 1]
++
++    def test_order_by_keys_on_the_combined_output_name(self, unsorted):
++        query = "SELECT x AS k FROM one UNION SELECT x FROM two ORDER BY k"
++        assert unsorted.sql(query).column("k") == [1, 2, 3, 5]
++
++    def test_limit_cuts_the_combined_result(self, unsorted):
++        query = "SELECT x FROM one UNION SELECT x FROM two ORDER BY x LIMIT 2"
++        assert column(unsorted, query) == [1, 2]
++
++    def test_offset_skips_from_the_combined_result(self, unsorted):
++        query = "SELECT x FROM one UNION SELECT x FROM two ORDER BY x LIMIT 2 OFFSET 2"
++        assert column(unsorted, query) == [3, 5]
++
++    def test_a_difference_can_be_ordered_the_same_way(self, unsorted):
++        query = "SELECT x FROM one EXCEPT SELECT x FROM two ORDER BY x"
++        assert column(unsorted, query) == [1, 3]
++
++    def test_an_expression_key_orders_the_combined_result(self, unsorted):
++        query = "SELECT x FROM one UNION SELECT x FROM two ORDER BY x * -1"
++        assert column(unsorted, query) == [5, 3, 2, 1]
++
++    def test_nulls_sort_smallest_across_the_chain(self, unsorted):
++        unsorted.register_rows("nul", [{"x": v} for v in [4, None]])
++        query = "SELECT x FROM nul UNION SELECT x FROM two ORDER BY x"
++        assert column(unsorted, query) == [None, 2, 4, 5]
++
++    def test_nulls_last_is_honoured_across_the_chain(self, unsorted):
++        unsorted.register_rows("nul", [{"x": v} for v in [4, None]])
++        query = "SELECT x FROM nul UNION SELECT x FROM two ORDER BY x NULLS LAST"
++        assert column(unsorted, query) == [2, 4, 5, None]
++
++    def test_a_descending_chain_puts_nulls_last(self, unsorted):
++        unsorted.register_rows("nul", [{"x": v} for v in [4, None]])
++        query = "SELECT x FROM nul UNION SELECT x FROM two ORDER BY x DESC"
++        assert column(unsorted, query) == [5, 4, 2, None]
++
++    def test_an_intersection_can_be_limited(self, unsorted):
++        engine = unsorted
++        engine.register_rows("two", [{"x": v} for v in [3, 2, 1]], replace=True)
++        query = "SELECT x FROM one INTERSECT SELECT x FROM two ORDER BY x LIMIT 1"
++        assert column(engine, query) == [1]
++
++    def test_a_limit_without_an_order_still_cuts_the_chain(self, unsorted):
++        query = "SELECT x FROM one UNION ALL SELECT x FROM two LIMIT 4"
++        assert column(unsorted, query) == [3, 1, 2, 2]
++
++    def test_the_tail_reaches_over_a_three_way_chain(self, unsorted):
++        engine = unsorted
++        engine.register_rows("three", [{"x": v} for v in [9, 7]])
++        query = (
++            "SELECT x FROM one UNION SELECT x FROM two "
++            "UNION SELECT x FROM three ORDER BY x DESC LIMIT 3"
++        )
++        assert column(engine, query) == [9, 7, 5]
++
++
++class TestExplainNaming:
++    """``EXPLAIN`` names the operation the way it names a union."""
++
++    def test_a_plain_intersection(self, sets):
++        text = sets.explain("SELECT x FROM one INTERSECT SELECT x FROM two")
++        assert "Intersect: distinct" in text
++
++    def test_a_counted_intersection(self, sets):
++        text = sets.explain("SELECT x FROM one INTERSECT ALL SELECT x FROM two")
++        assert "Intersect: all" in text
++
++    def test_a_plain_difference(self, sets):
++        text = sets.explain("SELECT x FROM one EXCEPT SELECT x FROM two")
++        assert "Except: distinct" in text
++
++    def test_a_counted_difference(self, sets):
++        text = sets.explain("SELECT x FROM one EXCEPT ALL SELECT x FROM two")
++        assert "Except: all" in text
++
++    def test_a_union_beside_them_keeps_its_own_name(self, sets):
++        text = sets.explain(
++            "SELECT x FROM one UNION ALL SELECT x FROM two "
++            "INTERSECT ALL SELECT x FROM three"
++        )
++        assert "Union: all" in text
++        assert "Intersect: all" in text
++
++    def test_a_chain_shows_both_operations(self, sets):
++        text = sets.explain(
++            "SELECT x FROM one INTERSECT SELECT x FROM two EXCEPT SELECT x FROM three"
++        )
++        assert "Intersect: distinct" in text
++        assert "Except: distinct" in text
++
++    def test_the_unoptimized_plan_names_them_too(self, sets):
++        text = sets.explain(
++            "SELECT x FROM one EXCEPT ALL SELECT x FROM two", optimized=False
++        )
++        assert "Except: all" in text
++
++
++QUERIES = {
++    "intersect": "SELECT x FROM one INTERSECT SELECT x FROM two",
++    "intersect_all": "SELECT x FROM one INTERSECT ALL SELECT x FROM two",
++    "except": "SELECT x FROM one EXCEPT SELECT x FROM two",
++    "except_all": "SELECT x FROM one EXCEPT ALL SELECT x FROM two",
++    "except_chain": (
++        "SELECT x FROM one EXCEPT SELECT x FROM two EXCEPT SELECT x FROM three"
++    ),
++    "mixed_chain": (
++        "SELECT x FROM one UNION SELECT x FROM two INTERSECT SELECT x FROM three"
++    ),
++    "filtered": (
++        "SELECT x FROM one WHERE x > 1 INTERSECT SELECT x FROM two WHERE x < 4"
++    ),
++}
++
++
++class TestOptimizerDoesNotMoveAnswers:
++    """Rewriting a plan may change its shape and never its rows."""
++
++    @pytest.mark.parametrize("query", QUERIES.values(), ids=list(QUERIES))
++    def test_the_same_rows_with_and_without_rewriting(self, sets, query):
++        plain = sets.with_config(optimize=False).sql(query).to_rows()
++        rewritten = sets.with_config(optimize=True).sql(query).to_rows()
++        assert plain == rewritten
++
++    def test_a_repeated_run_agrees_with_itself(self, sets):
++        query = "SELECT x FROM one EXCEPT ALL SELECT x FROM two"
++        assert sets.sql(query).to_rows() == sets.sql(query).to_rows()
++
++    def test_a_filtered_chain_keeps_its_rows(self, sets):
++        query = (
++            "SELECT x FROM one WHERE x <> 2 INTERSECT ALL "
++            "SELECT x FROM two WHERE x <> 4"
++        )
++        plain = sets.with_config(optimize=False).sql(query).to_rows()
++        assert plain == sets.sql(query).to_rows() == [(3,)]
++
++
++class TestBatchSizeDoesNotMoveAnswers:
++    """The tally has to span batches, so a one-row batch changes nothing."""
++
++    @pytest.fixture
++    def repeats(self) -> Engine:
++        engine = Engine()
++        engine.register_rows(
++            "one", [{"x": v} for v in ["a", "b", "a", "c", "a", None, None]]
++        )
++        engine.register_rows("two", [{"x": v} for v in ["a", "c", "c", None]])
++        return engine
++
++    @pytest.mark.parametrize("batch_size", [1, 2, 3, 1024])
++    def test_a_counted_difference_at_every_batch_size(self, repeats, batch_size):
++        query = "SELECT x FROM one EXCEPT ALL SELECT x FROM two"
++        assert column(repeats, query, batch_size=batch_size) == ["b", "a", "a", None]
++
++    @pytest.mark.parametrize("batch_size", [1, 2, 3, 1024])
++    def test_a_counted_intersection_at_every_batch_size(self, repeats, batch_size):
++        query = "SELECT x FROM one INTERSECT ALL SELECT x FROM two"
++        assert column(repeats, query, batch_size=batch_size) == ["a", "c", None]
++
++    @pytest.mark.parametrize("batch_size", [1, 2, 1024])
++    def test_a_plain_intersection_at_every_batch_size(self, repeats, batch_size):
++        query = "SELECT x FROM one INTERSECT SELECT x FROM two"
++        assert column(repeats, query, batch_size=batch_size) == ["a", "c", None]
++
++    @pytest.mark.parametrize("batch_size", [1, 2, 1024])
++    def test_a_plain_difference_at_every_batch_size(self, repeats, batch_size):
++        query = "SELECT x FROM one EXCEPT SELECT x FROM two"
++        assert column(repeats, query, batch_size=batch_size) == ["b"]
++
++
++class TestChainErrors:
++    """A width mismatch anywhere in a chain is a planning error."""
++
++    def test_a_mismatch_on_the_first_operator(self, sets):
++        with pytest.raises(PlanningError):
++            sets.sql(
++                "SELECT x, x FROM one INTERSECT SELECT x FROM two "
++                "UNION SELECT x FROM three"
++            )
++
++    def test_a_mismatch_on_the_last_operator(self, sets):
++        with pytest.raises(PlanningError):
++            sets.sql(
++                "SELECT x FROM one UNION SELECT x FROM two "
++                "INTERSECT SELECT x, x FROM three"
++            )
++
++
++class TestRowCountEstimates:
++    """``estimate`` bounds what a pairing can produce."""
++
++    @pytest.fixture
++    def counted(self) -> Engine:
++        engine = Engine()
++        engine.register_rows("four", [{"x": value} for value in [3, 1, 2, 1]])
++        engine.register_rows("three", [{"x": value} for value in [2, 5, 2]])
++        engine.register_rows("five", [{"x": value} for value in [1, 2, 3, 4, 5]])
++        engine.register_rows("single", [{"x": value} for value in [9]])
++        return engine
++
++    def rows_of(self, engine: Engine, sql: str):
++        """The estimated row count of a statement's unoptimized plan."""
++        return estimate(engine.plan(sql, optimize=False)).num_rows
++
++    def test_a_counted_intersection_takes_the_smaller_branch(self, counted):
++        query = "SELECT x FROM four INTERSECT ALL SELECT x FROM three"
++        assert self.rows_of(counted, query) == 3
++
++    def test_the_smaller_branch_can_be_the_left_one(self, counted):
++        query = "SELECT x FROM three INTERSECT ALL SELECT x FROM four"
++        assert self.rows_of(counted, query) == 3
++
++    def test_a_counted_difference_subtracts_the_right_branch(self, counted):
++        query = "SELECT x FROM four EXCEPT ALL SELECT x FROM three"
++        assert self.rows_of(counted, query) == 1
++
++    def test_a_counted_difference_floors_at_zero(self, counted):
++        query = "SELECT x FROM three EXCEPT ALL SELECT x FROM four"
++        assert self.rows_of(counted, query) == 0
++
++    def test_a_filtered_branch_narrows_the_bound(self, counted):
++        query = (
++            "SELECT x FROM four WHERE x > 1 INTERSECT ALL "
++            "SELECT x FROM three WHERE x > 1"
++        )
++        assert self.rows_of(counted, query) <= 3
++
++    def test_a_union_all_beside_them_still_adds_its_branches(self, counted):
++        # four UNION ALL (three INTERSECT ALL four) is 4 + min(3, 4).
++        query = (
++            "SELECT x FROM four UNION ALL SELECT x FROM three "
++            "INTERSECT ALL SELECT x FROM four"
++        )
++        assert self.rows_of(counted, query) == 7
++
++    def test_a_plain_intersection_scales_the_bound_down(self, counted):
++        query = "SELECT x FROM four INTERSECT SELECT x FROM three"
++        assert self.rows_of(counted, query) == 2
++
++    def test_a_plain_difference_scales_the_bound_down(self, counted):
++        # The bound is one row, and the plain spelling scales that away.
++        query = "SELECT x FROM four EXCEPT SELECT x FROM three"
++        assert self.rows_of(counted, query) == 0
++
++    def test_a_plain_difference_reaches_zero_rather_than_one(self, counted):
++        query = "SELECT x FROM three EXCEPT SELECT x FROM four"
++        assert self.rows_of(counted, query) == 0
++
++    def test_a_union_above_a_plain_intersection(self, counted):
++        # four UNION (three INTERSECT four) bounds 4 + 2, scaled once.
++        query = (
++            "SELECT x FROM four UNION SELECT x FROM three "
++            "INTERSECT SELECT x FROM four"
++        )
++        assert self.rows_of(counted, query) == 3
++
++    def test_a_counted_difference_over_a_plain_intersection(self, counted):
++        query = (
++            "SELECT x FROM four EXCEPT ALL SELECT x FROM three "
++            "INTERSECT SELECT x FROM four"
++        )
++        assert self.rows_of(counted, query) == 2
++
++    def test_a_plain_intersection_gives_the_scaled_bound_no_rounding(self, counted):
++        # The bound is four rows, and four sevenths of that is two, not three.
++        query = "SELECT x FROM five INTERSECT SELECT x FROM four"
++        assert self.rows_of(counted, query) == 2
++
++    def test_a_plain_difference_gives_the_scaled_bound_no_rounding(self, counted):
++        query = "SELECT x FROM five EXCEPT SELECT x FROM single"
++        assert self.rows_of(counted, query) == 2
++
++
++class TestWhatBuffers:
++    """A pairing has to hold the right branch; a concatenation does not."""
++
++    @pytest.fixture
++    def sets(self) -> Engine:
++        engine = Engine()
++        for name, values in (("one", [1, 2, 3]), ("two", [2, 3, 4])):
++            engine.register_rows(name, [{"x": value} for value in values])
++        return engine
++
++    def buffers(self, engine: Engine, sql: str):
++        """The operators in an unoptimized plan that report as blocking."""
++        tree = create_physical_plan(engine.plan(sql, optimize=False))
++        return [operator for operator in tree.walk() if operator.is_blocking]
++
++    def test_an_intersection_holds_something_back(self, sets):
++        assert self.buffers(sets, "SELECT x FROM one INTERSECT SELECT x FROM two")
++        # A concatenation beside it still streams, so this is not blanket.
++        assert self.buffers(sets, "SELECT x FROM one UNION ALL SELECT x FROM two") == []
++
++    def test_a_counted_intersection_holds_something_back(self, sets):
++        assert self.buffers(sets, "SELECT x FROM one INTERSECT ALL SELECT x FROM two")
++        assert self.buffers(sets, "SELECT x FROM one UNION SELECT x FROM two") == []
++
++    def test_a_difference_holds_something_back(self, sets):
++        assert self.buffers(sets, "SELECT x FROM one EXCEPT SELECT x FROM two")
++
++    def test_a_counted_difference_holds_something_back(self, sets):
++        assert self.buffers(sets, "SELECT x FROM one EXCEPT ALL SELECT x FROM two")
+diff --git a/tests/test_row_pairing.py b/tests/test_row_pairing.py
+new file mode 100644
+index 0000000..da00ada
+--- /dev/null
++++ b/tests/test_row_pairing.py
+@@ -0,0 +1,317 @@
++"""How the two row-pairing set operations decide what survives.
++
++Every case here runs a whole statement through an engine and reads the rows
++back, because the pairing rules are a promise about answers rather than about
++any particular plan shape: how many copies of a row come out, in what order,
++and which values count as the same row in the first place.
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from veldt import Engine, PlanningError
++from veldt.types.dtypes import DataType
++
++
++def engine_over(**tables) -> Engine:
++    """Build an engine holding one single-column table per keyword argument."""
++    engine = Engine()
++    for name, values in tables.items():
++        engine.register_rows(name, [{"x": value} for value in values])
++    return engine
++
++
++def column(engine: Engine, sql: str, name: str = "x", **options):
++    """Run a statement and return one output column as a list."""
++    return engine.sql(sql, **options).column(name)
++
++
++@pytest.fixture
++def letters() -> Engine:
++    """Two overlapping columns of text, both carrying repeats and nulls."""
++    return engine_over(
++        alpha=["a", "b", "a", "c", None, None],
++        beta=["a", "c", "c", None],
++    )
++
++
++@pytest.fixture
++def numbers() -> Engine:
++    """Three small integer columns that overlap pairwise but not everywhere."""
++    return engine_over(one=[1, 2, 3], two=[2, 3, 4], three=[3, 4, 5])
++
++
++class TestIntersectWithoutAll:
++    """``INTERSECT`` keeps what both sides produced, once each."""
++
++    def test_keeps_only_rows_the_right_side_also_produced(self, numbers):
++        assert column(numbers, "SELECT x FROM one INTERSECT SELECT x FROM two") == [2, 3]
++
++    def test_drops_every_row_the_right_side_never_produced(self, numbers):
++        kept = column(numbers, "SELECT x FROM one INTERSECT SELECT x FROM three")
++        assert kept == [3]
++
++    def test_an_empty_right_side_leaves_nothing(self, numbers):
++        query = "SELECT x FROM one INTERSECT SELECT x FROM two WHERE x > 100"
++        assert column(numbers, query) == []
++
++    def test_a_repeated_row_still_appears_once(self, letters):
++        assert column(letters, "SELECT x FROM alpha INTERSECT SELECT x FROM beta") == [
++            "a",
++            "c",
++            None,
++        ]
++
++    def test_repeats_on_the_right_do_not_multiply_the_output(self, letters):
++        # 'c' arrives twice on the right and once on the left.
++        kept = column(letters, "SELECT x FROM alpha INTERSECT SELECT x FROM beta")
++        assert kept.count("c") == 1
++
++    def test_output_follows_the_left_side_order(self, numbers):
++        numbers.register_rows("one", [{"x": v} for v in [3, 1, 2]], replace=True)
++        assert column(numbers, "SELECT x FROM one INTERSECT SELECT x FROM two") == [3, 2]
++
++    def test_intersecting_a_table_with_itself_deduplicates_it(self, letters):
++        kept = column(letters, "SELECT x FROM alpha INTERSECT SELECT x FROM alpha")
++        assert kept == ["a", "b", "c", None]
++
++
++class TestExceptWithoutAll:
++    """``EXCEPT`` keeps the left rows the right side never produced."""
++
++    def test_keeps_rows_absent_from_the_right_side(self, numbers):
++        assert column(numbers, "SELECT x FROM one EXCEPT SELECT x FROM two") == [1]
++
++    def test_keeps_everything_when_the_right_side_is_empty(self, numbers):
++        query = "SELECT x FROM one EXCEPT SELECT x FROM two WHERE x > 100"
++        assert column(numbers, query) == [1, 2, 3]
++
++    def test_a_repeated_row_survives_once(self, letters):
++        assert column(letters, "SELECT x FROM alpha EXCEPT SELECT x FROM beta") == ["b"]
++
++    def test_removing_a_table_from_itself_leaves_nothing(self, letters):
++        assert column(letters, "SELECT x FROM alpha EXCEPT SELECT x FROM alpha") == []
++
++    def test_output_follows_the_left_side_order(self, numbers):
++        numbers.register_rows("one", [{"x": v} for v in [4, 1, 3, 2]], replace=True)
++        assert column(numbers, "SELECT x FROM one EXCEPT SELECT x FROM three") == [1, 2]
++
++
++class TestIntersectAll:
++    """``ALL`` turns the intersection into ``min(m, n)`` copies of each row."""
++
++    def test_takes_the_smaller_of_the_two_counts(self):
++        engine = engine_over(alpha=["a", "a", "a"], beta=["a", "a"])
++        assert column(engine, "SELECT x FROM alpha INTERSECT ALL SELECT x FROM beta") == [
++            "a",
++            "a",
++        ]
++
++    def test_the_left_count_can_be_the_smaller_one(self):
++        engine = engine_over(alpha=["a", "a"], beta=["a", "a", "a", "a"])
++        kept = column(engine, "SELECT x FROM alpha INTERSECT ALL SELECT x FROM beta")
++        assert kept == ["a", "a"]
++
++    def test_a_row_missing_on_the_right_survives_zero_times(self):
++        engine = engine_over(alpha=["a", "a", "b"], beta=["a"])
++        assert column(engine, "SELECT x FROM alpha INTERSECT ALL SELECT x FROM beta") == [
++            "a"
++        ]
++
++    def test_counts_are_kept_per_row_value(self, letters):
++        kept = column(letters, "SELECT x FROM alpha INTERSECT ALL SELECT x FROM beta")
++        assert kept == ["a", "c", None]
++
++    def test_the_surviving_copies_stay_in_left_order(self):
++        engine = engine_over(alpha=["a", "b", "a", "b"], beta=["b", "a"])
++        kept = column(engine, "SELECT x FROM alpha INTERSECT ALL SELECT x FROM beta")
++        assert kept == ["a", "b"]
++
++    def test_it_differs_from_the_plain_spelling_when_copies_pile_up(self):
++        engine = engine_over(alpha=["a", "a"], beta=["a", "a"])
++        plain = "SELECT x FROM alpha INTERSECT SELECT x FROM beta"
++        counted = "SELECT x FROM alpha INTERSECT ALL SELECT x FROM beta"
++        assert column(engine, plain) == ["a"]
++        assert column(engine, counted) == ["a", "a"]
++
++
++class TestExceptAll:
++    """``ALL`` turns the difference into ``m - n`` copies, floored at zero."""
++
++    def test_subtracts_the_right_count_from_the_left_one(self):
++        engine = engine_over(alpha=["a", "a", "a"], beta=["a"])
++        assert column(engine, "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta") == [
++            "a",
++            "a",
++        ]
++
++    def test_a_surplus_on_the_right_floors_the_count_at_zero(self):
++        engine = engine_over(alpha=["a"], beta=["a", "a", "a"])
++        assert column(engine, "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta") == []
++
++    def test_rows_the_right_side_never_sent_survive_untouched(self):
++        engine = engine_over(alpha=["a", "b", "b"], beta=["a"])
++        assert column(engine, "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta") == [
++            "b",
++            "b",
++        ]
++
++    def test_each_right_copy_cancels_the_earliest_left_copy_standing(self):
++        # 'a' at position one is cancelled, so what is left of the row's run is
++        # the copy at position three, which lands after 'b'.
++        engine = engine_over(alpha=["a", "b", "a"], beta=["a"])
++        assert column(engine, "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta") == [
++            "b",
++            "a",
++        ]
++
++    def test_two_cancellations_reach_further_into_the_run(self):
++        engine = engine_over(alpha=["a", "b", "a", "c", "a"], beta=["a", "a"])
++        kept = column(engine, "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta")
++        assert kept == ["b", "c", "a"]
++
++    def test_counts_are_kept_per_row_value(self, letters):
++        kept = column(letters, "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta")
++        assert kept == ["b", "a", None]
++
++    def test_it_differs_from_the_plain_spelling_when_copies_pile_up(self):
++        engine = engine_over(alpha=["a", "a", "a"], beta=["a"])
++        plain = "SELECT x FROM alpha EXCEPT SELECT x FROM beta"
++        counted = "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta"
++        assert column(engine, plain) == []
++        assert column(engine, counted) == ["a", "a"]
++
++
++class TestNullPairing:
++    """Two nulls are the same row here, which a comparison would deny."""
++
++    def test_a_null_on_both_sides_survives_an_intersection(self):
++        engine = engine_over(alpha=["a", None], beta=[None])
++        assert column(engine, "SELECT x FROM alpha INTERSECT SELECT x FROM beta") == [None]
++
++    def test_a_null_on_the_right_cancels_a_null_on_the_left(self):
++        engine = engine_over(alpha=["a", None], beta=[None])
++        assert column(engine, "SELECT x FROM alpha EXCEPT SELECT x FROM beta") == ["a"]
++
++    def test_a_null_survives_a_difference_when_the_right_has_none(self):
++        engine = engine_over(alpha=["a", None], beta=["a"])
++        assert column(engine, "SELECT x FROM alpha EXCEPT SELECT x FROM beta") == [None]
++
++    def test_nulls_are_counted_like_any_other_row(self):
++        engine = engine_over(alpha=[None, None, None], beta=[None])
++        kept = column(engine, "SELECT x FROM alpha EXCEPT ALL SELECT x FROM beta")
++        assert kept == [None, None]
++
++    def test_pairing_and_comparison_disagree_about_two_nulls(self):
++        engine = engine_over(alpha=["a", None], beta=[None])
++        paired = "SELECT x FROM alpha INTERSECT SELECT x FROM beta"
++        assert engine.sql(paired).to_rows() == [(None,)]
++        assert engine.sql("SELECT x FROM alpha WHERE x = NULL").to_rows() == []
++
++
++class TestTypeUnification:
++    """Both branches are converted before rows are paired."""
++
++    def test_an_integer_pairs_with_the_matching_float(self):
++        engine = Engine()
++        engine.register_rows("whole", [{"x": 1}, {"x": 2}, {"x": 3}])
++        engine.register_rows("fractional", [{"x": 1.0}, {"x": 2.5}])
++        kept = column(engine, "SELECT x FROM whole INTERSECT SELECT x FROM fractional")
++        assert kept == [1.0]
++
++    def test_the_pairing_works_from_either_side(self):
++        engine = Engine()
++        engine.register_rows("whole", [{"x": 1}, {"x": 2}])
++        engine.register_rows("fractional", [{"x": 1.0}, {"x": 2.0}])
++        kept = column(engine, "SELECT x FROM fractional EXCEPT SELECT x FROM whole")
++        assert kept == []
++
++    def test_the_output_type_is_the_unified_one(self):
++        engine = Engine()
++        engine.register_rows("whole", [{"x": 1}, {"x": 2}])
++        engine.register_rows("fractional", [{"x": 1.0}])
++        result = engine.sql("SELECT x FROM whole INTERSECT SELECT x FROM fractional")
++        assert result.schema.dtypes == [DataType.FLOAT64]
++
++    def test_output_names_come_from_the_left_side(self):
++        engine = Engine()
++        engine.register_rows("whole", [{"x": 1}])
++        engine.register_rows("other", [{"y": 1}])
++        result = engine.sql("SELECT x FROM whole INTERSECT SELECT y FROM other")
++        assert result.column_names == ["x"]
++
++    def test_an_alias_on_the_left_names_the_output(self):
++        engine = Engine()
++        engine.register_rows("whole", [{"x": 1}, {"x": 2}])
++        engine.register_rows("other", [{"y": 2}])
++        result = engine.sql("SELECT x AS kept FROM whole EXCEPT SELECT y FROM other")
++        assert result.column_names == ["kept"]
++        assert result.column("kept") == [1]
++
++    def test_a_float_column_keeps_its_type_when_both_sides_are_whole(self):
++        engine = Engine()
++        engine.register_rows("whole", [{"x": 1}, {"x": 2}])
++        engine.register_rows("fractional", [{"x": 2.0}, {"x": 4.0}])
++        result = engine.sql("SELECT x FROM fractional INTERSECT SELECT x FROM whole")
++        assert result.schema.dtypes == [DataType.FLOAT64]
++        assert result.column("x") == [2.0]
++
++
++class TestColumnCounts:
++    """Both sides have to be the same width, whichever operator is written."""
++
++    def test_intersect_rejects_a_narrower_right_side(self, numbers):
++        with pytest.raises(PlanningError):
++            numbers.sql("SELECT x, x FROM one INTERSECT SELECT x FROM two")
++
++    def test_except_rejects_a_wider_right_side(self, numbers):
++        with pytest.raises(PlanningError):
++            numbers.sql("SELECT x FROM one EXCEPT SELECT x, x FROM two")
++
++    def test_a_union_in_the_same_chain_is_held_to_the_same_rule(self, numbers):
++        with pytest.raises(PlanningError):
++            numbers.sql("SELECT x FROM one UNION SELECT x, x FROM two")
++        with pytest.raises(PlanningError):
++            numbers.sql(
++                "SELECT x FROM one UNION SELECT x FROM two "
++                "INTERSECT SELECT x, x FROM one"
++            )
++
++    def test_a_mismatch_deeper_in_a_chain_is_caught_too(self, numbers):
++        with pytest.raises(PlanningError):
++            numbers.sql(
++                "SELECT x FROM one INTERSECT SELECT x FROM two "
++                "EXCEPT SELECT x, x FROM three"
++            )
++
++
++class TestWideRows:
++    """Pairing looks at the whole row, not at one column of it."""
++
++    @pytest.fixture
++    def pairs(self) -> Engine:
++        engine = Engine()
++        engine.register_rows(
++            "alpha",
++            [
++                {"a": 1, "b": "x"},
++                {"a": 1, "b": "y"},
++                {"a": 2, "b": "x"},
++                {"a": 1, "b": "x"},
++            ],
++        )
++        engine.register_rows("beta", [{"a": 1, "b": "x"}, {"a": 3, "b": "y"}])
++        return engine
++
++    def test_a_row_matches_only_when_every_column_matches(self, pairs):
++        result = pairs.sql("SELECT a, b FROM alpha INTERSECT SELECT a, b FROM beta")
++        assert result.to_rows() == [(1, "x")]
++
++    def test_a_partial_match_does_not_cancel_a_row(self, pairs):
++        result = pairs.sql("SELECT a, b FROM alpha EXCEPT SELECT a, b FROM beta")
++        assert result.to_rows() == [(1, "y"), (2, "x")]
++
++    def test_counting_works_across_the_whole_row(self, pairs):
++        result = pairs.sql("SELECT a, b FROM alpha EXCEPT ALL SELECT a, b FROM beta")
++        assert result.to_rows() == [(1, "y"), (2, "x"), (1, "x")]

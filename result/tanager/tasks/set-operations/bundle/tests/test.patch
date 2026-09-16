@@ -1,0 +1,1083 @@
+diff --git a/tests/aggregation.rs b/tests/aggregation.rs
+index e6b1ccc..744e854 100644
+--- a/tests/aggregation.rs
++++ b/tests/aggregation.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for GROUP BY, HAVING, and aggregate functions.
++//! Every case runs through the public `Database` API, so grouping keeps its
++//! meaning across a rewrite of the planner or the executor.
+ 
+ mod common;
+ 
+diff --git a/tests/bounded_branches.rs b/tests/bounded_branches.rs
+new file mode 100644
+index 0000000..cb89666
+--- /dev/null
++++ b/tests/bounded_branches.rs
+@@ -0,0 +1,474 @@
++//! The clauses that close a query — `ORDER BY`, `LIMIT`, `OFFSET` — and what
++//! the optimizer is allowed to do with a limit that sits over a concatenation.
++
++use tanager::ast::statement::Statement;
++use tanager::optimizer::Optimizer;
++use tanager::parser::parse_statement;
++use tanager::planner::logical::LogicalPlan;
++use tanager::planner::Binder;
++use tanager::{Database, ErrorKind};
++
++/// Two tables of four and three rows, with one value in common.
++fn seeded() -> Database {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE early (mark INTEGER, label TEXT)")
++        .unwrap();
++    db.execute("CREATE TABLE late (mark INTEGER, label TEXT)")
++        .unwrap();
++    db.execute("CREATE TABLE spare (mark INTEGER, label TEXT)")
++        .unwrap();
++    db.execute(
++        "INSERT INTO early (mark, label) VALUES \
++            (10, 'a'), (30, 'b'), (20, 'c'), (40, 'd')",
++    )
++    .unwrap();
++    db.execute("INSERT INTO late (mark, label) VALUES (50, 'e'), (20, 'f'), (60, 'g')")
++        .unwrap();
++    db.execute("INSERT INTO spare (mark, label) VALUES (70, 'h'), (80, 'i')")
++        .unwrap();
++    db
++}
++
++fn column(db: &mut Database, sql: &str) -> Vec<String> {
++    db.query(sql)
++        .unwrap()
++        .rows()
++        .iter()
++        .map(|row| row.get(0).unwrap().to_string())
++        .collect()
++}
++
++/// Bind and optimize `sql` against the database's catalog.
++fn optimized(db: &Database, sql: &str) -> LogicalPlan {
++    let select = match parse_statement(sql).unwrap() {
++        Statement::Select(s) => s,
++        other => panic!("expected a query, got {:?}", other),
++    };
++    let plan = Binder::new(db.catalog()).bind_select(&select).unwrap();
++    Optimizer::new().optimize(plan).unwrap()
++}
++
++/// The detail line of every node in the plan, parents before children.
++fn details(plan: &LogicalPlan) -> Vec<String> {
++    let mut out = vec![plan.detail()];
++    for child in plan.children() {
++        out.extend(details(child));
++    }
++    out
++}
++
++/// The branches of the node that combines two inputs. These queries read two
++/// tables and never join them, so the plan holds exactly one such node,
++/// wherever a build chooses to put it.
++fn branches(plan: &LogicalPlan) -> Vec<&LogicalPlan> {
++    if plan.children().len() == 2 {
++        return plan.children();
++    }
++    for child in plan.children() {
++        let found = branches(child);
++        if !found.is_empty() {
++            return found;
++        }
++    }
++    Vec::new()
++}
++
++/// The same, insisting the query really did combine two branches.
++fn two_branches(plan: &LogicalPlan) -> Vec<&LogicalPlan> {
++    let found = branches(plan);
++    assert_eq!(
++        found.len(),
++        2,
++        "no node combining two inputs in: {}",
++        plan.explain()
++    );
++    found
++}
++
++#[test]
++fn order_by_sorts_the_whole_result() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early UNION ALL SELECT mark FROM late ORDER BY mark"
++        ),
++        vec!["10", "20", "20", "30", "40", "50", "60"]
++    );
++}
++
++#[test]
++fn order_by_a_position_picks_a_result_column() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark, label FROM early UNION SELECT mark, label FROM late \
++             ORDER BY 1 DESC"
++        ),
++        vec!["60", "50", "40", "30", "20", "20", "10"]
++    );
++}
++
++#[test]
++fn order_by_uses_the_leftmost_branch_names() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark AS score FROM early UNION SELECT mark FROM late \
++             ORDER BY score DESC"
++        ),
++        vec!["60", "50", "40", "30", "20", "10"]
++    );
++}
++
++#[test]
++fn order_by_a_column_outside_the_result_is_rejected() {
++    let mut db = seeded();
++    let err = db
++        .query("SELECT mark FROM early UNION SELECT mark FROM late ORDER BY label")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn limit_cuts_the_combined_result() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early UNION ALL SELECT mark FROM late LIMIT 2"
++        ),
++        vec!["10", "30"]
++    );
++}
++
++#[test]
++fn offset_skips_into_the_second_branch() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early UNION ALL SELECT mark FROM late OFFSET 4"
++        ),
++        vec!["50", "20", "60"]
++    );
++}
++
++#[test]
++fn a_limit_after_an_offset_spans_both_branches() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early UNION ALL SELECT mark FROM late \
++             LIMIT 3 OFFSET 3"
++        ),
++        vec!["40", "50", "20"]
++    );
++}
++
++#[test]
++fn a_limit_reaching_past_the_first_branch_still_reads_the_second() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early UNION ALL SELECT mark FROM late \
++             LIMIT 2 OFFSET 5"
++        ),
++        vec!["20", "60"]
++    );
++}
++
++#[test]
++fn order_by_before_the_last_branch_is_rejected() {
++    let mut db = seeded();
++    // The same two branches read fine with the clause in its proper place.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early UNION SELECT mark FROM late ORDER BY mark",
++        ),
++        vec!["10", "20", "30", "40", "50", "60"]
++    );
++    let err = db
++        .query("SELECT mark FROM early ORDER BY mark UNION SELECT mark FROM late")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Parse);
++}
++
++#[test]
++fn limit_before_the_last_branch_is_rejected() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early UNION SELECT mark FROM late LIMIT 2",
++        ),
++        vec!["10", "30"]
++    );
++    let err = db
++        .query("SELECT mark FROM early LIMIT 2 UNION SELECT mark FROM late")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Parse);
++}
++
++#[test]
++fn offset_before_the_last_branch_is_rejected() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT mark FROM early EXCEPT SELECT mark FROM late OFFSET 1",
++        ),
++        vec!["30", "40"]
++    );
++    let err = db
++        .query("SELECT mark FROM early OFFSET 1 EXCEPT SELECT mark FROM late")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Parse);
++}
++
++#[test]
++fn explain_reports_the_operator_as_written() {
++    let mut db = seeded();
++    for (sql, expected) in [
++        (
++            "SELECT mark FROM early UNION SELECT mark FROM late",
++            "UNION",
++        ),
++        (
++            "SELECT mark FROM early UNION ALL SELECT mark FROM late",
++            "UNION ALL",
++        ),
++        (
++            "SELECT mark FROM early INTERSECT SELECT mark FROM late",
++            "INTERSECT",
++        ),
++        (
++            "SELECT mark FROM early INTERSECT ALL SELECT mark FROM late",
++            "INTERSECT ALL",
++        ),
++        (
++            "SELECT mark FROM early EXCEPT SELECT mark FROM late",
++            "EXCEPT",
++        ),
++        (
++            "SELECT mark FROM early EXCEPT ALL SELECT mark FROM late",
++            "EXCEPT ALL",
++        ),
++    ] {
++        let lines: Vec<String> = db
++            .query(&format!("EXPLAIN {}", sql))
++            .unwrap()
++            .rows()
++            .iter()
++            .map(|r| r.get(0).unwrap().to_string().trim().to_string())
++            .collect();
++        // The line is the operator as written; a build may add its own detail
++        // in brackets after it.
++        let opening = format!("{} (", expected);
++        assert!(
++            lines
++                .iter()
++                .any(|line| line == expected || line.starts_with(&opening)),
++            "expected a `{}` line for `{}`, got {:?}",
++            expected,
++            sql,
++            lines
++        );
++    }
++}
++
++#[test]
++fn a_concatenation_bounds_both_of_its_branches() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late LIMIT 3",
++    );
++    for branch in two_branches(&plan) {
++        assert!(
++            details(branch).iter().any(|d| d == "Limit 3"),
++            "branch was not bounded: {:?}",
++            details(branch)
++        );
++    }
++}
++
++#[test]
++fn the_bound_is_the_limit_plus_the_offset() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late LIMIT 3 OFFSET 2",
++    );
++    for branch in two_branches(&plan) {
++        assert!(
++            details(branch).iter().any(|d| d == "Limit 5"),
++            "branch carries the wrong bound: {:?}",
++            details(branch)
++        );
++    }
++}
++
++#[test]
++fn the_outer_limit_stays_where_it_was() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late LIMIT 3 OFFSET 2",
++    );
++    assert_eq!(plan.detail(), "Limit 3 Offset 2");
++}
++
++#[test]
++fn a_branch_is_bounded_only_once() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late LIMIT 3 OFFSET 2",
++    );
++    let bounds = details(&plan)
++        .into_iter()
++        .filter(|d| d == "Limit 5")
++        .count();
++    assert_eq!(bounds, 2, "plan was: {}", plan.explain());
++}
++
++#[test]
++fn a_deduplicating_union_leaves_its_branches_alone() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION SELECT mark FROM late LIMIT 3",
++    );
++    for branch in two_branches(&plan) {
++        assert!(
++            !details(branch).iter().any(|d| d.starts_with("Limit")),
++            "branch was bounded: {:?}",
++            details(branch)
++        );
++    }
++}
++
++#[test]
++fn an_intersection_leaves_its_branches_alone() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early INTERSECT ALL SELECT mark FROM late LIMIT 3",
++    );
++    for branch in two_branches(&plan) {
++        assert!(
++            !details(branch).iter().any(|d| d.starts_with("Limit")),
++            "branch was bounded: {:?}",
++            details(branch)
++        );
++    }
++}
++
++#[test]
++fn a_difference_leaves_its_branches_alone() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early EXCEPT ALL SELECT mark FROM late LIMIT 3",
++    );
++    for branch in two_branches(&plan) {
++        assert!(
++            !details(branch).iter().any(|d| d.starts_with("Limit")),
++            "branch was bounded: {:?}",
++            details(branch)
++        );
++    }
++}
++
++#[test]
++fn an_offset_with_no_limit_bounds_nothing() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late OFFSET 2",
++    );
++    for branch in two_branches(&plan) {
++        assert!(
++            !details(branch).iter().any(|d| d.starts_with("Limit")),
++            "branch was bounded: {:?}",
++            details(branch)
++        );
++    }
++}
++
++#[test]
++fn a_sort_between_the_limit_and_the_branches_blocks_the_bound() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late ORDER BY mark LIMIT 3",
++    );
++    // The only limit in the plan is the one the query wrote.
++    let bounds = details(&plan)
++        .into_iter()
++        .filter(|d| d.starts_with("Limit"))
++        .count();
++    assert_eq!(bounds, 1, "plan was: {}", plan.explain());
++}
++
++#[test]
++fn every_branch_of_a_chain_is_bounded() {
++    let db = seeded();
++    let plan = optimized(
++        &db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late \
++         UNION ALL SELECT mark FROM spare LIMIT 2 OFFSET 1",
++    );
++    let scans = bounded_scans(&plan, false, "Limit 3");
++    assert_eq!(
++        scans,
++        vec![
++            ("Scan early".to_string(), true),
++            ("Scan late".to_string(), true),
++            ("Scan spare".to_string(), true)
++        ],
++        "plan was: {}",
++        plan.explain()
++    );
++}
++
++/// Every table read in the plan, paired with whether some node above it
++/// carries `bound`.
++fn bounded_scans(plan: &LogicalPlan, above: bool, bound: &str) -> Vec<(String, bool)> {
++    let detail = plan.detail();
++    if detail.starts_with("Scan ") {
++        return vec![(detail, above)];
++    }
++    let above = above || detail == bound;
++    let mut out = Vec::new();
++    for child in plan.children() {
++        out.extend(bounded_scans(child, above, bound));
++    }
++    out
++}
++
++#[test]
++fn bounding_the_branches_does_not_move_a_row() {
++    let mut db = seeded();
++    let whole = column(
++        &mut db,
++        "SELECT mark FROM early UNION ALL SELECT mark FROM late",
++    );
++    for offset in 0..whole.len() {
++        for limit in 1..4 {
++            let sql = format!(
++                "SELECT mark FROM early UNION ALL SELECT mark FROM late \
++                 LIMIT {} OFFSET {}",
++                limit, offset
++            );
++            let expected: Vec<String> = whole.iter().skip(offset).take(limit).cloned().collect();
++            assert_eq!(column(&mut db, &sql), expected, "for {}", sql);
++        }
++    }
++}
+diff --git a/tests/branch_pairing.rs b/tests/branch_pairing.rs
+new file mode 100644
+index 0000000..bdc229c
+--- /dev/null
++++ b/tests/branch_pairing.rs
+@@ -0,0 +1,464 @@
++//! How two query branches pair up: multiplicity, ordering, widening and the
++//! shape rules that decide whether they can be combined at all.
++
++use tanager::{Database, ErrorKind};
++
++/// A database with three small tables whose rows overlap in different ways.
++fn seeded() -> Database {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE north (city TEXT, visits INTEGER)")
++        .unwrap();
++    db.execute("CREATE TABLE south (city TEXT, visits INTEGER)")
++        .unwrap();
++    db.execute("CREATE TABLE readings (station TEXT, level FLOAT)")
++        .unwrap();
++    db.execute(
++        "INSERT INTO north (city, visits) VALUES \
++            ('oslo', 3), ('bergen', 1), ('oslo', 3), ('tromso', 2), ('oslo', 3)",
++    )
++    .unwrap();
++    db.execute(
++        "INSERT INTO south (city, visits) VALUES \
++            ('oslo', 3), ('cork', 5), ('oslo', 3), ('bergen', 9)",
++    )
++    .unwrap();
++    db.execute(
++        "INSERT INTO readings (station, level) VALUES \
++            ('oslo', 3.0), ('cork', 1.5), ('tromso', 2.0)",
++    )
++    .unwrap();
++    db
++}
++
++/// Every cell of every row, stringified in row order.
++fn table(db: &mut Database, sql: &str) -> Vec<Vec<String>> {
++    db.query(sql)
++        .unwrap()
++        .rows()
++        .iter()
++        .map(|row| row.values().iter().map(|v| v.to_string()).collect())
++        .collect()
++}
++
++/// The first column of every row, in row order.
++fn column(db: &mut Database, sql: &str) -> Vec<String> {
++    table(db, sql)
++        .into_iter()
++        .map(|mut cells| cells.remove(0))
++        .collect()
++}
++
++#[test]
++fn union_reports_each_row_once() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north UNION SELECT city FROM south"
++        ),
++        vec!["oslo", "bergen", "tromso", "cork"]
++    );
++}
++
++#[test]
++fn union_all_keeps_every_copy() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north UNION ALL SELECT city FROM south"
++        ),
++        vec!["oslo", "bergen", "oslo", "tromso", "oslo", "oslo", "cork", "oslo", "bergen"]
++    );
++}
++
++#[test]
++fn intersect_reports_shared_rows_once() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north INTERSECT SELECT city FROM south"
++        ),
++        vec!["oslo", "bergen"]
++    );
++}
++
++#[test]
++fn intersect_all_keeps_the_smaller_count() {
++    let mut db = seeded();
++    // 'oslo' appears three times on the left and twice on the right.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north INTERSECT ALL SELECT city FROM south"
++        ),
++        vec!["oslo", "bergen", "oslo"]
++    );
++}
++
++#[test]
++fn except_drops_rows_the_other_branch_holds() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north EXCEPT SELECT city FROM south"
++        ),
++        vec!["tromso"]
++    );
++}
++
++#[test]
++fn except_all_cancels_one_copy_per_right_row() {
++    let mut db = seeded();
++    // Three 'oslo' on the left less two on the right leaves one.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north EXCEPT ALL SELECT city FROM south"
++        ),
++        vec!["oslo", "tromso"]
++    );
++}
++
++#[test]
++fn except_all_floors_a_surplus_on_the_right_at_zero() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM south EXCEPT ALL SELECT city FROM north"
++        ),
++        vec!["cork"]
++    );
++}
++
++#[test]
++fn rows_pair_on_every_column() {
++    let mut db = seeded();
++    // ('bergen', 1) and ('bergen', 9) differ in their second column.
++    assert_eq!(
++        table(
++            &mut db,
++            "SELECT city, visits FROM north INTERSECT SELECT city, visits FROM south"
++        ),
++        vec![vec!["oslo", "3"]]
++    );
++}
++
++#[test]
++fn a_null_pairs_with_a_null() {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE l (v INTEGER)").unwrap();
++    db.execute("CREATE TABLE r (v INTEGER)").unwrap();
++    db.execute("INSERT INTO l (v) VALUES (NULL), (1), (NULL)")
++        .unwrap();
++    db.execute("INSERT INTO r (v) VALUES (NULL)").unwrap();
++    assert_eq!(
++        column(&mut db, "SELECT v FROM l INTERSECT SELECT v FROM r"),
++        vec!["NULL"]
++    );
++    assert_eq!(
++        column(&mut db, "SELECT v FROM l EXCEPT ALL SELECT v FROM r"),
++        vec!["NULL", "1"]
++    );
++}
++
++#[test]
++fn a_null_row_survives_a_union() {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE l (v INTEGER)").unwrap();
++    db.execute("CREATE TABLE r (v INTEGER)").unwrap();
++    db.execute("INSERT INTO l (v) VALUES (NULL), (2)").unwrap();
++    db.execute("INSERT INTO r (v) VALUES (NULL), (3)").unwrap();
++    assert_eq!(
++        column(&mut db, "SELECT v FROM l UNION SELECT v FROM r"),
++        vec!["NULL", "2", "3"]
++    );
++}
++
++#[test]
++fn a_narrow_branch_carries_its_values_over() {
++    let mut db = seeded();
++    // The INTEGER branch meets a FLOAT one, so its rows arrive as floats.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT visits FROM north UNION SELECT level FROM readings"
++        ),
++        vec!["3.0", "1.0", "2.0", "1.5"]
++    );
++}
++
++#[test]
++fn widened_rows_pair_across_the_branches() {
++    let mut db = seeded();
++    // visits 3 and level 3.0 are the same row once both are floats.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT visits FROM north INTERSECT SELECT level FROM readings"
++        ),
++        vec!["3.0", "2.0"]
++    );
++}
++
++#[test]
++fn a_widened_branch_reports_the_wider_type() {
++    let mut db = seeded();
++    let result = db
++        .query("SELECT visits FROM north UNION SELECT level FROM readings")
++        .unwrap();
++    let types: Vec<String> = result
++        .schema()
++        .fields()
++        .iter()
++        .map(|f| f.data_type().to_string())
++        .collect();
++    assert_eq!(types, vec!["FLOAT"]);
++}
++
++#[test]
++fn result_names_come_from_the_leftmost_branch() {
++    let mut db = seeded();
++    let result = db
++        .query(
++            "SELECT city AS place, visits FROM north \
++             UNION SELECT station, level FROM readings",
++        )
++        .unwrap();
++    assert_eq!(result.columns(), vec!["place", "visits"]);
++}
++
++#[test]
++fn intersect_binds_tighter_than_union() {
++    let mut db = seeded();
++    // north UNION (south INTERSECT readings): the intersection is 'oslo' and
++    // 'cork', so 'cork' joins the north cities and nothing else does.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north UNION SELECT city FROM south \
++             INTERSECT SELECT station FROM readings"
++        ),
++        vec!["oslo", "bergen", "tromso", "cork"]
++    );
++}
++
++#[test]
++fn intersect_first_can_leave_fewer_rows_than_folding_left() {
++    let mut db = seeded();
++    // north EXCEPT (south INTERSECT readings) removes only 'oslo' and 'cork'.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north EXCEPT SELECT city FROM south \
++             INTERSECT SELECT station FROM readings"
++        ),
++        vec!["bergen", "tromso"]
++    );
++}
++
++#[test]
++fn equal_operators_fold_from_the_left() {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE a (v INTEGER)").unwrap();
++    db.execute("CREATE TABLE b (v INTEGER)").unwrap();
++    db.execute("CREATE TABLE c (v INTEGER)").unwrap();
++    db.execute("INSERT INTO a (v) VALUES (1), (2), (3)")
++        .unwrap();
++    db.execute("INSERT INTO b (v) VALUES (2)").unwrap();
++    db.execute("INSERT INTO c (v) VALUES (2), (3)").unwrap();
++    // (a EXCEPT b) EXCEPT c leaves 1. Folding from the right would leave 1 and 3.
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT v FROM a EXCEPT SELECT v FROM b EXCEPT SELECT v FROM c"
++        ),
++        vec!["1"]
++    );
++}
++
++#[test]
++fn a_union_follows_the_left_branch_then_appends() {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE a (v INTEGER)").unwrap();
++    db.execute("CREATE TABLE b (v INTEGER)").unwrap();
++    db.execute("INSERT INTO a (v) VALUES (9), (4), (7)")
++        .unwrap();
++    db.execute("INSERT INTO b (v) VALUES (8), (4), (1)")
++        .unwrap();
++    assert_eq!(
++        column(&mut db, "SELECT v FROM a UNION SELECT v FROM b"),
++        vec!["9", "4", "7", "8", "1"]
++    );
++}
++
++#[test]
++fn an_intersection_follows_the_left_branch() {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE a (v INTEGER)").unwrap();
++    db.execute("CREATE TABLE b (v INTEGER)").unwrap();
++    db.execute("INSERT INTO a (v) VALUES (9), (4), (7)")
++        .unwrap();
++    db.execute("INSERT INTO b (v) VALUES (7), (9)").unwrap();
++    assert_eq!(
++        column(&mut db, "SELECT v FROM a INTERSECT SELECT v FROM b"),
++        vec!["9", "7"]
++    );
++}
++
++#[test]
++fn branches_of_different_widths_are_rejected() {
++    let mut db = seeded();
++    let err = db
++        .query("SELECT city FROM north UNION SELECT city, visits FROM south")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn columns_that_do_not_unify_are_rejected() {
++    let mut db = seeded();
++    let err = db
++        .query("SELECT city FROM north EXCEPT SELECT visits FROM south")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn a_branch_may_group_and_aggregate() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT COUNT(*) FROM north UNION ALL SELECT COUNT(*) FROM south"
++        ),
++        vec!["5", "4"]
++    );
++}
++
++#[test]
++fn a_grouping_branch_collapses_only_its_own_rows() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north GROUP BY city \
++             UNION ALL SELECT city FROM south"
++        ),
++        vec!["oslo", "bergen", "tromso", "oslo", "cork", "oslo", "bergen"]
++    );
++}
++
++#[test]
++fn each_branch_counts_within_its_own_groups() {
++    let mut db = seeded();
++    assert_eq!(
++        table(
++            &mut db,
++            "SELECT city, COUNT(*) FROM north GROUP BY city \
++             UNION ALL SELECT city, COUNT(*) FROM south GROUP BY city"
++        ),
++        vec![
++            vec!["oslo", "3"],
++            vec!["bergen", "1"],
++            vec!["tromso", "1"],
++            vec!["oslo", "2"],
++            vec!["cork", "1"],
++            vec!["bergen", "1"],
++        ]
++    );
++}
++
++#[test]
++fn grouped_branches_pair_on_their_group_rows() {
++    let mut db = seeded();
++    assert_eq!(
++        table(
++            &mut db,
++            "SELECT city, COUNT(*) FROM north GROUP BY city \
++             INTERSECT SELECT city, COUNT(*) FROM south GROUP BY city"
++        ),
++        vec![vec!["bergen", "1"]]
++    );
++    assert_eq!(
++        table(
++            &mut db,
++            "SELECT city, COUNT(*) FROM north GROUP BY city \
++             EXCEPT SELECT city, COUNT(*) FROM south GROUP BY city"
++        ),
++        vec![vec!["oslo", "3"], vec!["tromso", "1"]]
++    );
++}
++
++#[test]
++fn a_grouped_branch_meets_an_ungrouped_one() {
++    let mut db = seeded();
++    let mut result = db
++        .query(
++            "SELECT city, SUM(visits) FROM north GROUP BY city \
++             UNION SELECT city, visits FROM south",
++        )
++        .unwrap();
++    assert_eq!(result.columns(), vec!["city", "sum"]);
++    let rows: Vec<Vec<String>> = result
++        .rows()
++        .iter()
++        .map(|row| row.values().iter().map(|v| v.to_string()).collect())
++        .collect();
++    assert_eq!(
++        rows,
++        vec![
++            vec!["oslo", "9"],
++            vec!["bergen", "1"],
++            vec!["tromso", "2"],
++            vec!["oslo", "3"],
++            vec!["cork", "5"],
++            vec!["bergen", "9"],
++        ]
++    );
++    result = db
++        .query("SELECT city, MAX(visits) FROM south GROUP BY city")
++        .unwrap();
++    assert_eq!(result.row_count(), 3);
++}
++
++#[test]
++fn distinct_inside_a_branch_binds_to_that_branch() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT DISTINCT city FROM north UNION ALL SELECT city FROM south"
++        ),
++        vec!["oslo", "bergen", "tromso", "oslo", "cork", "oslo", "bergen"]
++    );
++}
++
++#[test]
++fn a_filtered_branch_contributes_only_its_matching_rows() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north WHERE visits > 2 \
++             UNION SELECT city FROM south WHERE visits > 4"
++        ),
++        vec!["oslo", "cork", "bergen"]
++    );
++}
++
++#[test]
++fn three_branches_chain_left_to_right() {
++    let mut db = seeded();
++    assert_eq!(
++        column(
++            &mut db,
++            "SELECT city FROM north UNION SELECT city FROM south \
++             UNION ALL SELECT station FROM readings"
++        ),
++        vec!["oslo", "bergen", "tromso", "cork", "oslo", "cork", "tromso"]
++    );
++}
+diff --git a/tests/common/mod.rs b/tests/common/mod.rs
+index 364b6f5..05a3832 100644
+--- a/tests/common/mod.rs
++++ b/tests/common/mod.rs
+@@ -1,4 +1,6 @@
+ //! Shared helpers for the integration tests.
++//! The seeded dataset is shared, so a case that changes it would change
++//! every other suite's expectations with it. Nothing here mutates in place.
+ #![allow(dead_code)]
+ 
+ use tanager::{Database, QueryResult, Value};
+diff --git a/tests/ddl_and_dml.rs b/tests/ddl_and_dml.rs
+index f1852c9..1c54e17 100644
+--- a/tests/ddl_and_dml.rs
++++ b/tests/ddl_and_dml.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for CREATE TABLE, INSERT, and DROP TABLE.
++//! Table creation and insertion sit under every query in the suite, so their
++//! behaviour is pinned here rather than assumed elsewhere.
+ 
+ mod common;
+ 
+diff --git a/tests/determinism.rs b/tests/determinism.rs
+index 41f1993..c1be6eb 100644
+--- a/tests/determinism.rs
++++ b/tests/determinism.rs
+@@ -2,6 +2,7 @@
+ //!
+ //! Determinism is a core guarantee: the reference test suite depends on it, and
+ //! these tests guard against accidental reliance on hash-map iteration order.
++//! Anything that groups, deduplicates or pairs rows answers to these cases.
+ 
+ mod common;
+ 
+diff --git a/tests/errors.rs b/tests/errors.rs
+index 033cf07..12dadbf 100644
+--- a/tests/errors.rs
++++ b/tests/errors.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for error classification.
++//! Callers classify failures by `ErrorKind`, never by message text, and these
++//! cases fix which kind each failure carries.
+ 
+ mod common;
+ 
+diff --git a/tests/explain.rs b/tests/explain.rs
+index 47dde12..50dbc76 100644
+--- a/tests/explain.rs
++++ b/tests/explain.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for EXPLAIN.
++//! Every plan node reaches the reader through EXPLAIN, so the tree it prints is
++//! part of the engine's public behaviour.
+ 
+ mod common;
+ 
+diff --git a/tests/joins.rs b/tests/joins.rs
+index ee7633a..b49a8ec 100644
+--- a/tests/joins.rs
++++ b/tests/joins.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for joins.
++//! A join's output row is the left columns then the right, and the cases here
++//! hold that layout for anything built above it.
+ 
+ mod common;
+ 
+diff --git a/tests/null_semantics.rs b/tests/null_semantics.rs
+index 0dc342b..f3ca99a 100644
+--- a/tests/null_semantics.rs
++++ b/tests/null_semantics.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for SQL three-valued (NULL) logic.
++//! Three-valued logic reaches every comparison, so a new operator inherits
++//! these answers rather than choosing its own.
+ 
+ mod common;
+ 
+diff --git a/tests/optimizer_effects.rs b/tests/optimizer_effects.rs
+index 1431a16..dbfb846 100644
+--- a/tests/optimizer_effects.rs
++++ b/tests/optimizer_effects.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests verifying the optimizer preserves query semantics.
++//! A rule may rewrite a plan and must not change what the plan answers. These
++//! cases hold both halves of that.
+ 
+ mod common;
+ 
+diff --git a/tests/order_and_limit.rs b/tests/order_and_limit.rs
+index 4e1cb13..1743180 100644
+--- a/tests/order_and_limit.rs
++++ b/tests/order_and_limit.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for ORDER BY, LIMIT, and OFFSET.
++//! Ordering and slicing are written once per query, and these cases fix what
++//! they apply to.
+ 
+ mod common;
+ 
+diff --git a/tests/parser_api.rs b/tests/parser_api.rs
+index ef80748..fe94fc9 100644
+--- a/tests/parser_api.rs
++++ b/tests/parser_api.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests against the library parser API.
++//! The parser's public surface is what embedders build on: the shapes asserted
++//! here are part of the contract, not an implementation detail.
+ 
+ use tanager::ast::statement::{SelectItem, Statement};
+ use tanager::parser::{parse_program, parse_statement, tokenize};
+diff --git a/tests/select_basic.rs b/tests/select_basic.rs
+index 136fc88..53a6f31 100644
+--- a/tests/select_basic.rs
++++ b/tests/select_basic.rs
+@@ -1,4 +1,6 @@
+ //! Integration tests for projection, filtering, and scalar expressions.
++//! Projection and filtering are the floor the rest of the engine stands on:
++//! these cases hold whatever else a query gains the right to say.
+ 
+ mod common;
+ 

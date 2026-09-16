@@ -1,0 +1,978 @@
+diff --git a/.cargo/config.toml b/.cargo/config.toml
+new file mode 100644
+index 0000000..d52f0a8
+--- /dev/null
++++ b/.cargo/config.toml
+@@ -0,0 +1,2 @@
++[net]
++offline = true
+diff --git a/README.md b/README.md
+index 378711f..646ff3f 100644
+--- a/README.md
++++ b/README.md
+@@ -27,17 +27,18 @@ high-level Rust in its hot paths.
+ 5. The skald language
+ 6. Bytecode format
+ 7. Opcode reference
+-8. The value model
+-9. Memory management
+-10. The virtual machine
+-11. Embedding skald
+-12. Standard library reference
+-13. Data-structure subsystem
+-14. Utility subsystem
+-15. JSON subsystem
+-16. Testing
+-17. Design notes
+-18. Frequently asked questions
++8. Chunk audit
++9. The value model
++10. Memory management
++11. The virtual machine
++12. Embedding skald
++13. Standard library reference
++14. Data-structure subsystem
++15. Utility subsystem
++16. JSON subsystem
++17. Testing
++18. Design notes
++19. Frequently asked questions
+ 
+ ---
+ 
+@@ -108,6 +109,7 @@ skald/
+     heap.rs                reference-counted object heap
+     gc.rs                  tri-color mark-and-sweep collector
+     bytecode.rs            binary chunk format and loader
++    verify/                static audit of a loaded chunk
+     lexer.rs               tokenizer for the surface language
+     vm.rs                  stack-based bytecode interpreter
+     json.rs                JSON parser, serializer, validator
+@@ -138,7 +140,7 @@ The skald binary is a small driver over the library:
+ skald run <file.skc>       execute a compiled bytecode chunk
+ skald lex <file>           tokenize a source file and print a token count
+ skald json <file>          parse a JSON file and report validity
+-skald validate <file>      validate a bytecode chunk header
++skald validate <file>      load a chunk and audit its code
+ ```
+ 
+ ---
+@@ -301,6 +303,98 @@ undefined behavior.
+ 
+ ---
+ 
++## Chunk audit
++
++Loading a chunk proves its shape, not its contents. `chunk_load` reads the
++header, the pool and one descriptor per function, and stops there: the code
++those descriptors carry is a byte string it never opens. So an image that loads
++can still hold a byte that is not an opcode, a jump landing between two
++instructions, a call passing three arguments to a function taking two, or a
++body whose stack depth depends on which branch ran. The interpreter meets those
++one at a time, on whichever path execution takes, and answers with a status
++that says what went wrong but not where.
++
++`verify::chunk_verify` reads the image ahead of time instead:
++
++```
++use skald::bytecode::chunk_load;
++use skald::verify::chunk_verify;
++
++let chunk = chunk_load(&bytes).expect("loads");
++for flaw in chunk_verify(&chunk) {
++    println!("function {} at {}: {:?}", flaw.func, flaw.offset, flaw.kind);
++}
++```
++
++Every flaw names a function, the offset of an opcode byte inside it, and one of
++eight kinds:
++
++```
++  Opcode      a byte that is not an opcode at all
++  Truncated   operands running past the end of the code
++  Constant    a constant index past the pool, or a dict key that is not a string
++  Local       a local slot at or past the count the frame will hold
++  Function    a function index past the function table
++  Arity       a call passing arguments the callee does not declare
++  Jump        a target outside the body, or between two instructions
++  Depth       the value stack under- or overflows, or two paths disagree
++```
++
++A body is read from its first byte forward, so an unknown or truncated
++instruction ends the walk there: nothing after it is known to be code. Every
++other check reads one decoded instruction, and reports at most the first thing
++wrong with it, in the order above.
++
++The stack reading is the part that cannot be done a body at a time. There is
++one value stack for the whole program: entering a function takes its arguments
++off whatever the caller was holding and leaves the rest where it sits, so a
++callee begins as deep as its caller left it. Working that out means reading the
++callers first, and what they leave depends on reading their callers, so the
++audit settles the starting depths by iteration and then reads each body from
++the depth it found. A function no reachable call names is read from an empty
++stack, which is how the interpreter enters the entry function and the only
++reading available for one nothing arrives at. Two calls arriving at different
++depths is itself worth reporting: the body is then correct for one caller and
++wrong for the other.
++
++Inside a body, depths travel along every edge, which is how a branch that
++leaves one value and a branch that leaves two are caught meeting. A call is a
++special case in both directions: returning from a frame drains the value stack
++and pushes the result, so whatever the caller had is gone and the depth after
++any call is one.
++
++A short flawed image and what comes back:
++
++```
++  offset  bytes             what it is
++  ------  ----------------  -------------------------------------------
++  0       04                PUSH_NULL
++  1       1F 01 00          JMP_FALSE, over one byte
++  4       C3                a byte no opcode uses
++  5       01                HALT
++```
++
++```
++  0 4 opcode      the byte the walk stopped at
++```
++
++The jump is fine: it lands on the halt, which begins an instruction. The byte
++before it is not, and the walk ends there, so the stack is never read.
++
++The audit is advisory. Nothing in the loader or the interpreter consults it,
++and a chunk it finds nothing wrong with is not thereby safe: type errors,
++division by zero and runaway recursion are all run-time facts. What it removes
++is the class of faults that are visible in the image itself.
++
++Nor does it read past what a chunk records. An invocation's target is a value
++rather than an operand, so a function reached only through a closure has no
++call the audit can read a starting depth from, and it is read from empty like
++any other function nothing arrives at. A body that is only correct given a
++caller the audit cannot see is reported, which is one reason the report is
++advice rather than a gate.
++
++---
++
+ ## The value model
+ 
+ A Value (see value.rs) is a tagged union of four cases:
+@@ -1051,6 +1145,14 @@ referenced by raw pointer and lifetimes are managed by hand through reference co
+ Preserving that model keeps the port faithful and the object representation compact, at
+ the cost of concentrating the unsafe reasoning in the heap and collector modules.
+ 
++Why is the chunk audit advisory rather than a gate? Refusing to run an image
++the audit dislikes would make the engine less useful, not safer: the audit
++reads every path a body has, including ones execution never takes, and it reads
++a function nothing calls as if it were entered with an empty stack, which is a
++convention rather than a fact. An embedder that wants a gate can make one out of it in a
++line. Wiring it into the loader would take that choice away, and would put a
++whole-image analysis in front of every chunk that loads.
++
+ Why so many self-contained utilities? A scripting engine needs a broad standard library.
+ Implementing these directly, rather than pulling in dependencies, keeps the build
+ hermetic, deterministic, and free of network access, which is a hard requirement
+diff --git a/src/bin/skald.rs b/src/bin/skald.rs
+index 8523799..749faff 100644
+--- a/src/bin/skald.rs
++++ b/src/bin/skald.rs
+@@ -4,7 +4,7 @@
+ //!   skald run <file.skc>      execute a compiled bytecode chunk
+ //!   skald lex <file>          tokenise a source file and print a token count
+ //!   skald json <file>         parse a JSON file and report validity
+-//!   skald validate <file>     validate a bytecode chunk header
++//!   skald validate <file>     load a chunk and audit its code
+ //!
+ //! The driver reads whole files into memory and never touches the network.
+ 
+@@ -73,7 +73,14 @@ fn cmd_validate(path: &str) -> ExitCode {
+                 chunk.funcs.len(),
+                 chunk.entry_idx
+             );
+-            ExitCode::SUCCESS
++            let flaws = skald::verify::chunk_verify(&chunk);
++            if flaws.is_empty() {
++                println!("skald: audit clean");
++                return ExitCode::SUCCESS;
++            }
++            print!("{}", skald::verify::render(&flaws));
++            println!("skald: {} flaws", flaws.len());
++            ExitCode::FAILURE
+         }
+         None => {
+             println!("skald: malformed chunk");
+diff --git a/src/lib.rs b/src/lib.rs
+index ce132c1..09b9038 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -18,4 +18,5 @@ pub mod stdlib;
+ pub mod symbol;
+ pub mod util;
+ pub mod value;
++pub mod verify;
+ pub mod vm;
+diff --git a/src/verify/decode.rs b/src/verify/decode.rs
+new file mode 100644
+index 0000000..a0a1432
+--- /dev/null
++++ b/src/verify/decode.rs
+@@ -0,0 +1,152 @@
++//! Instruction decoding — turning a function body into the instructions the
++//! interpreter would actually execute.
++//!
++//! The loader hands back a `Vec<u8>` per function and says nothing about what
++//! is in it. Every check in this subsystem needs the same thing first: where
++//! each instruction starts and how far it runs. The VM answers that one byte
++//! at a time as it executes (`Vm::read_u8` and friends), so the widths here
++//! are the same widths the dispatch loop reads, in the same order:
++//!
++//! ```text
++//!   0 bytes   NOP HALT PUSH_NULL POP DUP ARRAY_PUSH ARRAY_GET ARRAY_LEN
++//!             RETURN ADD SUB MUL DIV MOD EQ LT LE NOT NEG CONCAT PRINT
++//!             TYPE_OF INCREF DECREF GC
++//!   1 byte    LOAD STORE NEW_OBJ INVOKE
++//!   2 bytes   PUSH_CONST DICT_SET DICT_GET JMP JMP_TRUE JMP_FALSE JMP_NULL
++//!   3 bytes   CALL NEW_CLOSURE
++//!   4 bytes   PUSH_INT
++//! ```
++//!
++//! A byte outside that set is not an opcode, and an opcode whose operands do
++//! not fit in what is left of the body is the end of the readable part: the
++//! bytes after it belong to an instruction that was never finished, so calling
++//! them code would be a guess.
++
++use crate::bytecode::*;
++
++/// One decoded instruction: the opcode, where its byte sits in the function's
++/// code, and how many bytes it occupies including its operands.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct Insn {
++    pub offset: u16,
++    pub op: u8,
++    pub len: u16,
++}
++
++/// Why a linear walk stopped before the end of a function body.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Stop {
++    /// The byte at this offset is not an opcode the interpreter knows.
++    Unknown,
++    /// The opcode is known but its operands run past the end of the code.
++    Truncated,
++}
++
++/// A decoded function body.
++pub struct Body {
++    /// Instructions in the order a linear walk from offset zero meets them.
++    pub insns: Vec<Insn>,
++    /// `starts[o]` is true when offset `o` begins a decoded instruction. The
++    /// vector has one extra entry, for `code.len()`, because falling off the
++    /// end of a body is how the interpreter returns from a frame and is
++    /// therefore a place a jump may legitimately land.
++    pub starts: Vec<bool>,
++    /// The offset the walk stopped at, and what stopped it.
++    pub stop: Option<(u16, Stop)>,
++    /// The body's own bytes, kept so operand readers do not need them passed
++    /// alongside every call.
++    pub code: Vec<u8>,
++}
++
++impl Body {
++    /// The unsigned 16-bit operand `n` bytes past an instruction's opcode.
++    pub fn u16_at(&self, insn: &Insn, n: u16) -> u16 {
++        let p = (insn.offset + 1 + n) as usize;
++        self.code[p] as u16 | ((self.code[p + 1] as u16) << 8)
++    }
++
++    /// The signed 16-bit operand `n` bytes past an instruction's opcode.
++    pub fn i16_at(&self, insn: &Insn, n: u16) -> i16 {
++        self.u16_at(insn, n) as i16
++    }
++
++    /// The single byte operand `n` bytes past an instruction's opcode.
++    pub fn u8_at(&self, insn: &Insn, n: u16) -> u8 {
++        self.code[(insn.offset + 1 + n) as usize]
++    }
++
++    /// Where the instruction after this one begins.
++    pub fn next_offset(&self, insn: &Insn) -> u16 {
++        insn.offset + insn.len
++    }
++}
++
++/// How many operand bytes an opcode carries, or `None` when the byte is not an
++/// opcode at all. Mirrors the reads the dispatch loop makes for each case.
++pub fn operand_width(op: u8) -> Option<u16> {
++    let w = match op {
++        OP_NOP | OP_HALT | OP_PUSH_NULL | OP_POP | OP_DUP => 0,
++        OP_ARRAY_PUSH | OP_ARRAY_GET | OP_ARRAY_LEN => 0,
++        OP_RETURN => 0,
++        OP_ADD | OP_SUB | OP_MUL | OP_DIV | OP_MOD => 0,
++        OP_EQ | OP_LT | OP_LE | OP_NOT | OP_NEG => 0,
++        OP_CONCAT | OP_PRINT | OP_TYPE_OF => 0,
++        OP_INCREF | OP_DECREF | OP_GC => 0,
++        OP_LOAD | OP_STORE | OP_NEW_OBJ | OP_INVOKE => 1,
++        OP_PUSH_CONST | OP_DICT_SET | OP_DICT_GET => 2,
++        OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL => 2,
++        OP_CALL | OP_NEW_CLOSURE => 3,
++        OP_PUSH_INT => 4,
++        _ => return None,
++    };
++    Some(w)
++}
++
++/// Walk a function body from its first byte, decoding one instruction after
++/// another until the bytes run out or a byte cannot be decoded.
++pub fn decode(code: &[u8]) -> Body {
++    let len = code.len() as u16;
++    let mut insns = Vec::new();
++    let mut starts = vec![false; code.len() + 1];
++    starts[code.len()] = true;
++    let mut stop = None;
++
++    let mut pos: u16 = 0;
++    while (pos as usize) < code.len() {
++        let op = code[pos as usize];
++        let Some(width) = operand_width(op) else {
++            stop = Some((pos, Stop::Unknown));
++            break;
++        };
++        // An instruction whose operands reach past the last byte is one the
++        // interpreter would read as zeroes with a bad-opcode status latched,
++        // so nothing after it is code and the walk cannot continue.
++        if pos as u32 + 1 + width as u32 > len as u32 {
++            stop = Some((pos, Stop::Truncated));
++            break;
++        }
++        starts[pos as usize] = true;
++        insns.push(Insn {
++            offset: pos,
++            op,
++            len: 1 + width,
++        });
++        pos += 1 + width;
++    }
++
++    Body {
++        insns,
++        starts,
++        stop,
++        code: code.to_vec(),
++    }
++}
++
++/// True when an offset begins a decoded instruction, or is the one-past-the-end
++/// offset a body returns from.
++pub fn is_boundary(body: &Body, target: i32) -> bool {
++    if target < 0 || target as usize >= body.starts.len() {
++        return false;
++    }
++    body.starts[target as usize]
++}
+diff --git a/src/verify/depth.rs b/src/verify/depth.rs
+new file mode 100644
+index 0000000..f4c6d84
+--- /dev/null
++++ b/src/verify/depth.rs
+@@ -0,0 +1,245 @@
++//! Stack shape — what the value stack holds at each instruction of a function.
++//!
++//! The interpreter meets a stack fault only on the path it happens to take: a
++//! pop below an empty stack answers null with `StackUnderflow` latched, a push
++//! past [`VM_STACK_MAX`] stops with `StackOverflow`. Reading the same body
++//! ahead of time means following every path instead of one.
++//!
++//! Each function is read on its own, entered with an empty stack, because a
++//! chunk says which functions exist and not which ones call which with what
++//! left over. Depths propagate along every edge a body has, so an instruction
++//! two branches reach carries both of their depths, and the two disagreeing is
++//! itself worth reporting: it means the body's shape depends on which way
++//! control went, which is not something a compiler emits on purpose.
++
++use crate::bytecode::*;
++use crate::verify::decode::{is_boundary, Body, Insn};
++use crate::vm::VM_STACK_MAX;
++
++/// What one instruction does to the depth of the value stack.
++enum Effect {
++    /// Reads `needs` slots, removes `pops` of them, and leaves `pushes` behind.
++    Shape {
++        needs: u16,
++        pops: u16,
++        pushes: u16,
++    },
++    /// Enters another function with `needs` slots beneath it. A frame returns
++    /// by draining the value stack and pushing its result, so whatever the
++    /// caller had is gone and the depth afterwards is one.
++    Call { needs: u16 },
++    /// Control does not continue past this instruction.
++    End,
++}
++
++fn effect(body: &Body, insn: &Insn) -> Effect {
++    let shape = |needs: u16, pops: u16, pushes: u16| Effect::Shape {
++        needs,
++        pops,
++        pushes,
++    };
++    match insn.op {
++        OP_NOP | OP_GC | OP_JMP => shape(0, 0, 0),
++        OP_HALT | OP_RETURN => Effect::End,
++        OP_PUSH_CONST | OP_PUSH_INT | OP_PUSH_NULL | OP_LOAD => shape(0, 0, 1),
++        OP_NEW_OBJ | OP_NEW_CLOSURE => shape(0, 0, 1),
++        OP_DUP => shape(1, 0, 1),
++        OP_POP | OP_STORE | OP_PRINT | OP_DECREF => shape(1, 1, 0),
++        OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL => shape(1, 1, 0),
++        OP_NOT | OP_NEG | OP_ARRAY_LEN | OP_TYPE_OF => shape(1, 1, 1),
++        OP_INCREF => shape(1, 0, 0),
++        OP_DICT_GET => shape(1, 1, 1),
++        // Both of these read the container underneath and leave it there.
++        OP_ARRAY_PUSH | OP_DICT_SET => shape(2, 1, 0),
++        OP_ARRAY_GET => shape(2, 2, 1),
++        OP_ADD | OP_SUB | OP_MUL | OP_DIV | OP_MOD => shape(2, 2, 1),
++        OP_EQ | OP_LT | OP_LE | OP_CONCAT => shape(2, 2, 1),
++        OP_CALL => Effect::Call {
++            needs: body.u8_at(insn, 2) as u16,
++        },
++        // A closure sits under its arguments, so an invocation reads one slot
++        // more than it passes.
++        OP_INVOKE => Effect::Call {
++            needs: body.u8_at(insn, 0) as u16 + 1,
++        },
++        _ => shape(0, 0, 0),
++    }
++}
++
++/// The lowest offset in `body` whose stack shape is wrong, if any is, reading
++/// it from the depth its callers leave.
++///
++/// Reachable depths are collected first and read afterwards, so the answer is
++/// the earliest offset in the body rather than the first one some traversal
++/// happened to reach.
++pub fn first_flaw(body: &Body, entry: u16) -> Option<u16> {
++    if body.insns.is_empty() {
++        return None;
++    }
++    let ceiling = VM_STACK_MAX as u16;
++    let mut at: Vec<usize> = vec![usize::MAX; body.starts.len()];
++    for (i, insn) in body.insns.iter().enumerate() {
++        at[insn.offset as usize] = i;
++    }
++
++    // reached[i][d] records that instruction i can be entered with depth d.
++    let mut reached: Vec<Vec<bool>> = vec![vec![false; ceiling as usize + 1]; body.insns.len()];
++    let mut work: Vec<(usize, u16)> = vec![(0, entry)];
++    reached[0][entry as usize] = true;
++
++    while let Some((i, depth)) = work.pop() {
++        let insn = body.insns[i];
++        let go = |work: &mut Vec<(usize, u16)>, reached: &mut Vec<Vec<bool>>, target: i32, d: u16| {
++            if !is_boundary(body, target) || d > ceiling {
++                return;
++            }
++            let j = at[target as usize];
++            if j == usize::MAX || reached[j][d as usize] {
++                return;
++            }
++            reached[j][d as usize] = true;
++            work.push((j, d));
++        };
++        match effect(body, &insn) {
++            Effect::End => {}
++            Effect::Call { needs } => {
++                if depth >= needs {
++                    go(&mut work, &mut reached, body.next_offset(&insn) as i32, 1);
++                }
++            }
++            Effect::Shape {
++                needs,
++                pops,
++                pushes,
++            } => {
++                if depth < needs {
++                    continue;
++                }
++                let after = depth - pops + pushes;
++                if after > ceiling {
++                    continue;
++                }
++                if insn.op != OP_JMP {
++                    go(&mut work, &mut reached, body.next_offset(&insn) as i32, after);
++                }
++                if matches!(
++                    insn.op,
++                    OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL
++                ) {
++                    let off = body.i16_at(&insn, 0) as i32;
++                    go(
++                        &mut work,
++                        &mut reached,
++                        body.next_offset(&insn) as i32 + off,
++                        after,
++                    );
++                }
++            }
++        }
++    }
++
++    for (i, insn) in body.insns.iter().enumerate() {
++        let depths: Vec<u16> = (0..=ceiling).filter(|d| reached[i][*d as usize]).collect();
++        if depths.is_empty() {
++            continue;
++        }
++        if depths.len() > 1 {
++            return Some(insn.offset);
++        }
++        let depth = depths[0];
++        match effect(body, insn) {
++            Effect::End => {}
++            Effect::Call { needs } => {
++                if depth < needs {
++                    return Some(insn.offset);
++                }
++            }
++            Effect::Shape {
++                needs,
++                pops,
++                pushes,
++            } => {
++                if depth < needs || depth - pops + pushes > ceiling {
++                    return Some(insn.offset);
++                }
++            }
++        }
++    }
++    None
++}
++
++// ── where a function is entered from ────────────────────────────────────
++
++/// Every `CALL` this body reaches, as (function named, depth the callee is
++/// entered with). The value stack is one stack for the whole program, so a
++/// callee begins holding whatever the caller had left once its arguments have
++/// been taken off.
++pub fn call_sites(body: &Body, entry: u16) -> Vec<(u16, u16)> {
++    let ceiling = VM_STACK_MAX as u16;
++    let mut at: Vec<usize> = vec![usize::MAX; body.starts.len()];
++    for (i, insn) in body.insns.iter().enumerate() {
++        at[insn.offset as usize] = i;
++    }
++    if body.insns.is_empty() {
++        return Vec::new();
++    }
++    let mut reached: Vec<Vec<bool>> = vec![vec![false; ceiling as usize + 1]; body.insns.len()];
++    let mut work: Vec<(usize, u16)> = vec![(0, entry)];
++    reached[0][entry as usize] = true;
++    let mut sites: Vec<(u16, u16)> = Vec::new();
++
++    while let Some((i, depth)) = work.pop() {
++        let insn = body.insns[i];
++        let go = |work: &mut Vec<(usize, u16)>, reached: &mut Vec<Vec<bool>>, target: i32, d: u16| {
++            if !is_boundary(body, target) || d > ceiling {
++                return;
++            }
++            let j = at[target as usize];
++            if j == usize::MAX || reached[j][d as usize] {
++                return;
++            }
++            reached[j][d as usize] = true;
++            work.push((j, d));
++        };
++        match effect(body, &insn) {
++            Effect::End => {}
++            Effect::Call { needs } => {
++                if depth < needs {
++                    continue;
++                }
++                if insn.op == OP_CALL {
++                    sites.push((body.u16_at(&insn, 0), depth - needs));
++                }
++                go(&mut work, &mut reached, body.next_offset(&insn) as i32, 1);
++            }
++            Effect::Shape {
++                needs,
++                pops,
++                pushes,
++            } => {
++                if depth < needs {
++                    continue;
++                }
++                let after = depth - pops + pushes;
++                if after > ceiling {
++                    continue;
++                }
++                if insn.op != OP_JMP {
++                    go(&mut work, &mut reached, body.next_offset(&insn) as i32, after);
++                }
++                if matches!(insn.op, OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL) {
++                    let off = body.i16_at(&insn, 0) as i32;
++                    go(
++                        &mut work,
++                        &mut reached,
++                        body.next_offset(&insn) as i32 + off,
++                        after,
++                    );
++                }
++            }
++        }
++    }
++    sites.sort_unstable();
++    sites.dedup();
++    sites
++}
+diff --git a/src/verify/mod.rs b/src/verify/mod.rs
+new file mode 100644
+index 0000000..8bb70fd
+--- /dev/null
++++ b/src/verify/mod.rs
+@@ -0,0 +1,351 @@
++//! Static audit of a loaded chunk — the reading the loader does not do.
++//!
++//! [`chunk_load`](crate::bytecode::chunk_load) reads a chunk's shape: magic,
++//! version, the constant pool, and one descriptor per function. It never looks
++//! at the code those descriptors carry, so an image that loads cleanly can
++//! still hold a byte that is not an opcode, a jump landing between two
++//! instructions, a call passing three arguments to a function that declares
++//! two, or a body whose stack shape depends on which branch ran. The
++//! interpreter meets those one at a time, at run time, on whichever path
++//! happens to reach them, and reports a status without saying where.
++//!
++//! [`chunk_verify`] reads the whole image instead, before anything runs, and
++//! reports what it finds as a list of [`Flaw`]s.
++
++mod decode;
++mod depth;
++
++use crate::bytecode::*;
++use decode::{is_boundary, Body, Insn, Stop};
++use std::collections::BTreeSet;
++
++/// What is wrong at one place in a chunk.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum FlawKind {
++    /// The byte is not an opcode the interpreter knows.
++    Opcode,
++    /// The opcode's operands run past the end of the function's code.
++    Truncated,
++    /// A constant index reaches past the pool, or a dictionary key index names
++    /// a constant that is not a string.
++    Constant,
++    /// A local slot at or past the count the frame will hold.
++    Local,
++    /// A function index reaching past the function table.
++    Function,
++    /// A call passing a number of arguments the callee does not declare.
++    Arity,
++    /// A jump landing outside the body, or between two instructions.
++    Jump,
++    /// The value stack under- or overflows, or two paths reach one instruction
++    /// with different depths.
++    Depth,
++}
++
++/// One thing the audit found, at one instruction of one function.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct Flaw {
++    /// Index of the function in the chunk's function table.
++    pub func: u16,
++    /// Offset of the opcode byte inside that function's code.
++    pub offset: u16,
++    pub kind: FlawKind,
++}
++
++/// How many local slots a frame for `func` will hold.
++///
++/// A frame carries its parameters and its declared locals, and one slot more
++/// when it is entered through a closure, because the captured value lands in
++/// slot zero and pushes everything else up. So the ceiling a `LOAD` has to
++/// respect depends on whether any function in the chunk makes a closure over
++/// this one, which is a fact about the whole image rather than about the body
++/// being read.
++fn slot_counts(chunk: &Chunk, bodies: &[Body]) -> Vec<u16> {
++    let mut captured = vec![false; chunk.funcs.len()];
++    for body in bodies {
++        for insn in &body.insns {
++            if insn.op != OP_NEW_CLOSURE {
++                continue;
++            }
++            let target = body.u16_at(insn, 0) as usize;
++            if target < captured.len() {
++                captured[target] = true;
++            }
++        }
++    }
++    chunk
++        .funcs
++        .iter()
++        .zip(captured)
++        .map(|(f, over)| f.param_count as u16 + f.local_count as u16 + u16::from(over))
++        .collect()
++}
++
++/// The constant at `idx`, if the pool holds one there.
++fn constant<'a>(chunk: &'a Chunk, idx: u16) -> Option<&'a Constant> {
++    chunk.constants.get(idx as usize)
++}
++
++
++/// The depth a function's frame is entered with.
++enum Entry {
++    /// Every call that reaches it leaves the stack the same height.
++    At(u16),
++    /// Two calls reach it holding different amounts.
++    Conflict,
++}
++
++/// Work out what each function is entered holding.
++///
++/// The value stack belongs to the program rather than to a frame: entering a
++/// function takes its arguments off whatever the caller had, and leaves the
++/// rest where it was. So a body cannot be read on its own, and what a call
++/// site leaves depends on reading the caller first, which is why this settles
++/// by iteration rather than in one pass.
++///
++/// A function no reachable call names is read from an empty stack, which is
++/// what the interpreter does with the entry function and the only reading
++/// available for one nothing arrives at.
++fn entry_depths(chunk: &Chunk, bodies: &[Body]) -> Vec<Entry> {
++    let count = chunk.funcs.len();
++    let mut depths: Vec<BTreeSet<u16>> = vec![BTreeSet::new(); count];
++    let mut called = vec![false; count];
++    for body in bodies {
++        for insn in &body.insns {
++            if insn.op == OP_CALL {
++                let target = body.u16_at(insn, 0) as usize;
++                if target < count {
++                    called[target] = true;
++                }
++            }
++        }
++    }
++    depths[chunk.entry_idx as usize].insert(0);
++    for (func, names) in called.iter().enumerate() {
++        if !names {
++            depths[func].insert(0);
++        }
++    }
++
++    loop {
++        loop {
++            let mut moved = false;
++            for func in 0..count {
++                if depths[func].len() != 1 || bodies[func].stop.is_some() {
++                    continue;
++                }
++                let from = *depths[func].iter().next().unwrap();
++                for (target, entry) in depth::call_sites(&bodies[func], from) {
++                    let target = target as usize;
++                    if target < count && depths[target].insert(entry) {
++                        moved = true;
++                    }
++                }
++            }
++            if !moved {
++                break;
++            }
++        }
++        // A function only ever called from code nothing reaches has no depth
++        // to inherit. Every one of those is read from empty, together, so the
++        // answer does not depend on which was looked at first.
++        let stranded: Vec<usize> = (0..count).filter(|f| depths[*f].is_empty()).collect();
++        if stranded.is_empty() {
++            break;
++        }
++        for func in stranded {
++            depths[func].insert(0);
++        }
++    }
++
++    depths
++        .into_iter()
++        .map(|set| {
++            if set.len() == 1 {
++                Entry::At(*set.iter().next().unwrap())
++            } else {
++                Entry::Conflict
++            }
++        })
++        .collect()
++}
++
++/// The checks that read one decoded instruction, in the order the audit takes
++/// them. The first that answers is the one reported, so a call naming a
++/// function that does not exist is a `Function` flaw and its argument count is
++/// never weighed against a callee there is no way to find.
++fn instruction_flaw(
++    chunk: &Chunk,
++    slots: &[u16],
++    body: &Body,
++    func: usize,
++    insn: &Insn,
++) -> Option<FlawKind> {
++    match insn.op {
++        OP_PUSH_CONST => {
++            if constant(chunk, body.u16_at(insn, 0)).is_none() {
++                return Some(FlawKind::Constant);
++            }
++        }
++        OP_DICT_SET | OP_DICT_GET => {
++            match constant(chunk, body.u16_at(insn, 0)) {
++                Some(Constant::Str(_)) => {}
++                _ => return Some(FlawKind::Constant),
++            }
++        }
++        OP_LOAD | OP_STORE => {
++            if body.u8_at(insn, 0) as u16 >= slots[func] {
++                return Some(FlawKind::Local);
++            }
++        }
++        OP_NEW_CLOSURE => {
++            if body.u8_at(insn, 2) as u16 >= slots[func] {
++                return Some(FlawKind::Local);
++            }
++            if body.u16_at(insn, 0) as usize >= chunk.funcs.len() {
++                return Some(FlawKind::Function);
++            }
++        }
++        OP_CALL => {
++            let target = body.u16_at(insn, 0) as usize;
++            let Some(callee) = chunk.funcs.get(target) else {
++                return Some(FlawKind::Function);
++            };
++            if body.u8_at(insn, 2) != callee.param_count {
++                return Some(FlawKind::Arity);
++            }
++        }
++        OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL => {
++            // Offsets are relative to the instruction after the jump, which is
++            // where the interpreter's instruction pointer sits once it has read
++            // the operand.
++            let target = body.next_offset(insn) as i32 + body.i16_at(insn, 0) as i32;
++            if !is_boundary(body, target) {
++                return Some(FlawKind::Jump);
++            }
++        }
++        _ => {}
++    }
++    None
++}
++
++/// Audit every function of a loaded chunk.
++///
++/// Flaws come out ordered by function index, and by offset within a function.
++/// That is a report order, not the order the checks run in: instructions are
++/// read one at a time from the first byte forward, while the stack shape of a
++/// body is only known once the whole body has been walked, so a flaw belonging
++/// to the first instruction can be the last one found.
++///
++/// A body is read from its first byte: an unknown or truncated instruction
++/// ends that body's walk, because nothing after it can be known to be code,
++/// and the stack shape of a body that stopped is not read at all. Everything
++/// else is read whether execution could reach it or not, dead code included,
++/// with one exception: an instruction no path arrives at has no depth to
++/// disagree about, so it is only the stack reading that skips it.
++pub fn chunk_verify(chunk: &Chunk) -> Vec<Flaw> {
++    let bodies: Vec<Body> = chunk.funcs.iter().map(|f| decode::decode(&f.code)).collect();
++    let slots = slot_counts(chunk, &bodies);
++    let entries = entry_depths(chunk, &bodies);
++    let mut flaws = Vec::new();
++
++    for (func, body) in bodies.iter().enumerate() {
++        let mut found: Vec<Flaw> = Vec::new();
++        for insn in &body.insns {
++            if let Some(kind) = instruction_flaw(chunk, &slots, body, func, insn) {
++                found.push(Flaw {
++                    func: func as u16,
++                    offset: insn.offset,
++                    kind,
++                });
++            }
++        }
++        match body.stop {
++            Some((offset, stop)) => found.push(Flaw {
++                func: func as u16,
++                offset,
++                kind: match stop {
++                    Stop::Unknown => FlawKind::Opcode,
++                    Stop::Truncated => FlawKind::Truncated,
++                },
++            }),
++            // `Depth` comes last in the order the checks are taken, so where
++            // the offset it lands on already carries an instruction's flaw,
++            // that one is what the instruction reports.
++            None => {
++                if let Some(offset) = entry_flaw(body, &entries[func]) {
++                    if !found.iter().any(|f| f.offset == offset) {
++                        found.push(Flaw {
++                            func: func as u16,
++                            offset,
++                            kind: FlawKind::Depth,
++                        });
++                    }
++                }
++            }
++        }
++        found.sort_by_key(|f| f.offset);
++        flaws.extend(found);
++    }
++    flaws
++}
++
++/// The depth flaw a body carries, if it has one. A function two calls reach
++/// holding different amounts is reported at its first byte, which is as early
++/// as an offset goes, so nothing inside it can come first.
++fn entry_flaw(body: &Body, entry: &Entry) -> Option<u16> {
++    match entry {
++        Entry::Conflict => Some(0),
++        Entry::At(depth) => depth::first_flaw(body, *depth),
++    }
++}
++
++/// True when an audit found nothing to report.
++pub fn chunk_is_clean(chunk: &Chunk) -> bool {
++    chunk_verify(chunk).is_empty()
++}
++
++/// Load a chunk and audit it in one step, for a host holding bytes rather than
++/// a parsed image. `None` means the bytes are not a chunk at all, which is the
++/// loader's answer and not the audit's.
++pub fn verify_bytes(data: &[u8]) -> Option<Vec<Flaw>> {
++    chunk_load(data).map(|chunk| chunk_verify(&chunk))
++}
++
++impl FlawKind {
++    /// The one-word name this kind renders under.
++    pub fn label(&self) -> &'static str {
++        match self {
++            FlawKind::Opcode => "opcode",
++            FlawKind::Truncated => "truncated",
++            FlawKind::Constant => "constant",
++            FlawKind::Local => "local",
++            FlawKind::Function => "function",
++            FlawKind::Arity => "arity",
++            FlawKind::Jump => "jump",
++            FlawKind::Depth => "depth",
++        }
++    }
++}
++
++impl std::fmt::Display for FlawKind {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str(self.label())
++    }
++}
++
++impl std::fmt::Display for Flaw {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        write!(f, "{} {} {}", self.func, self.offset, self.kind)
++    }
++}
++
++/// One line per flaw, in the order [`chunk_verify`] returns them.
++pub fn render(flaws: &[Flaw]) -> String {
++    let mut out = String::new();
++    for flaw in flaws {
++        out.push_str(&flaw.to_string());
++        out.push('\n');
++    }
++    out
++}

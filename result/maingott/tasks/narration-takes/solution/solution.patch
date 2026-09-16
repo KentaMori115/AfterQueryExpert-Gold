@@ -1,0 +1,1745 @@
+diff --git a/.env.example b/.env.example
+index 887bc17..45c56cd 100644
+--- a/.env.example
++++ b/.env.example
+@@ -26,6 +26,9 @@ VOICE_INSTRUCTIONS=
+ VOICE_SPEED=
+ # fail | regenerate — what to do when the narration overruns the timeline.
+ VOICE_FIT_STRATEGY=fail
++# whole | scene — one take for the Reel, or one take per storyboard scene.
++VOICE_TAKES=whole
++# Speaking-speed window a regenerate round may use to fit every take.
+ VOICE_MIN_SPEED=0.9
+ VOICE_MAX_SPEED=1.2
+ # --- Cost control ---
+diff --git a/README.md b/README.md
+index d2bfc5c..564edcd 100644
+--- a/README.md
++++ b/README.md
+@@ -23,6 +23,16 @@ maingott-reel approve --by NAME --version v1.0.0
+ maingott-reel release                       # immutable package
+ ```
+ 
++Narration is spoken as one take by default. `VOICE_TAKES=scene` speaks each
++storyboard scene separately and fits each line to its own scene, which is what
++you want once the timing matters more than the recording session does.
++Each take is checked against its own scene, an overrun names every scene
++that spills, and `VOICE_FIT_STRATEGY=regenerate` re-speaks the whole Reel at
++one shared speed inside `VOICE_MIN_SPEED`..`VOICE_MAX_SPEED`.
++A run the provider refuses part of the way through stops at that take and
++keeps what it already spoke, so running the stage again once the refusal is
++fixed speaks only the scenes that never got their turn.
++
+ Every paid stage takes `--dry-run` and `--offline`, both of which work without
+ an API key. A Reel built offline is a development output and `validate
+ --strict` says so.
+diff --git a/TASKS.md b/TASKS.md
+index 56f60bf..76dda64 100644
+--- a/TASKS.md
++++ b/TASKS.md
+@@ -9,3 +9,10 @@
+ - [x] Phase 6: validation
+ - [x] Phase 7: voice generation + end-to-end CLI
+ - [x] Phase 8: release readiness, cost control and approval
++- [x] Phase 9: scene-by-scene narration
++  - [x] `VOICE_TAKES=scene` speaks one take per storyboard scene
++  - [x] each take measured against its own scene from the audio
++  - [x] shared-speed regenerate round bounded by the speed window
++  - [x] takes laid onto the timeline into one full-length track
++  - [x] `cost-estimate` plans and prices per take
++  - [x] a refused take stops the round, and a later attempt speaks the rest
+diff --git a/docs/architecture/ARCHITECTURE.md b/docs/architecture/ARCHITECTURE.md
+index 86e8f0c..fc46f29 100644
+--- a/docs/architecture/ARCHITECTURE.md
++++ b/docs/architecture/ARCHITECTURE.md
+@@ -211,6 +211,44 @@ Delivery is configuration, not code: the versioned prompt in
+ `prompts/voice/narration.md` steers *how* the words are spoken and is sent as
+ the provider's `instructions`. It cannot change the words.
+ 
++### Takes
++
++`VOICE_TAKES` decides how much of the script goes to the provider at once.
++`whole`, the default, asks for the Reel in one piece and measures it against
++the whole timeline. `scene` asks for each storyboard scene's voiceover on its
++own, and measures each take against the seconds that scene actually runs —
++which is the only way to notice that a line is still being spoken after its
++scene has cut away.
++
++Cutting the script changes three things and nothing else:
++
++- **fitting is per scene.** A take that overruns is answered the way an
++  overrunning Reel always was, by re-speaking rather than by rewriting. The
++  difference is that one speaking speed is chosen for the whole Reel, the
++  slowest that makes every take fit, because a Reel that speeds up for one
++  scene and slows down for the next sounds broken even when every scene fits;
++- **repeated words are paid for once.** Take audio is content-addressed like
++  every other generated asset, so two scenes that say the same thing at the
++  same speed share one generated file, in this run and in every later one;
++- **the takes are laid onto the storyboard's timeline**, each starting at its
++  own scene's start instant, with silence in between. What comes out is a
++  single track of exactly the Reel's length, so composition, the audit and the
++  release gates read what they always read.
++
++The record follows: `voice.json` still describes one track bound to the whole
++approved script, and lists what was spoken for each scene. Its measured speech
++metrics describe the words, not the silence between them — counting the gaps
++as delivery would describe a speaker nobody recorded.
++
++A fourth thing follows from the first three rather than being a decision of its
++own. Because takes are asked for one at a time and cached as they arrive, a
++take the provider refuses ends the round where it stands: the scenes after it
++are never sent, and the ones before it stay in the cache. The stage reports a
++failure with the takes it managed as evidence, and a later attempt at the same
++run speaks the remainder. Carrying on past a refusal would buy nothing — the
++provider is refusing a voice, a format or a language, and would refuse the next
++scene for the same reason — while paying for it once per remaining scene.
++
+ The narration is measured from the audio, never from provider metadata, and
+ compared with the storyboard's timeline. If the same words cannot be heard
+ inside the Reel, that is reported. The script is never shortened to fit: the
+diff --git a/docs/architecture/OPENAI_INTEGRATION.md b/docs/architecture/OPENAI_INTEGRATION.md
+index 3156788..b7b0729 100644
+--- a/docs/architecture/OPENAI_INTEGRATION.md
++++ b/docs/architecture/OPENAI_INTEGRATION.md
+@@ -60,3 +60,32 @@ Handle authentication errors, rate limits, transient failures, malformed outputs
+ Record model, duration, resolution, generation count and usage/cost metadata where available.
+ 
+ Never expose secrets in logs, prompts or generated files.
++
++## Speech requests in scene mode
++
++With `VOICE_TAKES=scene` the voice stage sends one speech request per distinct
++take rather than one per Reel. The text of a request is the voiceover of a
++single storyboard scene, the `speed` parameter is the shared speed of the
++current round (omitted for the provider default), and every other parameter
++(model, voice, format, instructions, language) is the same for every take in
++the run. Two scenes with identical words at the same speed share one request;
++the second is served from the local cache, in this run and in later ones.
++
++A regenerate round therefore costs one request per take that is not already
++cached at the new speed. `cost-estimate` counts requests the same way, so the
++number it prints is the number of calls the stage would still make.
++
++### A refused request ends the round
++
++Requests go out one at a time, in storyboard order, and the round stops at the
++first one the provider will not answer. The scenes after it are never sent, so
++a voice the account cannot use, or a format it does not offer, costs one
++rejected request rather than one per scene. The run's request log shows the
++successes that came before it and the rejection that ended it, in that order.
++
++Each answered request is written to the cache as it arrives, not at the end of
++the round, which is what makes a stopped round worth resuming: the next attempt
++finds those takes already there and sends requests only for the scenes that
++were never reached. Nothing distinguishes a resumed attempt from a first one in
++the code that talks to the provider — it asks for what is not cached, and after
++a stopped round that happens to be the tail of the Reel.
+diff --git a/docs/development/DATA_SCHEMAS.md b/docs/development/DATA_SCHEMAS.md
+index 02e59fa..233ad05 100644
+--- a/docs/development/DATA_SCHEMAS.md
++++ b/docs/development/DATA_SCHEMAS.md
+@@ -86,6 +86,55 @@ composition and the audit both refuse a track whose hash does not match.
+ regeneration at a different speaking speed — and the words are never among
+ them. `development` marks a placeholder track.
+ 
++## NarrationTake
++`scene_id, text_sha256, cache_key, characters, start_seconds, duration_seconds,
++scene_seconds, speed, cache_hit`
++
++One scene's narration inside a track that was spoken scene by scene. A take is
++not an asset of its own: the run holds one narration file, and these say which
++words were spoken for which scene, where they sit on the timeline, how long
++they turned out to be and how fast they were delivered. `speed` is null when
++the provider's default was used. `end_seconds`, `headroom_seconds` and
++`fits_scene` are derived. `VoiceAsset.takes` is empty for a Reel spoken as one
++take, which is what `VOICE_TAKES=whole` does and what happens by default.
++
++The run's request log gains one `audio.speech` record per take that was
++actually generated. Words a later scene repeats at the same speed make no
++request at all, in this run or in a later one that finds the take cached, so a
++run that re-lays an unchanged script over a rescaled storyboard adds nothing
++to the log. Counting `success` records is counting paid speech calls.
++
++One entry, as it appears under `takes` in `voice.json`:
++
++```json
++{
++  "scene_id": "S-03",
++  "text_sha256": "…",
++  "cache_key": "…",
++  "characters": 39,
++  "start_seconds": 8.0,
++  "duration_seconds": 2.6,
++  "scene_seconds": 5.0,
++  "speed": null,
++  "cache_hit": false
++}
++```
++
++A `voice.json` written by a stopped round is a normal record with `status`
++`failed`, `error` carrying the provider's own words, and `takes` holding the
++scenes that were spoken before the refusal — four entries for a Reel of eight
++that was refused at the fifth. It is not a partial track: `path` is unset,
++because no audio was laid onto the timeline. Read it as a receipt for what the
++run has already paid for rather than as a result, and note that the take of the
++refused scene is not among the entries, since nothing came back for it.
++
++The request log tells the same story a call at a time: one `audio.speech`
++record with outcome `success` per take that was spoken, then one with outcome
++`rejected` for the take that was not, and nothing at all for the scenes after
++it. A run that is attempted twice therefore has two runs of records in one
++log, and the second is shorter than the first by every take the first one
++managed to speak.
++
+ ## Composition
+ `version, created_at, run_id, language, target_duration_seconds, timeline_duration_seconds, settings, scenes, captions, audio, logo, font, styles, source_sha256, storyboard_sha256, narration_sha256, assets_sha256, composition_sha256, output_path, output_sha256, output_size_bytes, validation, readiness, development`
+ 
+diff --git a/docs/development/IMPLEMENTATION_PLAN.md b/docs/development/IMPLEMENTATION_PLAN.md
+index 2980332..17b666e 100644
+--- a/docs/development/IMPLEMENTATION_PLAN.md
++++ b/docs/development/IMPLEMENTATION_PLAN.md
+@@ -46,4 +46,19 @@ Implement:
+ ## Phase 8 — Hardening
+ Add dry-run, resume, cost estimates, structured logs, run comparison and approval gates.
+ 
++## Phase 9 — Scene takes
++Cut the narration to the storyboard when `VOICE_TAKES=scene`:
++
++- speak each scene's voiceover as its own take, one provider call per distinct
++  text at a given speed, shared across scenes and across runs through the cache;
++- measure every take from the audio that came back and hold it against its own
++  scene with the timeline tolerance, naming every scene that overruns;
++- on overrun with `regenerate`, re-speak all takes at one shared speed inside
++  `VOICE_MIN_SPEED`..`VOICE_MAX_SPEED`, refusing when no such speed exists;
++- lay the takes onto the storyboard timeline into one full-length track and
++  record them in `voice.json` beside the unchanged narration hash;
++- teach `cost-estimate` to plan and price one item per take.
++- stop the round at the first take the provider will not speak, keeping what
++  was already spoken so a later attempt at the same run pays only for the rest.
++
+ Do not implement the whole project in one pass.
+diff --git a/docs/development/OPEN_QUESTIONS.md b/docs/development/OPEN_QUESTIONS.md
+index e92d4a7..f283201 100644
+--- a/docs/development/OPEN_QUESTIONS.md
++++ b/docs/development/OPEN_QUESTIONS.md
+@@ -187,10 +187,19 @@ These defaults are configurable and were chosen only to unblock the skeleton:
+   second generation when it triggers. Confirm whether re-speaking faster is
+   acceptable at all, or whether an overrun should always send the script back
+   to planning.
+-- Narration is generated as one continuous take for the whole Reel, and the
+-  mix pads or trims it to the timeline. Per-scene narration timing — making
+-  each sentence land on its own scene — is not implemented, and would need a
+-  word-level timing source the speech API does not return.
++- Narration can be generated as one continuous take for the whole Reel, or
++  scene by scene with `VOICE_TAKES=scene`. Cutting at the storyboard's own
++  scene boundaries makes each line land on its own scene without needing the
++  word-level timing the speech API does not return. What it cannot do is place
++  words *inside* a scene: a take starts when its scene starts, and any slack
++  is silence at the end.
++- A shared speaking speed keeps the Reel's pace even, and it is chosen by the
++  tightest scene. One badly sized line therefore speeds up the whole Reel.
++  Whether that is better than re-planning the line is a creative judgement
++  nobody has made yet; the stage reports the change rather than hiding it.
++- Nothing measures whether the silence between takes sounds like a pause or
++  like a gap. That is a listening question, and it belongs in the human
++  review.
+ - `voice.json` records the whole narration text in `instructions`-free form
+   only as a hash; the words themselves live in `script.json`. Anyone auditing
+   what was said reads the plan, not the audio record.
+diff --git a/docs/operations/GENERATION_WORKFLOW.md b/docs/operations/GENERATION_WORKFLOW.md
+index 4ee00c2..a268fdb 100644
+--- a/docs/operations/GENERATION_WORKFLOW.md
++++ b/docs/operations/GENERATION_WORKFLOW.md
+@@ -120,6 +120,119 @@ The track lands in `audio/voice.wav` and is recorded in `voice.json` with
+ cached under `output/assets/cache/` alongside footage, so the same narration
+ in the same voice is paid for once across every run.
+ 
++Set `VOICE_TAKES=scene` to speak the Reel one scene at a time instead of in a
++single piece. Each scene's voiceover becomes its own take, measured against the
++seconds that scene runs rather than against the whole Reel, so a line that
++overruns is caught here instead of in the finished file. The takes are then
++laid onto the storyboard's timeline — each at its own scene's start, silence in
++between — and written as one `audio/voice.wav`, exactly as long as the Reel.
++Individual takes are kept beside it under `audio/takes/` so a specific line can
++be listened to on its own.
++
++Two things follow that are worth knowing before a paid run:
++
++- if any take overruns, `VOICE_FIT_STRATEGY=regenerate` re-speaks **every**
++  take once at one shared speed, the slowest that makes all of them fit. That
++  is a second call per take. With `fail` the stage stops and names every scene
++  whose take overruns, so one re-plan can fix all of them at once;
++- scenes that say exactly the same thing are one paid call, not two, in this
++  run and in any later one. `cost-estimate` counts it the same way, and lists
++  one planned item per take so you can see which scene is being paid for.
++
++To see what a scene-by-scene run really paid for, read the run's request
++log rather than `voice.json`: each `audio.speech` record with outcome
++`success` is one speech call. Eight scenes with one repeated line show seven
++records; a regenerate round adds one more per take, since every take is spoken
++again at the shared speed; a rescale adds none.
++
++A refusal lists the overrunning scenes in storyboard order, each with the
++seconds its take measured and the seconds its scene runs. Scenes whose takes
++fit are not mentioned, so a short list means a local problem and a long one
++means the whole plan is talking too fast for the Reel it was given.
++
++### When a take cannot be spoken
++
++An overrun is a fit problem and the whole Reel is measured before the stage
++decides what to do about it. A take the provider simply will not speak is a
++different matter, and the stage treats it differently: the round stops there.
++The scenes after the refused one are never asked for, which is the point — the
++same rejection would come back for every one of them, at the same price.
++
++What is left behind is deliberate:
++
++- the takes that were spoken are on disk under `audio/takes/`, one WAV per
++  scene, and in the cache under the words and speed they were spoken at;
++- `voice.json` holds those takes with the stage marked failed and the
++  provider's own message in `error`;
++- the request log has one `success` record per take spoken and one `rejected`
++  record for the take that ended the round.
++
++Run the stage again after fixing whatever the provider objected to and it
++speaks only what is still missing: the refused take, and the scenes that came
++after it. Eight scenes refused at the fifth cost four calls the first time and
++four the second, not eight and eight. This holds for a regenerate round too — a
++round that is stopped part of the way through re-speaking the Reel at the
++shared speed resumes at the take it stopped on, since the takes already
++re-spoken are cached at that speed like any others.
++
++Two things worth not doing. Do not reach for `--force`: it is there to ignore
++what earlier runs left behind, and after a stopped round that is precisely the
++work you want to keep. And do not delete `audio/takes/` to get a clean start
++unless the audio itself is suspect; the cache, not the directory, is what makes
++the second attempt cheap, and the two are cleared together.
++
++A run refused at its fifth scene reads like this end to end, counting only what
++was paid for:
++
++| attempt | what happened | speech calls |
++| --- | --- | --- |
++| first | S-01 to S-04 spoken, S-05 rejected, S-06 to S-08 never sent | 4 success, 1 rejected |
++| second | S-01 to S-04 served from the cache, S-05 to S-08 spoken | 4 success |
++
++Eight takes, eight paid calls, one rejected one in between: no take is spoken
++twice, and the four the first attempt managed are the four the second one does
++not have to buy. A stage that carried on past the refusal, or one that started
++the second attempt from nothing, would spend twelve calls on the same Reel.
++
++Note that the second attempt is an ordinary `generate-voice`. Nothing marks it
++as a retry, no flag asks for the resume, and the same command run a third time
++makes no calls at all, because by then every take is cached. This is also why
++the run directory is worth keeping after a refusal rather than deleting it and
++starting over.
++
++When the shared speed a regenerate round would need falls outside
++`VOICE_MIN_SPEED`..`VOICE_MAX_SPEED`, the stage stops before spending anything
++and names the speed it wanted along with the scene that forced it. Three ways
++out, in the order worth trying:
++
++1. give that scene more seconds in the storyboard, so the words fit at a speed
++   the window allows;
++2. shorten the beat's narration in the approved script and re-run `approve`;
++3. widen `VOICE_MAX_SPEED`, accepting that every scene, not only the tight one,
++   will be delivered at that pace.
++
++A scene-by-scene run of the shipped eight-beat plan against the offline
++provider lays out like this:
++
++| scene | starts | scene runs | spoken | headroom |
++| --- | --- | --- | --- | --- |
++| S-01 | 0s | 4s | 1.733s | +2.267s |
++| S-02 | 4s | 4s | 1.933s | +2.067s |
++| S-03 | 8s | 5s | 2.6s | +2.4s |
++| S-04 | 13s | 5s | 2.867s | +2.133s |
++| S-05 | 18s | 5s | 1.8s | +3.2s |
++| S-06 | 23s | 6s | 2.533s | +3.467s |
++| S-07 | 29s | 5s | 2.333s | +2.667s |
++| S-08 | 34s | 6s | 2.267s | +3.733s |
++
++Eight takes, 18.066s of words inside a 40s track, delivered at 15.39 characters
++per second. Nothing overruns, so nothing is re-spoken and every take keeps the
++provider's own pace. Note what the measured rate is taken over: the words, not
++the 22 seconds of silence between them. Divide the same script by the whole
++track and the delivery reads as half the speed of the voice that recorded it,
++which is the wrong answer to give a reviewer asking whether the narration
++sounds rushed.
++
+ After generation the audio is measured and compared with the storyboard's
+ timeline. If the same words cannot be heard inside the Reel the stage fails
+ and says by how much. The script is never trimmed to fit; set
+diff --git a/docs/operations/SETUP.md b/docs/operations/SETUP.md
+index 034cda9..ad00ca0 100644
+--- a/docs/operations/SETUP.md
++++ b/docs/operations/SETUP.md
+@@ -38,6 +38,30 @@ are spoken, never what they are.
+ `VOICE_LANGUAGE` is a guard, not a translator: set it and the voice stage
+ refuses to run if the approved plan is in another language.
+ 
++`VOICE_TAKES` decides how the narration is cut. `whole`, the default, speaks
++the approved script as one recording and measures it against the whole Reel.
++`scene` speaks every storyboard scene as its own take and measures each one
++against the seconds its scene runs, so a line that would spill into the next
++scene is caught before the Reel is composed. Both settings are part of the
++release configuration, so two runs that differ only in how they were cut are
++reported as differently configured rather than as drift.
++
++`VOICE_MIN_SPEED` and `VOICE_MAX_SPEED` (0.25 to 4.0, floor not above ceiling)
++bound the speaking speed a `regenerate` round may pick. In `scene` mode the
++round speaks every take at one shared speed, the slowest that fits all of them;
++if that speed falls outside the window the stage stops and reports it instead
++of rushing the Reel or quietly dropping the line.
++
++A scene-by-scene run that the provider refuses part of the way through leaves
++the run half spoken on purpose. The takes that came back are on disk under
++`audio/takes/`, `voice.json` records them with the stage marked failed, and the
++scenes after the refused one were never asked for. Run the stage again once the
++refusal is understood — a voice the account may use, a format the provider
++offers, a line without the characters it rejected — and it picks up the takes
++already on disk and speaks only what is still missing. There is no flag for
++this and nothing to clean up first; `--force` is the wrong tool here, since it
++throws away exactly the takes that were paid for.
++
+ ## Source
+ Put:
+ `input/source/MainGott_Technical_Specification_ru.docx`
+diff --git a/src/maingott_reel/audio/identity.py b/src/maingott_reel/audio/identity.py
+index f378da4..dcb5661 100644
+--- a/src/maingott_reel/audio/identity.py
++++ b/src/maingott_reel/audio/identity.py
+@@ -51,6 +51,10 @@ class VoiceRequest:
+     instructions: str | None = None
+     prompt_version: str = "1"
+     settings: dict[str, Any] = field(default_factory=dict)
++    scene_id: str | None = field(
++        default=None,
++        metadata={"note": "which scene these words belong to; never part of the cache key"},
++    )
+ 
+     @property
+     def spoken_text(self) -> str:
+@@ -110,6 +114,22 @@ class VoiceRequest:
+         """Return the same request at a different speaking speed."""
+         return VoiceRequest(**{**self.__dict__, "speed": speed})
+ 
++    def for_scene(self, scene_id: str, narration: str, seconds: float) -> VoiceRequest:
++        """Return the request for one scene's take of this narration.
++
++        The scene decides which words are spoken and how long they have, and
++        neither the scene nor its length reaches the cache key: two scenes
++        speaking the same words at the same speed share one generated file.
++        """
++        return VoiceRequest(
++            **{
++                **self.__dict__,
++                "narration": narration,
++                "target_duration_seconds": seconds,
++                "scene_id": scene_id,
++            }
++        )
++
+     def describe(self) -> dict[str, Any]:
+         """A log- and manifest-safe summary of the request.
+ 
+@@ -117,6 +137,7 @@ class VoiceRequest:
+         """
+         return {
+             "voice_id": self.voice_id,
++            "scene_id": self.scene_id,
+             "cache_key": self.cache_key,
+             "provider": self.provider,
+             "model": self.model,
+diff --git a/src/maingott_reel/audio/takes.py b/src/maingott_reel/audio/takes.py
+new file mode 100644
+index 0000000..3bb2dca
+--- /dev/null
++++ b/src/maingott_reel/audio/takes.py
+@@ -0,0 +1,320 @@
++"""Speaking the approved narration scene by scene.
++
++The whole-script take answers one question: can the narration be heard inside
++the Reel. It cannot answer the narrower one a viewer actually notices, which
++is whether a line is still being spoken when its scene has already cut away.
++Cutting the script at the storyboard's own scene boundaries answers that,
++because every take is then measured against the seconds its own scene runs.
++
++Three rules do the work here and none of them is about audio quality:
++
++* a take belongs to one scene and is measured from the audio that came back,
++  never from a character count, which is the same rule the whole-script take
++  has always followed;
++* when anything overruns, the Reel is re-spoken at **one** speaking speed, the
++  slowest that makes every take fit. A Reel that speeds up for one scene and
++  slows down for the next sounds broken even when every scene technically
++  fits;
++* the same words at the same speed are paid for once, however many scenes say
++  them.
++
++What comes out is still a single narration track laid on the storyboard's
++timeline, so composition, the audit and the release gates keep reading exactly
++what they read before.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Callable, Sequence
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import Protocol
++
++from maingott_reel.audio.identity import VoiceRequest
++from maingott_reel.audio.probe import AudioInfo
++from maingott_reel.audio.validation import fit_speed
++from maingott_reel.audio.wav import place_samples, read_pcm, write_wav
++from maingott_reel.errors import ConfigurationError
++from maingott_reel.logging_config import get_logger
++from maingott_reel.models import (
++    TIMELINE_TOLERANCE_SECONDS,
++    AudioFormat,
++    NarrationTake,
++    Storyboard,
++)
++from maingott_reel.providers.base import VoiceCapabilities
++from maingott_reel.utils.hashing import sha256_text
++
++logger = get_logger("audio.takes")
++
++#: Formats a take can be laid onto a timeline without a decoder.
++ASSEMBLABLE_FORMATS = (AudioFormat.WAV, AudioFormat.PCM)
++
++
++class Attempt(Protocol):
++    """What one synthesis attempt reports back.
++
++    Structural on purpose: the generation stage owns the attempt type, and
++    this module only ever asks it how it went.
++    """
++
++    path: Path | None
++    info: AudioInfo | None
++    error: str | None
++
++    @property
++    def audio_is_sound(self) -> bool:
++        """Whether the file is real, correct audio, timing aside."""
++        ...
++
++
++#: Speaks one request into one file. The stage supplies it; the caller decides
++#: whether the cache may answer, which is what makes a repeated take free.
++Speak = Callable[[VoiceRequest, Path, bool], Attempt]
++
++
++@dataclass(frozen=True)
++class TakeSlot:
++    """One scene's words, and the seconds they have to be said in."""
++
++    scene_id: str
++    start_seconds: float
++    scene_seconds: float
++    request: VoiceRequest
++
++    @property
++    def text(self) -> str:
++        """The words this take speaks."""
++        return self.request.narration
++
++
++@dataclass(frozen=True)
++class SpokenTake:
++    """A slot that has been through the provider or the cache."""
++
++    slot: TakeSlot
++    attempt: Attempt
++    cache_hit: bool = False
++
++    @property
++    def duration_seconds(self) -> float:
++        """Measured length of the audio, from the file itself."""
++        info = self.attempt.info
++        return info.duration_seconds if info is not None else 0.0
++
++    @property
++    def fits(self) -> bool:
++        """Whether the words can be heard inside their own scene."""
++        return self.duration_seconds <= self.slot.scene_seconds + TIMELINE_TOLERANCE_SECONDS
++
++    def record(self) -> NarrationTake:
++        """The persisted description of this take."""
++        return NarrationTake(
++            scene_id=self.slot.scene_id,
++            text_sha256=sha256_text(self.slot.text),
++            cache_key=self.slot.request.cache_key,
++            characters=self.slot.request.characters,
++            start_seconds=self.slot.start_seconds,
++            duration_seconds=self.duration_seconds,
++            scene_seconds=self.slot.scene_seconds,
++            speed=self.slot.request.speed,
++            cache_hit=self.cache_hit,
++        )
++
++
++@dataclass
++class TakeRound:
++    """Every take of one pass over the storyboard."""
++
++    takes: list[SpokenTake] = field(default_factory=list)
++    error: str | None = None
++
++    @property
++    def sound(self) -> bool:
++        """Whether every take came back as real, correct audio."""
++        return self.error is None and all(take.attempt.audio_is_sound for take in self.takes)
++
++    @property
++    def overrunning(self) -> list[SpokenTake]:
++        """Takes that are still being spoken when their scene has cut away."""
++        return [take for take in self.takes if not take.fits]
++
++    @property
++    def spoken_seconds(self) -> float:
++        """How much of the finished track is words rather than silence."""
++        return round(sum(take.duration_seconds for take in self.takes), 3)
++
++
++def slots(storyboard: Storyboard, request: VoiceRequest) -> list[TakeSlot]:
++    """Cut the approved narration at the storyboard's scene boundaries.
++
++    A scene with nothing to say is not a take: it is silence on the timeline,
++    and silence is never generated and never paid for.
++    """
++    cut: list[TakeSlot] = []
++    for scene in storyboard.scenes:
++        spoken = scene.voiceover.strip()
++        if not spoken:
++            logger.info("scene has no narration", extra={"scene": scene.id})
++            continue
++        cut.append(
++            TakeSlot(
++                scene_id=scene.id,
++                start_seconds=scene.start_seconds,
++                scene_seconds=scene.duration_seconds,
++                request=request.for_scene(scene.id, scene.voiceover, scene.duration_seconds),
++            )
++        )
++    return cut
++
++
++def required_speed(take: SpokenTake) -> float:
++    """How fast this take would have to be said to fit its own scene.
++
++    Derived from the audio that came back, so a provider that speaks slower
++    than the language's expected rate is answered with the speed it actually
++    needs rather than the one a character count predicts.
++    """
++    needed = fit_speed(take.duration_seconds, take.slot.scene_seconds)
++    return round(needed * (take.slot.request.speed or 1.0), 3)
++
++
++def shared_speed(round_: TakeRound) -> float:
++    """The one speed that makes every take fit.
++
++    The slowest of what each take needs, so nothing is rushed further than it
++    has to be and nothing is left overrunning.
++    """
++    return round(max((required_speed(take) for take in round_.takes), default=1.0), 3)
++
++
++def speed_is_available(
++    speed: float, capabilities: VoiceCapabilities, low: float, high: float
++) -> bool:
++    """Whether the provider and the configuration both allow this speed."""
++    if not capabilities.supports_speed:
++        return False
++    provider_low, provider_high = capabilities.speed_range
++    return max(low, provider_low) <= speed <= min(high, provider_high)
++
++
++def speak_round(
++    cut: Sequence[TakeSlot],
++    speak: Speak,
++    destination: Callable[[str], Path],
++    generated: set[str],
++    use_cache: bool = True,
++) -> TakeRound:
++    """Speak every take once, in scene order.
++
++    ``generated`` carries the cache keys this run has already produced. A take
++    whose words and speed have been spoken already is served from the cache
++    even when the caller asked for everything to be generated afresh: forcing
++    regeneration means ignoring what earlier runs left behind, not paying
++    twice inside one run for one piece of narration.
++    """
++    result = TakeRound()
++    for slot in cut:
++        repeat = slot.request.cache_key in generated
++        attempt = speak(slot.request, destination(slot.scene_id), use_cache or repeat)
++        if attempt.error is not None or not attempt.audio_is_sound:
++            result.error = attempt.error or f"{slot.scene_id}: the take did not pass validation"
++            result.takes.append(SpokenTake(slot=slot, attempt=attempt, cache_hit=repeat))
++            return result
++        result.takes.append(SpokenTake(slot=slot, attempt=attempt, cache_hit=repeat))
++        generated.add(slot.request.cache_key)
++    return result
++
++
++def at_speed(cut: Sequence[TakeSlot], speed: float) -> list[TakeSlot]:
++    """The same cut, to be spoken at one shared speaking speed."""
++    return [
++        TakeSlot(
++            scene_id=slot.scene_id,
++            start_seconds=slot.start_seconds,
++            scene_seconds=slot.scene_seconds,
++            request=slot.request.with_speed(speed),
++        )
++        for slot in cut
++    ]
++
++
++def overrun_summary(round_: TakeRound) -> str:
++    """Name every scene whose narration is still being spoken after the cut."""
++    return "; ".join(
++        f"{take.slot.scene_id} takes {take.duration_seconds}s of a "
++        f"{take.slot.scene_seconds}s scene"
++        for take in round_.overrunning
++    )
++
++
++def assemble(round_: TakeRound, total_seconds: float, destination: Path) -> Path:
++    """Lay the takes onto the storyboard's timeline and write one track.
++
++    Every take starts at its own scene's start instant, so a take that came
++    back a little short leaves silence behind it instead of dragging the rest
++    of the Reel forward. The finished file is exactly the storyboard's length.
++
++    Raises:
++        ConfigurationError: a take is not linear PCM and cannot be laid down
++            without a decoder.
++    """
++    blocks: list[tuple[float, bytes]] = []
++    rate: int | None = None
++    channels: int | None = None
++    depth: int | None = None
++    for take in round_.takes:
++        path = take.attempt.path
++        if path is None:
++            raise ConfigurationError(f"{take.slot.scene_id} produced no audio to lay down")
++        info, samples = read_pcm(path)
++        if rate is None:
++            rate, channels, depth = info.sample_rate, info.channels, info.bits_per_sample
++        elif (info.sample_rate, info.channels, info.bits_per_sample) != (rate, channels, depth):
++            raise ConfigurationError(
++                f"{take.slot.scene_id} came back as {info.sample_rate} Hz / {info.channels} ch "
++                f"and the Reel is being built at {rate} Hz / {channels} ch. Every take has to "
++                "be the same kind of audio."
++            )
++        blocks.append((take.slot.start_seconds, samples))
++
++    if rate is None or channels is None or depth is None:
++        raise ConfigurationError("there are no takes to lay onto the timeline")
++
++    return write_wav(
++        destination,
++        place_samples(blocks, total_seconds, rate, channels, depth),
++        sample_rate=rate,
++        channels=channels,
++        bits_per_sample=depth,
++    )
++
++
++def check_assemblable(audio_format: AudioFormat) -> None:
++    """Refuse a format that cannot be laid onto a timeline here.
++
++    Raises:
++        ConfigurationError: the narration format is not linear PCM.
++    """
++    if audio_format not in ASSEMBLABLE_FORMATS:
++        raise ConfigurationError(
++            f"Narration is requested as {audio_format.value}, and takes are laid onto the "
++            "timeline as linear PCM. Set VOICE_FORMAT to wav, or speak the Reel as one take."
++        )
++
++
++__all__ = [
++    "ASSEMBLABLE_FORMATS",
++    "SpokenTake",
++    "TakeRound",
++    "TakeSlot",
++    "assemble",
++    "at_speed",
++    "check_assemblable",
++    "overrun_summary",
++    "required_speed",
++    "shared_speed",
++    "slots",
++    "speak_round",
++    "speed_is_available",
++]
+diff --git a/src/maingott_reel/audio/validation.py b/src/maingott_reel/audio/validation.py
+index 9962d75..c4b8a0b 100644
+--- a/src/maingott_reel/audio/validation.py
++++ b/src/maingott_reel/audio/validation.py
+@@ -56,12 +56,20 @@ def expected_rate(language: Language) -> float:
+     return SPEECH_RATE_CPS[language]
+ 
+ 
+-def speech_metrics(request: VoiceRequest, duration_seconds: float) -> SpeechMetrics:
+-    """Measure how fast the generated narration actually speaks."""
++def speech_metrics(
++    request: VoiceRequest, duration_seconds: float, spoken_seconds: float | None = None
++) -> SpeechMetrics:
++    """Measure how fast the generated narration actually speaks.
++
++    ``spoken_seconds`` is how much of the file is words. A track cut into
++    takes carries silence between them, and counting that silence as delivery
++    would describe a speaker who is far slower than the one on the recording,
++    so the metrics follow the words and the file keeps its own length.
++    """
+     return SpeechMetrics(
+         characters=request.characters,
+         words=request.words,
+-        duration_seconds=duration_seconds,
++        duration_seconds=spoken_seconds if spoken_seconds is not None else duration_seconds,
+         timeline_seconds=request.target_duration_seconds,
+     )
+ 
+@@ -73,6 +81,7 @@ def validate_voice_file(
+     expected_narration_sha256: str,
+     recorded_sha256: str | None = None,
+     created_at: datetime | None = None,
++    spoken_seconds: float | None = None,
+ ) -> tuple[ValidationReport, AudioInfo | None]:
+     """Check a generated track against the request that produced it.
+ 
+@@ -158,7 +167,7 @@ def validate_voice_file(
+         )
+     )
+ 
+-    metrics = speech_metrics(request, info.duration_seconds)
++    metrics = speech_metrics(request, info.duration_seconds, spoken_seconds)
+     checks.append(
+         _check(
+             "narration_fits_the_timeline",
+diff --git a/src/maingott_reel/audio/voice.py b/src/maingott_reel/audio/voice.py
+index 22f0cc2..083b0a5 100644
+--- a/src/maingott_reel/audio/voice.py
++++ b/src/maingott_reel/audio/voice.py
+@@ -11,7 +11,7 @@ words in the same voice are paid for once and reused by every later run.
+ 
+ from __future__ import annotations
+ 
+-from collections.abc import Callable
++from collections.abc import Callable, Sequence
+ from dataclasses import dataclass, field
+ from datetime import UTC, datetime
+ from pathlib import Path
+@@ -22,6 +22,7 @@ from pydantic import ValidationError
+ from maingott_reel.assets.cache import AssetCache
+ from maingott_reel.assets.manager import check_inputs as check_upstream
+ from maingott_reel.audio.identity import VoiceRequest
++from maingott_reel.audio import takes as take_stage
+ from maingott_reel.audio.probe import AudioInfo, AudioProbe, default_audio_probe
+ from maingott_reel.audio.validation import (
+     expected_rate,
+@@ -53,6 +54,7 @@ from maingott_reel.models import (
+     ValidationReport,
+     VoiceAsset,
+     VoiceFitStrategy,
++    VoiceTakes,
+ )
+ from maingott_reel.providers.base import VoiceCapabilities, VoiceProvider
+ from maingott_reel.utils.hashing import sha256_file, sha256_text
+@@ -84,6 +86,7 @@ class VoicePlan:
+     reused: bool = False
+     cached: bool = False
+     previous: VoiceAsset | None = None
++    takes: tuple[take_stage.TakeSlot, ...] = ()
+ 
+     @property
+     def needs_generation(self) -> bool:
+@@ -92,8 +95,16 @@ class VoicePlan:
+ 
+     @property
+     def generation_count(self) -> int:
+-        """How many paid calls this plan implies."""
+-        return 1 if self.needs_generation else 0
++        """How many paid calls this plan implies.
++
++        One per distinct take: two scenes saying the same words at the same
++        speed are one piece of narration and are paid for once.
++        """
++        if not self.needs_generation:
++            return 0
++        if not self.takes:
++            return 1
++        return len({slot.request.cache_key for slot in self.takes})
+ 
+     @property
+     def estimated_seconds(self) -> float:
+@@ -384,20 +395,42 @@ def plan_voice(
+     capabilities: VoiceCapabilities,
+     cache: AssetCache,
+     force: bool = False,
++    take_slots: Sequence[take_stage.TakeSlot] = (),
+ ) -> VoicePlan:
+     """Work out what has to be generated, without generating anything."""
+     previous = _existing_voice(run)
+     reusable = not force and previous is not None and _still_usable(previous, request)
+-    cached = not force and not reusable and cache.lookup(request.cache_key) is not None
++    if reusable and previous is not None and not _takes_still_match(previous, take_slots):
++        # The words are the same but the scenes they have to fit are not.
++        logger.info("the storyboard's scenes moved since the last narration")
++        reusable = False
++    if take_slots:
++        keys = {slot.request.cache_key for slot in take_slots}
++        cached = not force and not reusable and all(cache.lookup(key) is not None for key in keys)
++    else:
++        cached = not force and not reusable and cache.lookup(request.cache_key) is not None
+     return VoicePlan(
+         request=request,
+         capabilities=capabilities,
+         reused=reusable,
+         cached=cached,
+         previous=previous,
++        takes=tuple(take_slots),
+     )
+ 
+ 
++def _takes_still_match(asset: VoiceAsset, take_slots: Sequence[take_stage.TakeSlot]) -> bool:
++    """Whether a stored track was cut the way the storyboard now asks for.
++
++    Rescaling a storyboard leaves the words alone and moves every scene, so a
++    track whose takes sit at the old instants is no longer this Reel's
++    narration even though it speaks the right script.
++    """
++    stored = [(take.scene_id, take.start_seconds, take.scene_seconds) for take in asset.takes]
++    wanted = [(slot.scene_id, slot.start_seconds, slot.scene_seconds) for slot in take_slots]
++    return stored == wanted
++
++
+ # --- generation ------------------------------------------------------------------
+ 
+ 
+@@ -619,6 +652,194 @@ def _generate(
+     )
+ 
+ 
++def _generate_takes(
++    request: VoiceRequest,
++    cut: Sequence[take_stage.TakeSlot],
++    run: RunContext,
++    provider: VoiceProvider,
++    capabilities: VoiceCapabilities,
++    cache: AssetCache,
++    probe: AudioProbe,
++    settings: Settings,
++    expected_narration_sha256: str,
++    prompt_version: str,
++    source_sha256: str,
++    development: bool,
++    total_seconds: float,
++    use_cache: bool = True,
++    log: RequestLog | None = None,
++    paid: bool = True,
++) -> VoiceAsset:
++    """Speak the Reel scene by scene and lay the takes onto its timeline."""
++    take_stage.check_assemblable(request.audio_format)
++    generated: set[str] = set()
++
++    def speak(one: VoiceRequest, destination: Path, may_cache: bool) -> _Attempt:
++        return _attempt(
++            one,
++            destination,
++            provider,
++            cache,
++            probe,
++            sha256_text(one.narration),
++            settings.voice_max_attempts,
++            use_cache=may_cache,
++            log=log,
++            paid=paid,
++        )
++
++    spoken = take_stage.speak_round(cut, speak, run.take_audio, generated, use_cache=use_cache)
++    transformations: list[str] = []
++
++    if spoken.sound and spoken.overrunning:
++        if settings.voice_fit_strategy is VoiceFitStrategy.REGENERATE:
++            speed = take_stage.shared_speed(spoken)
++            if take_stage.speed_is_available(
++                speed, capabilities, settings.voice_min_speed, settings.voice_max_speed
++            ):
++                logger.info(
++                    "narration overruns its scenes, re-speaking the Reel at one speed",
++                    extra={"speed": speed, "scenes": len(spoken.overrunning)},
++                )
++                transformations.append(
++                    f"every take re-spoken at speaking speed {speed} so each one fits its own "
++                    "scene; the words are unchanged"
++                )
++                spoken = take_stage.speak_round(
++                    take_stage.at_speed(cut, speed),
++                    speak,
++                    run.take_audio,
++                    generated,
++                    use_cache=use_cache,
++                )
++            else:
++                spoken.error = (
++                    f"the narration would have to be spoken at {speed} to fit every scene, "
++                    f"outside {settings.voice_min_speed}-{settings.voice_max_speed}. "
++                    "Re-plan shorter lines or lengthen the Reel."
++                )
++        else:
++            spoken.error = (
++                f"narration overruns its scenes: {take_stage.overrun_summary(spoken)}. "
++                "Re-plan shorter lines, lengthen the Reel, or set VOICE_FIT_STRATEGY=regenerate "
++                "to re-speak the same words faster."
++            )
++
++    if spoken.sound and spoken.overrunning:
++        spoken.error = spoken.error or (
++            f"even re-spoken, narration overruns its scenes: {take_stage.overrun_summary(spoken)}. "
++            "Re-plan shorter lines or lengthen the Reel."
++        )
++
++    if not spoken.sound:
++        return _record_takes(
++            request=request,
++            spoken=spoken,
++            run=run,
++            prompt_version=prompt_version,
++            source_sha256=source_sha256,
++            development=development,
++            transformations=transformations,
++            report=None,
++            info=None,
++            path=None,
++        )
++
++    path = take_stage.assemble(spoken, total_seconds, run.voice_audio(request.audio_format.suffix))
++    report, info = validate_voice_file(
++        path,
++        request,
++        probe,
++        expected_narration_sha256,
++        spoken_seconds=spoken.spoken_seconds,
++    )
++    return _record_takes(
++        request=request,
++        spoken=spoken,
++        run=run,
++        prompt_version=prompt_version,
++        source_sha256=source_sha256,
++        development=development,
++        transformations=transformations,
++        report=report,
++        info=info,
++        path=path if report.passed else None,
++    )
++
++
++def _record_takes(
++    request: VoiceRequest,
++    spoken: take_stage.TakeRound,
++    run: RunContext,
++    prompt_version: str,
++    source_sha256: str,
++    development: bool,
++    transformations: list[str],
++    report: ValidationReport | None,
++    info: AudioInfo | None,
++    path: Path | None,
++) -> VoiceAsset:
++    """Build the persisted record for a scene-by-scene track."""
++    provenance = GenerationProvenance(
++        generator_version=VOICE_VERSION,
++        prompt_version=prompt_version,
++        system_prompt_sha256=sha256_text(request.instructions or ""),
++        user_prompt_sha256=request.narration_sha256,
++        provider=request.provider,
++        model=request.model,
++        generated_at=datetime.now(tz=UTC),
++        source_sha256=source_sha256,
++        attempts=1,
++    )
++    usable = path is not None and report is not None and report.passed and spoken.error is None
++    recorded = [take.record() for take in spoken.takes if take.duration_seconds > 0]
++    error = spoken.error
++    if not usable and error is None:
++        error = (
++            failure_summary(report)
++            if report is not None
++            else "the narration did not pass validation"
++        ) or "the narration did not pass validation"
++    metrics = (
++        speech_metrics(request, spoken.spoken_seconds, spoken.spoken_seconds) if usable else None
++    )
++    return VoiceAsset(
++        id=request.voice_id,
++        status=AssetStatus.READY if usable else AssetStatus.FAILED,
++        created_at=datetime.now(tz=UTC),
++        provider=request.provider,
++        model=request.model,
++        voice=request.voice,
++        language=request.language,
++        audio_format=request.audio_format,
++        speed=recorded[-1].speed if recorded else request.speed,
++        instructions=request.instructions,
++        instructions_sha256=request.instructions_sha256,
++        cache_key=request.cache_key,
++        narration_sha256=request.narration_sha256,
++        narration_characters=request.characters,
++        storyboard_sha256=request.storyboard_sha256,
++        target_duration_seconds=request.target_duration_seconds,
++        path=path,
++        sha256=sha256_file(path) if path else None,
++        size_bytes=path.stat().st_size if path else None,
++        duration_seconds=info.duration_seconds if info and usable else None,
++        sample_rate=info.sample_rate if info else None,
++        channels=info.channels if info else None,
++        codec=info.codec if info else None,
++        metrics=metrics,
++        attempts=1,
++        cache_hit=bool(recorded) and all(take.cache_hit for take in recorded),
++        development=development,
++        transformations=transformations,
++        takes=recorded,
++        generation_metadata={"takes": len(recorded)},
++        validation=report,
++        provenance=provenance,
++        error=error,
++    )
++
++
+ def _too_long(attempt: _Attempt, settings: Settings, capabilities: VoiceCapabilities) -> _Attempt:
+     """Turn an overrunning take into a clear failure.
+ 
+@@ -801,7 +1022,8 @@ def generate_voice(
+         instructions=instructions,
+         prompt_version=prompt_version,
+     )
+-    voice_plan = plan_voice(run, request, capabilities, voice_cache, force=force)
++    cut = narration_slots(settings, storyboard, request)
++    voice_plan = plan_voice(run, request, capabilities, voice_cache, force=force, take_slots=cut)
+ 
+     logger.info(
+         "voice plan",
+@@ -810,6 +1032,7 @@ def generate_voice(
+             **request.describe(),
+             "cache_state": voice_plan.cache_state,
+             "generation_count": voice_plan.generation_count,
++            "takes": len(cut),
+             "dry_run": dry_run,
+         },
+     )
+@@ -826,22 +1049,28 @@ def generate_voice(
+         _check_budget(settings, run, force, allow_over_budget, voice_cache, source_path)
+ 
+     voice_provider = provider or build_voice_provider(settings, offline)
+-    asset = _generate(
+-        request=request,
+-        run=run,
+-        provider=voice_provider,
+-        capabilities=capabilities,
+-        cache=voice_cache,
+-        probe=audio_probe,
+-        settings=settings,
+-        expected_narration_sha256=sha256_text(plan.narration),
+-        prompt_version=prompt_version,
+-        source_sha256=registry.source_sha256,
+-        development=offline or provider_name == FAKE_PROVIDER_NAME,
+-        use_cache=not force,
+-        log=RequestLog(run.provider_log, run.run_id),
+-        paid=paid,
+-    )
++    shared = {
++        "request": request,
++        "run": run,
++        "provider": voice_provider,
++        "capabilities": capabilities,
++        "cache": voice_cache,
++        "probe": audio_probe,
++        "settings": settings,
++        "expected_narration_sha256": sha256_text(plan.narration),
++        "prompt_version": prompt_version,
++        "source_sha256": registry.source_sha256,
++        "development": offline or provider_name == FAKE_PROVIDER_NAME,
++        "use_cache": not force,
++        "log": RequestLog(run.provider_log, run.run_id),
++        "paid": paid,
++    }
++    if cut:
++        asset = _generate_takes(
++            cut=cut, total_seconds=storyboard.total_duration_seconds, **shared
++        )
++    else:
++        asset = _generate(**shared)
+     write_model(run.voice_json, asset)
+     _record_stage(run, asset)
+ 
+@@ -858,6 +1087,19 @@ def generate_voice(
+     return VoiceResult(run=run, plan=voice_plan, asset=asset, dry_run=False)
+ 
+ 
++def narration_slots(
++    settings: Settings, storyboard: Storyboard, request: VoiceRequest
++) -> list[take_stage.TakeSlot]:
++    """Cut the narration the way this configuration asks for.
++
++    Empty when the Reel is spoken as one take, which is what the pipeline has
++    always done and still does by default.
++    """
++    if settings.voice_takes is not VoiceTakes.SCENE:
++        return []
++    return take_stage.slots(storyboard, request)
++
++
+ def _check_budget(
+     settings: Settings,
+     run: RunContext,
+@@ -936,6 +1178,7 @@ def voice_track(run: RunContext) -> VoiceAsset | None:
+ __all__ = [
+     "VoicePlan",
+     "VoiceResult",
++    "narration_slots",
+     "build_request",
+     "build_voice_provider",
+     "generate_voice",
+diff --git a/src/maingott_reel/audio/wav.py b/src/maingott_reel/audio/wav.py
+index 1f5b96b..1ab40d3 100644
+--- a/src/maingott_reel/audio/wav.py
++++ b/src/maingott_reel/audio/wav.py
+@@ -98,6 +98,27 @@ def parse_wav(path: Path) -> WavInfo:
+     )
+ 
+ 
++def read_pcm(path: Path) -> tuple[WavInfo, bytes]:
++    """Return ``path``'s header and its linear PCM samples.
++
++    Raises:
++        WavError: the file is missing, truncated, or not linear PCM.
++    """
++    info = parse_wav(path)
++    raw = path.read_bytes()
++    offset = 12
++    for _ in range(MAX_CHUNKS):
++        if offset + 8 > len(raw):
++            break
++        chunk_id = raw[offset : offset + 4]
++        (size,) = struct.unpack("<I", raw[offset + 4 : offset + 8])
++        if chunk_id == b"data":
++            usable = min(size, max(len(raw) - offset - 8, 0))
++            return info, raw[offset + 8 : offset + 8 + usable]
++        offset += 8 + size + (size % 2)
++    raise WavError("the container declares no audio data")
++
++
+ def write_wav(
+     path: Path,
+     samples: bytes,
+@@ -135,6 +156,65 @@ def write_wav(
+     return path
+ 
+ 
++def silence_samples(
++    seconds: float,
++    sample_rate: int,
++    channels: int = 1,
++    bits_per_sample: int = 16,
++) -> bytes:
++    """Build exactly ``seconds`` of silence.
++
++    Frames are rounded once, from the requested seconds, so a run of silence
++    laid between two takes is the length it was asked for rather than whatever
++    accumulated rounding left behind.
++
++    Raises:
++        ValueError: the parameters do not describe writable audio.
++    """
++    if seconds < 0:
++        raise ValueError("silence cannot be shorter than nothing")
++    if sample_rate <= 0 or channels <= 0 or bits_per_sample % 8:
++        raise ValueError("silence needs a positive rate, channel count and byte-aligned depth")
++    return bytes(round(seconds * sample_rate) * channels * bits_per_sample // 8)
++
++
++def place_samples(
++    blocks: list[tuple[float, bytes]],
++    total_seconds: float,
++    sample_rate: int,
++    channels: int = 1,
++    bits_per_sample: int = 16,
++) -> bytes:
++    """Lay blocks of audio onto one timeline of ``total_seconds``.
++
++    Each block is written at its own instant rather than after whatever came
++    before it, so one block being a few frames short never moves the next one.
++    Silence fills everything no block covers. Audio that would run past the end
++    of the timeline is cut there: the finished track is exactly as long as it
++    was asked to be.
++
++    Raises:
++        ValueError: the timeline has no length, or a block starts before it.
++    """
++    if total_seconds <= 0:
++        raise ValueError("a timeline needs a positive length")
++    if sample_rate <= 0 or channels <= 0 or bits_per_sample % 8:
++        raise ValueError("placing audio needs a positive rate, channels and byte-aligned depth")
++
++    frame = channels * bits_per_sample // 8
++    total = round(total_seconds * sample_rate) * frame
++    track = bytearray(total)
++    for start_seconds, payload in blocks:
++        if start_seconds < 0:
++            raise ValueError(f"a take cannot start at {start_seconds}s, before the timeline")
++        offset = round(start_seconds * sample_rate) * frame
++        if offset >= total:
++            continue
++        usable = payload[: total - offset]
++        track[offset : offset + len(usable)] = usable
++    return bytes(track)
++
++
+ def tone_samples(
+     seconds: float,
+     sample_rate: int,
+diff --git a/src/maingott_reel/cli.py b/src/maingott_reel/cli.py
+index 662f546..92e93c4 100644
+--- a/src/maingott_reel/cli.py
++++ b/src/maingott_reel/cli.py
+@@ -322,6 +322,8 @@ def _report_voice(result: VoiceResult) -> None:
+     table.add_row("timeline", f"{request.target_duration_seconds}s")
+     table.add_row("cache", plan.cache_state)
+     table.add_row("generation calls", str(plan.generation_count))
++    if plan.takes:
++        table.add_row("takes", f"{len(plan.takes)} scene(s)")
+     if result.dry_run:
+         table.add_row("estimated speech", f"~{plan.estimated_seconds:g}s")
+     if asset is not None:
+@@ -342,6 +344,42 @@ def _report_voice(result: VoiceResult) -> None:
+         table.add_row("validation", "passed" if asset.passed else "FAILED")
+     console.print(table)
+ 
++    if result.dry_run and plan.takes:
++        # A dry run is where somebody decides whether to pay, so show what
++        # would be spoken rather than only how many calls it comes to.
++        planned = Table(title="takes that would be spoken")
++        planned.add_column("scene", style="cyan")
++        planned.add_column("starts at")
++        planned.add_column("scene runs")
++        planned.add_column("narration")
++        for slot in plan.takes:
++            planned.add_row(
++                slot.scene_id,
++                f"{slot.start_seconds:g}s",
++                f"{slot.scene_seconds:g}s",
++                f"{slot.request.characters} characters",
++            )
++        console.print(planned)
++
++    if asset is not None and asset.takes:
++        takes = Table(title="takes")
++        takes.add_column("scene", style="cyan")
++        takes.add_column("starts at")
++        takes.add_column("spoken")
++        takes.add_column("scene")
++        takes.add_column("speed")
++        takes.add_column("source")
++        for take in asset.takes:
++            takes.add_row(
++                take.scene_id,
++                f"{take.start_seconds:g}s",
++                f"{take.duration_seconds:g}s",
++                f"{take.scene_seconds:g}s",
++                f"{take.speed:g}" if take.speed else "default",
++                "cache" if take.cache_hit else "generated",
++            )
++        console.print(takes)
++
+     if asset is not None:
+         for change in asset.transformations:
+             console.print(f"[yellow]{change}[/yellow]")
+diff --git a/src/maingott_reel/config.py b/src/maingott_reel/config.py
+index 48ab661..2295492 100644
+--- a/src/maingott_reel/config.py
++++ b/src/maingott_reel/config.py
+@@ -15,7 +15,7 @@ from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_va
+ from pydantic_settings import BaseSettings, SettingsConfigDict
+ 
+ from maingott_reel.errors import ConfigurationError
+-from maingott_reel.models.base import AudioFormat, Language, VoiceFitStrategy
++from maingott_reel.models.base import AudioFormat, Language, VoiceFitStrategy, VoiceTakes
+ from maingott_reel.models.release import DEFAULT_RELEASE_VERSION, RELEASE_VERSION_PATTERN
+ 
+ LogFormat = Literal["json", "console"]
+@@ -114,6 +114,9 @@ class Settings(BaseSettings):
+     voice_instructions: str | None = None
+     voice_speed: float | None = Field(default=None, ge=0.25, le=4.0)
+     voice_fit_strategy: VoiceFitStrategy = VoiceFitStrategy.FAIL
++    # How the approved script is cut up before it is spoken. One take for the
++    # whole Reel by default; 'scene' speaks each storyboard scene separately.
++    voice_takes: VoiceTakes = VoiceTakes.WHOLE
+     # Bounds for a fitting regeneration. Deliberately narrow: a large speed
+     # change is a script problem, not a delivery problem.
+     voice_min_speed: float = Field(default=0.9, ge=0.25, le=4.0)
+@@ -169,6 +172,14 @@ class Settings(BaseSettings):
+             return None
+         return value
+ 
++    @field_validator("voice_takes", mode="before")
++    @classmethod
++    def _blank_takes_means_whole(cls, value: object) -> object:
++        # Copying .env.example leaves the key present but empty.
++        if isinstance(value, str) and not value.strip():
++            return VoiceTakes.WHOLE
++        return value
++
+     @field_validator("openai_tts_model", "voice_provider", "voice_name", mode="before")
+     @classmethod
+     def _blank_means_default(cls, value: object, info: ValidationInfo) -> object:
+@@ -288,6 +299,7 @@ class Settings(BaseSettings):
+             "voice_language": self.voice_language.value if self.voice_language else None,
+             "voice_speed": self.voice_speed,
+             "voice_fit_strategy": self.voice_fit_strategy.value,
++            "voice_takes": self.voice_takes.value,
+             "voice_instructions_set": self.voice_instructions is not None,
+             "openai_reasoning_effort": self.openai_reasoning_effort,
+             "reel_language": self.reel_language.value,
+diff --git a/src/maingott_reel/costing.py b/src/maingott_reel/costing.py
+index e35a35b..7f4bcd3 100644
+--- a/src/maingott_reel/costing.py
++++ b/src/maingott_reel/costing.py
+@@ -217,28 +217,58 @@ def plan_generation(
+             instructions=instructions,
+             prompt_version=prompt_version,
+         )
+-        voice_plan = voice_stage.plan_voice(run, spoken, voice_caps, asset_cache, force=force)
+-        items.append(
+-            PlannedGeneration(
+-                kind=GenerationKind.VOICE,
+-                identity=spoken.voice_id,
+-                provider=provider_name,
+-                model=model,
+-                characters=spoken.characters,
+-                cache_state="generate" if voice_plan.needs_generation else "cached",
+-            )
++        cut = voice_stage.narration_slots(settings, storyboard, spoken)
++        voice_plan = voice_stage.plan_voice(
++            run, spoken, voice_caps, asset_cache, force=force, take_slots=cut
+         )
++        state = "generate" if voice_plan.needs_generation else "cached"
++        if cut:
++            # One item per take, so a reader can see which scene is being paid
++            # for; repeated words are one call, counted by the plan itself.
++            items.extend(
++                PlannedGeneration(
++                    kind=GenerationKind.VOICE,
++                    identity=slot.request.cache_key[:16],
++                    scene_id=slot.scene_id,
++                    provider=provider_name,
++                    model=model,
++                    characters=slot.request.characters,
++                    cache_state=state,
++                )
++                for slot in cut
++            )
++        else:
++            items.append(
++                PlannedGeneration(
++                    kind=GenerationKind.VOICE,
++                    identity=spoken.voice_id,
++                    provider=provider_name,
++                    model=model,
++                    characters=spoken.characters,
++                    cache_state=state,
++                )
++            )
++        calls = voice_plan.generation_count
++        billed = float(spoken.characters if voice_plan.needs_generation else 0)
++        if cut and voice_plan.needs_generation:
++            # Only the takes that are actually generated are billed, so words
++            # a second scene repeats are not charged twice.
++            distinct: dict[str, int] = {}
++            for slot in cut:
++                distinct.setdefault(slot.request.cache_key, slot.request.characters)
++            billed = float(sum(distinct.values()))
+         lines.append(
+             _price_line(
+                 kind=GenerationKind.VOICE,
+                 provider=provider_name,
+                 model=model,
+-                calls=voice_plan.generation_count,
+-                units=float(spoken.characters if voice_plan.needs_generation else 0),
++                calls=calls,
++                units=billed,
+                 unit=UNIT_CHARACTERS,
+                 pricing=pricing,
+                 detail=f"voice '{voice_name}', {spoken.characters} characters, "
+-                f"{voice_plan.cache_state}",
++                f"{voice_plan.cache_state}"
++                + (f", {len(cut)} take(s) in {calls} call(s)" if cut else ""),
+             )
+         )
+ 
+diff --git a/src/maingott_reel/models/__init__.py b/src/maingott_reel/models/__init__.py
+index 4c7c174..f4d24e6 100644
+--- a/src/maingott_reel/models/__init__.py
++++ b/src/maingott_reel/models/__init__.py
+@@ -22,6 +22,7 @@ from maingott_reel.models.base import (
+     Schema,
+     StageName,
+     VoiceFitStrategy,
++    VoiceTakes,
+ )
+ from maingott_reel.models.brand import (
+     BRAND_REGISTRY_VERSION,
+@@ -104,6 +105,7 @@ from maingott_reel.models.voice import (
+     TIMELINE_TOLERANCE_SECONDS,
+     VOICE_VERSION,
+     AuditionSample,
++    NarrationTake,
+     SpeechMetrics,
+     VoiceAsset,
+     VoiceAudition,
+@@ -169,6 +171,7 @@ __all__ = [
+     "Language",
+     "LogoPlan",
+     "ModelPrice",
++    "NarrationTake",
+     "ModelVersions",
+     "PlannedGeneration",
+     "Platform",
+@@ -205,6 +208,7 @@ __all__ = [
+     "VoiceAsset",
+     "VoiceAudition",
+     "VoiceFitStrategy",
++    "VoiceTakes",
+     "VoiceProfile",
+     "is_release_version",
+     "package_root",
+diff --git a/src/maingott_reel/models/base.py b/src/maingott_reel/models/base.py
+index 5892713..9fe20dd 100644
+--- a/src/maingott_reel/models/base.py
++++ b/src/maingott_reel/models/base.py
+@@ -149,6 +149,16 @@ class VoiceFitStrategy(StrEnum):
+     """Regenerate once at a supported speaking speed, within configured bounds."""
+ 
+ 
++class VoiceTakes(StrEnum):
++    """How the approved narration is cut up before it is spoken."""
++
++    WHOLE = "whole"
++    """One take for the whole script, measured against the whole Reel."""
++
++    SCENE = "scene"
++    """One take per storyboard scene, each measured against its own scene."""
++
++
+ class AssetSource(StrEnum):
+     """Where an asset came from."""
+ 
+diff --git a/src/maingott_reel/models/release.py b/src/maingott_reel/models/release.py
+index 3fda049..c47e9a7 100644
+--- a/src/maingott_reel/models/release.py
++++ b/src/maingott_reel/models/release.py
+@@ -237,6 +237,7 @@ class ConfigurationSnapshot(Schema):
+     voice_format: str
+     voice_speed: float | None = None
+     voice_fit_strategy: str
++    voice_takes: str = "whole"
+ 
+     language: str
+     target_duration_seconds: int
+diff --git a/src/maingott_reel/models/voice.py b/src/maingott_reel/models/voice.py
+index bed36f0..1b0f135 100644
+--- a/src/maingott_reel/models/voice.py
++++ b/src/maingott_reel/models/voice.py
+@@ -72,6 +72,44 @@ class SpeechMetrics(Schema):
+         return self.duration_seconds <= self.timeline_seconds + TIMELINE_TOLERANCE_SECONDS
+ 
+ 
++class NarrationTake(Schema):
++    """One scene's narration, and where it sits in the finished track.
++
++    A take is not a separate asset: the run still holds one narration file,
++    and this records which words were spoken for which scene, how long they
++    turned out to be and how fast they were delivered.
++    """
++
++    scene_id: str = Field(min_length=1)
++    text_sha256: str = Field(
++        pattern=r"^[0-9a-f]{64}$", description="Hash of the words this take speaks"
++    )
++    cache_key: str = Field(pattern=r"^[0-9a-f]{64}$")
++    characters: int = Field(gt=0)
++    start_seconds: float = Field(ge=0, description="Where the take starts on the timeline")
++    duration_seconds: float = Field(gt=0, description="Measured length of the spoken audio")
++    scene_seconds: float = Field(gt=0, description="How long the scene it belongs to runs")
++    speed: float | None = Field(
++        default=None, ge=0.25, le=4.0, description="None when the provider's default was used"
++    )
++    cache_hit: bool = False
++
++    @property
++    def end_seconds(self) -> float:
++        """Where the spoken words stop."""
++        return round(self.start_seconds + self.duration_seconds, 3)
++
++    @property
++    def headroom_seconds(self) -> float:
++        """Scene time left over after the words are spoken."""
++        return round(self.scene_seconds - self.duration_seconds, 3)
++
++    @property
++    def fits_scene(self) -> bool:
++        """Whether the words can be heard inside their own scene."""
++        return self.duration_seconds <= self.scene_seconds + TIMELINE_TOLERANCE_SECONDS
++
++
+ class VoiceAsset(Schema):
+     """The narration track generated for one run."""
+ 
+@@ -123,6 +161,10 @@ class VoiceAsset(Schema):
+         default_factory=list,
+         description="Every deliberate change to the audio, e.g. a regeneration at a new speed",
+     )
++    takes: list[NarrationTake] = Field(
++        default_factory=list,
++        description="One entry per spoken take, in scene order. Empty for a single-take track.",
++    )
+     generation_metadata: dict[str, Any] = Field(default_factory=dict)
+     validation: ValidationReport | None = None
+     provenance: GenerationProvenance
+@@ -153,6 +195,21 @@ class VoiceAsset(Schema):
+         """Whether the track passed deterministic voice validation."""
+         return self.validation is not None and self.validation.passed
+ 
++    @property
++    def spoken_seconds(self) -> float | None:
++        """How much of the track is words rather than silence.
++
++        For a scene-by-scene track this is the takes added up, which is what
++        the recorded metrics describe; for a single take it is the file.
++        """
++        if self.takes:
++            return round(sum(take.duration_seconds for take in self.takes), 3)
++        return self.duration_seconds
++
++    def take(self, scene_id: str) -> NarrationTake | None:
++        """Return the take spoken for one scene, if there is one."""
++        return next((item for item in self.takes if item.scene_id == scene_id), None)
++
+ 
+ class AuditionSample(Schema):
+     """One candidate voice reading the same approved sample."""
+diff --git a/src/maingott_reel/release/compare.py b/src/maingott_reel/release/compare.py
+index 9fbb4a4..334b06b 100644
+--- a/src/maingott_reel/release/compare.py
++++ b/src/maingott_reel/release/compare.py
+@@ -102,12 +102,24 @@ def _voice_row(inputs: ReleaseInputs) -> list[tuple[str, str]]:
+             ("voice", str(audio.voice_path) if audio.voice_path else "— silent —"),
+             ("voice audio", (audio.voice_sha256 or "—")[:16]),
+         ]
+-    return [
++    rows = [
+         ("voice", f"{voice.provider}:{voice.model} '{voice.voice}' ({voice.language.value})"),
+         ("voice audio", (voice.sha256 or "—")[:16]),
+         ("voice duration", f"{voice.duration_seconds:g}s" if voice.duration_seconds else "—"),
+         ("voice speed", f"{voice.speed:g}" if voice.speed else "default"),
+     ]
++    # Two Reels that speak the same words can still have been recorded very
++    # differently, and which scenes were spoken separately is the difference a
++    # listener would notice first.
++    rows.append(
++        (
++            "narration takes",
++            f"{len(voice.takes)} scene takes, {voice.spoken_seconds:g}s spoken"
++            if voice.takes
++            else "one take for the whole Reel",
++        )
++    )
++    return rows
+ 
+ 
+ def _rows(inputs: ReleaseInputs) -> list[tuple[str, str]]:
+diff --git a/src/maingott_reel/release/configuration.py b/src/maingott_reel/release/configuration.py
+index 568bfb1..e4ad157 100644
+--- a/src/maingott_reel/release/configuration.py
++++ b/src/maingott_reel/release/configuration.py
+@@ -67,6 +67,7 @@ def snapshot(settings: Settings) -> ConfigurationSnapshot:
+         voice_format=settings.voice_format.value,
+         voice_speed=settings.voice_speed,
+         voice_fit_strategy=settings.voice_fit_strategy.value,
++        voice_takes=settings.voice_takes.value,
+         language=settings.reel_language.value,
+         target_duration_seconds=settings.default_reel_duration,
+         duration_bounds=[settings.min_reel_duration, settings.max_reel_duration],
+diff --git a/src/maingott_reel/release/reproduce.py b/src/maingott_reel/release/reproduce.py
+index ceb525c..2f5c992 100644
+--- a/src/maingott_reel/release/reproduce.py
++++ b/src/maingott_reel/release/reproduce.py
+@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
+ from pathlib import Path
+ 
+ from maingott_reel.config import Settings
+-from maingott_reel.models import ReleaseManifest
++from maingott_reel.models import ReleaseManifest, VoiceAsset
+ from maingott_reel.release.inputs import ReleaseInputs
+ from maingott_reel.utils.hashing import sha256_file
+ 
+@@ -59,6 +59,16 @@ def _item(name: str, available: bool, detail: str, required: bool = True) -> Rep
+     return ReproducibilityItem(name=name, available=available, detail=detail, required=required)
+ 
+ 
++def _takes_are_placed(voice: VoiceAsset) -> bool:
++    """Whether every take says which scene it belongs to and where it sits.
++
++    A track assembled out of takes can only be explained later if the record
++    says which words went where; a take without a scene is an unattributable
++    piece of audio inside a finished Reel.
++    """
++    return all(take.scene_id and take.duration_seconds > 0 for take in voice.takes)
++
++
+ def check_run(settings: Settings, inputs: ReleaseInputs) -> ReproducibilityReport:
+     """Report whether a finished run records everything needed to explain it."""
+     run = inputs.run
+@@ -114,6 +124,15 @@ def check_run(settings: Settings, inputs: ReleaseInputs) -> ReproducibilityRepor
+             bool(inputs.assets.model),
+             f"{inputs.assets.provider}:{inputs.assets.model}",
+         ),
++        _item(
++            "narration takes",
++            voice is None or not voice.takes or _takes_are_placed(voice),
++            "one take for the whole Reel"
++            if voice is None or not voice.takes
++            else f"{len(voice.takes)} scene takes, "
++            f"{', '.join(take.scene_id for take in voice.takes)}",
++            required=False,
++        ),
+         _item(
+             "voice record",
+             voice is not None,
+diff --git a/src/maingott_reel/utils/run_context.py b/src/maingott_reel/utils/run_context.py
+index 9dfebce..f7a5506 100644
+--- a/src/maingott_reel/utils/run_context.py
++++ b/src/maingott_reel/utils/run_context.py
+@@ -119,6 +119,15 @@ class RunContext:
+         """Where the generated narration lives inside the run."""
+         return self.audio_dir / f"voice{suffix}"
+ 
++    @property
++    def takes_dir(self) -> Path:
++        """Directory holding the individual takes of a scene-by-scene track."""
++        return self.audio_dir / "takes"
++
++    def take_audio(self, scene_id: str, suffix: str = ".wav") -> Path:
++        """Where one scene's take lives before it is laid onto the timeline."""
++        return self.takes_dir / f"{scene_id}{suffix}"
++
+     @property
+     def log_file(self) -> Path:
+         return self.logs_dir / "run.jsonl"

@@ -1,0 +1,1424 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index eb0acc6..e42743b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,12 @@ based on [Keep a Changelog](https://keepachangelog.com/).
+ ## [Unreleased]
+ 
+ ### Added
++- Set operations: `UNION`, `INTERSECT` and `EXCEPT`, each with an `ALL`
++  spelling. `INTERSECT` binds tighter than the other two, equal operators
++  associate to the left, and a trailing `ORDER BY` / `LIMIT` / `OFFSET`
++  applies to the combined result.
++- Limit pushdown bounds both branches of a `UNION ALL` by the limit plus the
++  offset, so neither branch reads rows the outer limit would discard.
+ - `EXPLAIN <select>` returns the optimized logical plan as a result set.
+ - String concatenation operator `||`.
+ - Scalar functions: `POWER`, `SQRT`, `SIGN`, `LTRIM`, `RTRIM`, `REVERSE`,
+diff --git a/README.md b/README.md
+index a795043..a33e29f 100644
+--- a/README.md
++++ b/README.md
+@@ -53,9 +53,14 @@ println!("{}", tanager::render_table(&result));
+ - **NULL semantics** — SQL three-valued logic everywhere: comparisons yield
+   `NULL`, predicates keep only `TRUE` rows, arithmetic propagates `NULL`, and
+   division/modulo by zero is a deterministic error rather than an infinity.
++- **Set operations** — `UNION`, `INTERSECT` and `EXCEPT` over `SELECT`
++  branches, each in a deduplicating spelling and an `ALL` spelling that keeps
++  duplicate rows. `INTERSECT` binds tighter than the other two, and one
++  trailing `ORDER BY` / `LIMIT` / `OFFSET` governs the combined result.
+ - **Optimizer** — a rule-based, fixpoint optimizer with constant folding
+-  (conservative: never folds an expression whose evaluation would error) and
+-  predicate pushdown into join inputs.
++  (conservative: never folds an expression whose evaluation would error),
++  predicate pushdown into join inputs, and limit pushdown, which also bounds
++  the branches of a concatenation.
+ - **Determinism** — grouping and `DISTINCT` preserve first-seen order and sorts
+   are stable, so identical inputs always render identical output.
+ 
+@@ -111,10 +116,32 @@ id | name
+ (2 rows)
+ ```
+ 
++## Combining queries
++
++Branches are combined by position, not by name: the result takes its column
++names from the leftmost branch and its column types from the type lattice, so a
++branch on the narrow side of a promotion has its values widened before the two
++are compared.
++
++```console
++$ tanager "CREATE TABLE q1 (city TEXT, sales INTEGER);
++           CREATE TABLE q2 (city TEXT, sales INTEGER);
++           INSERT INTO q1 VALUES ('lisbon', 3), ('oslo', 1), ('lisbon', 3);
++           INSERT INTO q2 VALUES ('lisbon', 3), ('cork', 5);
++           SELECT city FROM q1 EXCEPT SELECT city FROM q2"
++city
++------
++oslo
++(1 rows)
++```
++
+ ## Supported SQL grammar (informal)
+ 
+ ```
+-statement   := select | insert | create_table | drop_table
++statement   := query | insert | create_table | drop_table
++query       := select { set_op select }
++               [ORDER BY sort_key {, sort_key}] [LIMIT n] [OFFSET n]
++set_op      := (UNION | INTERSECT | EXCEPT) [ALL]
+ select      := SELECT [DISTINCT] select_list
+                [FROM table [alias] { join }]
+                [WHERE expr]
+diff --git a/docs/DESIGN.md b/docs/DESIGN.md
+index 2afea81..4f260f2 100644
+--- a/docs/DESIGN.md
++++ b/docs/DESIGN.md
+@@ -60,10 +60,60 @@ earlier stage:
+   lexer token if it needs new punctuation, a parser mapping, a binder type rule,
+   and an evaluator arm.
+ - **A plan rewrite**: implement `OptimizerRule` and add it to `Optimizer::new`.
++- **A relational operator**: add a `LogicalPlan` variant (schema, name,
++  children, detail), an executor arm, and the arms the optimizer's exhaustive
++  traversals need in `plan_util` and the two pushdown rules.
++
++## Set operations
++
++A query is one or more `SELECT` branches combined by `UNION`, `INTERSECT` or
++`EXCEPT`. The binder folds the branches into `SetOp` nodes and the executor
++pairs their rows; four rules decide what comes out.
++
++- **Shape.** Branches combine by position. They must project the same number of
++  columns, and each pair of columns must unify under `DataType::unify`. The
++  result takes its names from the leftmost branch and its types from the
++  unification, and a branch on the narrow side of a promotion is wrapped in a
++  projection that casts its values. That cast is not cosmetic: rows pair by
++  value *and* type, so an `INTEGER` 1 and a `FLOAT` 1.0 are different rows until
++  one of them moves.
++- **Pairing.** Two rows are the same row when every column shares a
++  `Value::group_key`, the canonical key `GROUP BY` and `DISTINCT` already use.
++  `NULL` therefore pairs with `NULL`, and `-0.0` with `0.0`.
++- **Multiplicity.** The plain spelling reports each surviving row once. `ALL`
++  counts instead: a concatenation for `UNION`, the smaller of the two counts for
++  `INTERSECT`, and the left count less the right, floored at zero, for `EXCEPT`.
++- **Order.** Output follows the left branch, in the order rows were first seen
++  there; a union appends the right branch's rows that the left did not already
++  hold. Nothing is sorted, so `ORDER BY` is still the only way to fix an order.
++
++Precedence is `INTERSECT` first, then `UNION` and `EXCEPT` folding from the
++left, and the binder applies it while building the tree rather than in the
++parser. `ORDER BY`, `LIMIT` and `OFFSET` belong to the whole query: they are
++parsed once, after the last branch, and an `ORDER BY` key over a set operation
++resolves against the result columns alone, by name or by position. The hidden
++sort column that carries a non-projected key through an ordinary `SELECT` has no
++meaning here, because there is no single input relation to take it from.
++
++## Bounding the branches of a concatenation
++
++`LimitPushdown` does two things. It moves a `Limit` below a `Project`, and it
++copies one into both branches of a `UNION ALL`, bounded by the limit plus the
++offset. A concatenation reads its left branch to exhaustion before its right, so
++no row past that total can reach the result from either side, and the outer
++limit stays where it is to do the cutting.
++
++The bound is not available to any other operator. An intersection or a
++difference reads a branch to decide about rows that come later, a deduplicating
++branch can spend any number of input rows on a single output row, and a `Sort`
++between the limit and the operator needs every row before it can order them. The
++rule also runs inside a fixpoint driver, so it looks for a bound a previous pass
++already applied — through a projection, since the earlier pass may since have
++pushed it below one — rather than wrapping its own output again.
+ 
+ ## Deliberate non-goals
+ 
+ tanager is a teaching-grade analytical engine, not a storage engine. There is no
+-persistence, transactions, indexes, subqueries, or set operations. Execution is
+-fully materializing, which keeps operators simple at the cost of memory on very
+-large inputs.
++persistence, transactions, indexes, or subqueries. Execution is fully
++materializing, which keeps operators simple at the cost of memory on very large
++inputs.
+diff --git a/src/ast/mod.rs b/src/ast/mod.rs
+index 14bed1e..76f4cbd 100644
+--- a/src/ast/mod.rs
++++ b/src/ast/mod.rs
+@@ -9,5 +9,5 @@
+ pub use operators::{BinaryOp, UnaryOp};
+ pub use statement::{
+     ColumnDef, CreateTableStmt, DropTableStmt, FromClause, InsertStmt, Join, JoinType, OrderByExpr,
+-    SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
++    SelectItem, SelectStmt, SetOpBranch, SetOperator, SortDirection, Statement, TableFactor,
+ };
+diff --git a/src/ast/statement.rs b/src/ast/statement.rs
+index 9ddf08b..36c790e 100644
+--- a/src/ast/statement.rs
++++ b/src/ast/statement.rs
+@@ -41,6 +41,46 @@ pub fn keyword(self) -> &'static str {
+     }
+ }
+ 
++/// A set operator combining two query branches.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum SetOperator {
++    /// Rows of either branch.
++    Union,
++    /// Rows present in both branches.
++    Intersect,
++    /// Rows of the left branch that the right branch does not hold.
++    Except,
++}
++
++impl SetOperator {
++    /// The SQL keyword that spells this operator.
++    pub fn keyword(self) -> &'static str {
++        match self {
++            SetOperator::Union => "UNION",
++            SetOperator::Intersect => "INTERSECT",
++            SetOperator::Except => "EXCEPT",
++        }
++    }
++
++    /// Whether this operator binds tighter than the others. `INTERSECT` does;
++    /// `UNION` and `EXCEPT` share the looser level and associate to the left.
++    pub fn binds_tighter(self) -> bool {
++        matches!(self, SetOperator::Intersect)
++    }
++}
++
++/// One branch appended to a query by a set operator.
++#[derive(Debug, Clone, PartialEq)]
++pub struct SetOpBranch {
++    pub op: SetOperator,
++    /// `true` for the `ALL` spelling, which keeps duplicate rows; `false` for
++    /// the plain spelling, which removes them.
++    pub all: bool,
++    /// The branch itself. A branch never carries `ORDER BY`, `LIMIT` or
++    /// `OFFSET`: those belong to the query as a whole.
++    pub select: SelectStmt,
++}
++
+ /// A joined relation and its `ON` predicate.
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct Join {
+@@ -98,6 +138,12 @@ pub struct SelectStmt {
+     pub selection: Option<Expr>,
+     pub group_by: Vec<Expr>,
+     pub having: Option<Expr>,
++    /// Branches combined with this one by set operators, in written order.
++    /// Empty for an ordinary `SELECT`.
++    pub set_ops: Vec<SetOpBranch>,
++    /// `ORDER BY`, `LIMIT` and `OFFSET` govern the whole query: when
++    /// `set_ops` is non-empty they apply to the combined result, not to the
++    /// branch they were written after.
+     pub order_by: Vec<OrderByExpr>,
+     pub limit: Option<u64>,
+     pub offset: Option<u64>,
+@@ -113,6 +159,7 @@ pub fn empty() -> SelectStmt {
+             selection: None,
+             group_by: Vec::new(),
+             having: None,
++            set_ops: Vec::new(),
+             order_by: Vec::new(),
+             limit: None,
+             offset: None,
+@@ -172,6 +219,25 @@ fn table_factor_binding_prefers_alias() {
+         assert_eq!(tf2.binding_name(), "employees");
+     }
+ 
++    #[test]
++    fn set_operator_keywords() {
++        assert_eq!(SetOperator::Union.keyword(), "UNION");
++        assert_eq!(SetOperator::Intersect.keyword(), "INTERSECT");
++        assert_eq!(SetOperator::Except.keyword(), "EXCEPT");
++    }
++
++    #[test]
++    fn only_intersect_binds_tighter() {
++        assert!(SetOperator::Intersect.binds_tighter());
++        assert!(!SetOperator::Union.binds_tighter());
++        assert!(!SetOperator::Except.binds_tighter());
++    }
++
++    #[test]
++    fn an_empty_select_has_no_branches() {
++        assert!(SelectStmt::empty().set_ops.is_empty());
++    }
++
+     #[test]
+     fn join_keywords() {
+         assert_eq!(JoinType::Inner.keyword(), "INNER JOIN");
+diff --git a/src/exec/executor.rs b/src/exec/executor.rs
+index f9d3cfc..ac1f011 100644
+--- a/src/exec/executor.rs
++++ b/src/exec/executor.rs
+@@ -6,7 +6,7 @@
+ 
+ use crate::error::Result;
+ use crate::exec::eval::eval;
+-use crate::exec::{agg_exec, join_exec, sort_exec};
++use crate::exec::{agg_exec, join_exec, set_exec, sort_exec};
+ use crate::planner::logical::LogicalPlan;
+ use crate::storage::{Catalog, Row};
+ use crate::types::GroupKey;
+@@ -99,6 +99,18 @@ pub fn execute(&self, plan: &LogicalPlan) -> Result<Vec<Row>> {
+                 join_exec::execute_join(left_rows, right_rows, on, *join_type, right_width)
+             }
+ 
++            LogicalPlan::SetOp {
++                left,
++                right,
++                op,
++                all,
++                ..
++            } => {
++                let left_rows = self.execute(left)?;
++                let right_rows = self.execute(right)?;
++                set_exec::execute_set_op(left_rows, right_rows, *op, *all)
++            }
++
+             LogicalPlan::Distinct { input } => {
+                 let rows = self.execute(input)?;
+                 let mut seen: std::collections::HashSet<Vec<GroupKey>> =
+diff --git a/src/exec/mod.rs b/src/exec/mod.rs
+index 8ebf489..4055a60 100644
+--- a/src/exec/mod.rs
++++ b/src/exec/mod.rs
+@@ -5,6 +5,7 @@
+ pub mod executor;
+ mod join_exec;
+ pub mod predicate;
++mod set_exec;
+ mod sort_exec;
+ 
+ pub use eval::eval;
+diff --git a/src/exec/set_exec.rs b/src/exec/set_exec.rs
+new file mode 100644
+index 0000000..8903759
+--- /dev/null
++++ b/src/exec/set_exec.rs
+@@ -0,0 +1,235 @@
++//! Set operations over two materialized branches.
++//!
++//! Both branches arrive as rows of the operator's own output schema, so the
++//! operator never evaluates an expression: it pairs rows and decides which of
++//! them reach the result.
++//!
++//! Two properties shape the implementation. Rows pair through
++//! [`crate::types::Value::group_key`], the same canonical key `DISTINCT` and
++//! `GROUP BY` use, so `NULL` pairs with `NULL` and `-0.0` with `0.0`. And the
++//! result follows the left branch: rows leave in the order they were first
++//! seen there, with a union's unpaired right-branch rows after them.
++
++use std::collections::HashMap;
++
++use crate::ast::statement::SetOperator;
++use crate::error::Result;
++use crate::storage::Row;
++use crate::types::GroupKey;
++
++/// The canonical pairing key of a whole row.
++fn row_key(row: &Row) -> Vec<GroupKey> {
++    row.values().iter().map(|v| v.group_key()).collect()
++}
++
++/// How many times each row appears in `rows`.
++fn tally(rows: &[Row]) -> HashMap<Vec<GroupKey>, usize> {
++    let mut counts: HashMap<Vec<GroupKey>, usize> = HashMap::new();
++    for row in rows {
++        *counts.entry(row_key(row)).or_insert(0) += 1;
++    }
++    counts
++}
++
++/// Apply `op` to two branch results.
++///
++/// `all` selects multiset behavior: `UNION ALL` concatenates, `INTERSECT ALL`
++/// keeps a row as many times as it appears in both branches, and `EXCEPT ALL`
++/// keeps the surplus copies of the left branch. Without it every operator
++/// reports each distinct row at most once.
++pub fn execute_set_op(
++    left: Vec<Row>,
++    right: Vec<Row>,
++    op: SetOperator,
++    all: bool,
++) -> Result<Vec<Row>> {
++    Ok(match (op, all) {
++        (SetOperator::Union, true) => concat(left, right),
++        (SetOperator::Union, false) => dedup(concat(left, right)),
++        (SetOperator::Intersect, true) => keep_copies(left, &right, Quota::Shared),
++        (SetOperator::Intersect, false) => keep_present(left, &right, true),
++        (SetOperator::Except, true) => keep_copies(left, &right, Quota::Surplus),
++        (SetOperator::Except, false) => dedup(keep_copies(left, &right, Quota::Surplus)),
++    })
++}
++
++fn concat(mut left: Vec<Row>, right: Vec<Row>) -> Vec<Row> {
++    left.extend(right);
++    left
++}
++
++/// Keep the first copy of each distinct row, in first-seen order.
++fn dedup(rows: Vec<Row>) -> Vec<Row> {
++    let mut seen: HashMap<Vec<GroupKey>, ()> = HashMap::new();
++    let mut out = Vec::new();
++    for row in rows {
++        if seen.insert(row_key(&row), ()).is_none() {
++            out.push(row);
++        }
++    }
++    out
++}
++
++/// How many copies of a row an `ALL` operator is allowed to keep.
++#[derive(Clone, Copy)]
++enum Quota {
++    /// As many as both branches hold: the smaller of the two counts.
++    Shared,
++    /// As many as the left branch holds over the right, floored at zero.
++    Surplus,
++}
++
++/// Keep the leading copies of each row, as many as `quota` allows.
++///
++/// Which copies survive is not arbitrary: they are the first ones, so the
++/// result reads in the order the left branch produced it, the same rule
++/// `DISTINCT` follows.
++fn keep_copies(left: Vec<Row>, right: &[Row], quota: Quota) -> Vec<Row> {
++    let available = tally(right);
++    let mut budget: HashMap<Vec<GroupKey>, usize> = HashMap::new();
++    for (key, held) in tally(&left) {
++        let other = available.get(&key).copied().unwrap_or(0);
++        let allowed = match quota {
++            Quota::Shared => held.min(other),
++            Quota::Surplus => held.saturating_sub(other),
++        };
++        budget.insert(key, allowed);
++    }
++
++    let mut out = Vec::new();
++    for row in left {
++        if let Some(remaining) = budget.get_mut(&row_key(&row)) {
++            if *remaining > 0 {
++                *remaining -= 1;
++                out.push(row);
++            }
++        }
++    }
++    out
++}
++
++/// Keep the first copy of each distinct left row the right branch does or does
++/// not hold.
++fn keep_present(left: Vec<Row>, right: &[Row], present: bool) -> Vec<Row> {
++    let other = tally(right);
++    let mut taken: HashMap<Vec<GroupKey>, ()> = HashMap::new();
++    let mut out = Vec::new();
++    for row in left {
++        let key = row_key(&row);
++        if other.contains_key(&key) != present {
++            continue;
++        }
++        if taken.insert(key, ()).is_none() {
++            out.push(row);
++        }
++    }
++    out
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::types::Value;
++
++    fn rows(values: &[i64]) -> Vec<Row> {
++        values
++            .iter()
++            .map(|v| Row::new(vec![Value::Integer(*v)]))
++            .collect()
++    }
++
++    fn ints(rows: Vec<Row>) -> Vec<i64> {
++        rows.iter()
++            .map(|r| match r.get(0) {
++                Some(Value::Integer(i)) => *i,
++                other => panic!("expected an integer, got {:?}", other),
++            })
++            .collect()
++    }
++
++    fn run(left: &[i64], right: &[i64], op: SetOperator, all: bool) -> Vec<i64> {
++        ints(execute_set_op(rows(left), rows(right), op, all).unwrap())
++    }
++
++    #[test]
++    fn union_all_concatenates_in_branch_order() {
++        assert_eq!(
++            run(&[3, 1, 3], &[1, 2], SetOperator::Union, true),
++            vec![3, 1, 3, 1, 2]
++        );
++    }
++
++    #[test]
++    fn union_keeps_first_sighting_of_each_row() {
++        assert_eq!(
++            run(&[3, 1, 3], &[1, 2], SetOperator::Union, false),
++            vec![3, 1, 2]
++        );
++    }
++
++    #[test]
++    fn intersect_all_keeps_the_smaller_count() {
++        assert_eq!(
++            run(&[1, 1, 1, 2], &[1, 1, 2, 2], SetOperator::Intersect, true),
++            vec![1, 1, 2]
++        );
++    }
++
++    #[test]
++    fn intersect_reports_each_row_once() {
++        assert_eq!(
++            run(&[1, 1, 1, 2], &[1, 1, 2, 2], SetOperator::Intersect, false),
++            vec![1, 2]
++        );
++    }
++
++    #[test]
++    fn except_all_removes_one_copy_per_right_row() {
++        assert_eq!(
++            run(&[1, 1, 1, 2], &[1, 2], SetOperator::Except, true),
++            vec![1, 1]
++        );
++    }
++
++    #[test]
++    fn except_all_keeps_the_leading_copies() {
++        // The third 1 is the one that goes, not the first.
++        assert_eq!(
++            run(&[1, 2, 1, 1], &[1, 5], SetOperator::Except, true),
++            vec![1, 2, 1]
++        );
++    }
++
++    #[test]
++    fn except_drops_a_row_the_right_branch_holds_at_all() {
++        assert_eq!(
++            run(&[1, 1, 1, 2], &[1], SetOperator::Except, false),
++            vec![2]
++        );
++    }
++
++    #[test]
++    fn except_reports_surviving_rows_once() {
++        assert_eq!(
++            run(&[1, 1, 3], &[2], SetOperator::Except, false),
++            vec![1, 3]
++        );
++    }
++
++    #[test]
++    fn nulls_pair_with_nulls() {
++        let left = vec![Row::new(vec![Value::Null]), Row::new(vec![Value::Null])];
++        let right = vec![Row::new(vec![Value::Null])];
++        let out = execute_set_op(left, right, SetOperator::Except, true).unwrap();
++        assert_eq!(out.len(), 1);
++        assert!(out[0].get(0).unwrap().is_null());
++    }
++
++    #[test]
++    fn signed_zeros_are_the_same_row() {
++        let left = vec![Row::new(vec![Value::Float(0.0)])];
++        let right = vec![Row::new(vec![Value::Float(-0.0)])];
++        let out = execute_set_op(left, right, SetOperator::Intersect, false).unwrap();
++        assert_eq!(out.len(), 1);
++    }
++}
+diff --git a/src/optimizer/limit_pushdown.rs b/src/optimizer/limit_pushdown.rs
+index 8d769ec..9e6c5e6 100644
+--- a/src/optimizer/limit_pushdown.rs
++++ b/src/optimizer/limit_pushdown.rs
+@@ -1,15 +1,26 @@
+-//! Limit pushdown: move a `Limit` below a `Project`.
++//! Limit pushdown: move a `Limit` below a `Project`, and bound the branches of
++//! a concatenation.
+ 
++use crate::ast::statement::SetOperator;
+ use crate::error::Result;
+ use crate::optimizer::rule::OptimizerRule;
+ use crate::planner::logical::LogicalPlan;
+ 
+-/// Pushes a `Limit` beneath a `Project`.
++/// Pushes a `Limit` beneath a `Project`, and copies it into the branches of a
++/// `UNION ALL`.
+ ///
+ /// A projection maps rows one-to-one, so applying the limit *before* the
+ /// projection produces the same rows while projecting fewer of them. The limit
+ /// is not pushed below cardinality-changing operators (filter, join, aggregate,
+ /// sort, distinct), where it would change results.
++///
++/// A concatenation reads its left branch to exhaustion before its right, so no
++/// row past the `LIMIT` plus the `OFFSET` can reach the result from either
++/// branch: both may be bounded by that total while the outer limit stays to do
++/// the actual cutting. No other set operator can be bounded this way — a row
++/// dropped from a branch of an intersection or a difference is a row the
++/// operator needed in order to decide about the rows that follow it, and a
++/// deduplicating branch can spend any number of input rows on one output row.
+ pub struct LimitPushdown;
+ 
+ impl OptimizerRule for LimitPushdown {
+@@ -32,6 +43,36 @@ fn pushdown(plan: LogicalPlan) -> LogicalPlan {
+         offset,
+     } = plan
+     {
++        if let LogicalPlan::SetOp {
++            left,
++            right,
++            op,
++            all,
++            schema,
++        } = *input
++        {
++            let bound = match limit {
++                Some(l) if all && matches!(op, SetOperator::Union) => {
++                    Some(l.saturating_add(offset.unwrap_or(0)))
++                }
++                _ => None,
++            };
++            let (left, right) = match bound {
++                Some(bound) => (bound_branch(*left, bound), bound_branch(*right, bound)),
++                None => (*left, *right),
++            };
++            return LogicalPlan::Limit {
++                input: Box::new(LogicalPlan::SetOp {
++                    left: Box::new(left),
++                    right: Box::new(right),
++                    op,
++                    all,
++                    schema,
++                }),
++                limit,
++                offset,
++            };
++        }
+         if let LogicalPlan::Project {
+             input: proj_input,
+             expressions,
+@@ -60,6 +101,33 @@ fn pushdown(plan: LogicalPlan) -> LogicalPlan {
+     plan
+ }
+ 
++/// Cap a branch at `bound` rows, unless it already carries that cap.
++///
++/// The rule runs to a fixpoint, and by the time it runs again the cap it added
++/// may have moved below a projection, so a bound is looked for through one.
++fn bound_branch(plan: LogicalPlan, bound: u64) -> LogicalPlan {
++    if already_bounded(&plan, bound) {
++        return plan;
++    }
++    LogicalPlan::Limit {
++        input: Box::new(plan),
++        limit: Some(bound),
++        offset: None,
++    }
++}
++
++fn already_bounded(plan: &LogicalPlan, bound: u64) -> bool {
++    match plan {
++        LogicalPlan::Limit {
++            limit: Some(limit),
++            offset: None,
++            ..
++        } => *limit == bound,
++        LogicalPlan::Project { input, .. } => already_bounded(input, bound),
++        _ => false,
++    }
++}
++
+ /// Apply the rewrite to a node's children, preserving the node itself.
+ fn map_children(plan: LogicalPlan) -> LogicalPlan {
+     match plan {
+@@ -119,5 +187,163 @@ fn map_children(plan: LogicalPlan) -> LogicalPlan {
+         LogicalPlan::Distinct { input } => LogicalPlan::Distinct {
+             input: Box::new(pushdown(*input)),
+         },
++        LogicalPlan::SetOp {
++            left,
++            right,
++            op,
++            all,
++            schema,
++        } => LogicalPlan::SetOp {
++            left: Box::new(pushdown(*left)),
++            right: Box::new(pushdown(*right)),
++            op,
++            all,
++            schema,
++        },
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::optimizer::optimizer::Optimizer;
++    use crate::planner::bound::BoundExpr;
++    use crate::types::{DataType, Field, Schema, Value};
++
++    fn schema() -> Schema {
++        Schema::new(vec![Field::new("v", DataType::Integer)]).unwrap()
++    }
++
++    fn scan(table: &str) -> LogicalPlan {
++        LogicalPlan::Scan {
++            table: table.to_string(),
++            schema: schema(),
++        }
++    }
++
++    fn set_op(op: SetOperator, all: bool) -> LogicalPlan {
++        LogicalPlan::SetOp {
++            left: Box::new(scan("a")),
++            right: Box::new(scan("b")),
++            op,
++            all,
++            schema: schema(),
++        }
++    }
++
++    fn limited(input: LogicalPlan, limit: Option<u64>, offset: Option<u64>) -> LogicalPlan {
++        LogicalPlan::Limit {
++            input: Box::new(input),
++            limit,
++            offset,
++        }
++    }
++
++    /// The detail line of every node, parents before children.
++    fn details(plan: &LogicalPlan) -> Vec<String> {
++        let mut out = vec![plan.detail()];
++        for child in plan.children() {
++            out.extend(details(child));
++        }
++        out
++    }
++
++    #[test]
++    fn a_concatenation_takes_the_limit_plus_the_offset() {
++        let plan = limited(set_op(SetOperator::Union, true), Some(4), Some(3));
++        let out = LimitPushdown.apply(plan).unwrap();
++        assert_eq!(
++            details(&out),
++            vec![
++                "Limit 4 Offset 3",
++                "UNION ALL",
++                "Limit 7",
++                "Scan a",
++                "Limit 7",
++                "Scan b"
++            ]
++        );
++    }
++
++    #[test]
++    fn no_other_operator_is_bounded() {
++        for (op, all) in [
++            (SetOperator::Union, false),
++            (SetOperator::Intersect, true),
++            (SetOperator::Intersect, false),
++            (SetOperator::Except, true),
++            (SetOperator::Except, false),
++        ] {
++            let plan = limited(set_op(op, all), Some(4), None);
++            let out = LimitPushdown.apply(plan).unwrap();
++            assert_eq!(
++                details(&out)
++                    .iter()
++                    .filter(|d| d.starts_with("Limit"))
++                    .count(),
++                1,
++                "{} {} was bounded",
++                op.keyword(),
++                all
++            );
++        }
++    }
++
++    #[test]
++    fn an_offset_alone_bounds_nothing() {
++        let plan = limited(set_op(SetOperator::Union, true), None, Some(3));
++        let out = LimitPushdown.apply(plan).unwrap();
++        assert_eq!(
++            details(&out)
++                .iter()
++                .filter(|d| d.starts_with("Limit"))
++                .count(),
++            0
++        );
++        assert_eq!(details(&out)[0], "Offset 3");
++    }
++
++    #[test]
++    fn the_bound_settles_instead_of_growing() {
++        let plan = limited(set_op(SetOperator::Union, true), Some(2), None);
++        let out = Optimizer::new().optimize(plan).unwrap();
++        assert_eq!(
++            details(&out).iter().filter(|d| *d == "Limit 2").count(),
++            3,
++            "plan was: {}",
++            out.explain()
++        );
++    }
++
++    #[test]
++    fn a_bound_is_recognized_through_a_projection() {
++        let project = LogicalPlan::Project {
++            input: Box::new(limited(scan("a"), Some(5), None)),
++            expressions: vec![BoundExpr::Column {
++                index: 0,
++                data_type: DataType::Integer,
++            }],
++            aliases: vec!["v".to_string()],
++            schema: schema(),
++        };
++        assert!(already_bounded(&project, 5));
++        assert!(!already_bounded(&project, 6));
++        assert!(!already_bounded(&scan("a"), 5));
++    }
++
++    /// A limit is still pushed below a projection, as it always was.
++    #[test]
++    fn a_projection_still_lets_a_limit_through() {
++        let project = LogicalPlan::Project {
++            input: Box::new(scan("a")),
++            expressions: vec![BoundExpr::Literal(Value::Integer(1))],
++            aliases: vec!["v".to_string()],
++            schema: schema(),
++        };
++        let out = LimitPushdown
++            .apply(limited(project, Some(2), None))
++            .unwrap();
++        assert_eq!(out.node_name(), "Project");
++        assert_eq!(out.children()[0].node_name(), "Limit");
+     }
+ }
+diff --git a/src/optimizer/plan_util.rs b/src/optimizer/plan_util.rs
+index 6cb27e4..d9bed1f 100644
+--- a/src/optimizer/plan_util.rs
++++ b/src/optimizer/plan_util.rs
+@@ -106,5 +106,19 @@ pub fn map_plan_expressions(
+         LogicalPlan::Distinct { input } => Ok(LogicalPlan::Distinct {
+             input: Box::new(map_plan_expressions(*input, f)?),
+         }),
++
++        LogicalPlan::SetOp {
++            left,
++            right,
++            op,
++            all,
++            schema,
++        } => Ok(LogicalPlan::SetOp {
++            left: Box::new(map_plan_expressions(*left, f)?),
++            right: Box::new(map_plan_expressions(*right, f)?),
++            op,
++            all,
++            schema,
++        }),
+     }
+ }
+diff --git a/src/optimizer/predicate_pushdown.rs b/src/optimizer/predicate_pushdown.rs
+index 933ffb4..d4dbc13 100644
+--- a/src/optimizer/predicate_pushdown.rs
++++ b/src/optimizer/predicate_pushdown.rs
+@@ -153,5 +153,18 @@ fn recurse_children(plan: LogicalPlan) -> Result<LogicalPlan> {
+         LogicalPlan::Distinct { input } => LogicalPlan::Distinct {
+             input: Box::new(pushdown(*input)?),
+         },
++        LogicalPlan::SetOp {
++            left,
++            right,
++            op,
++            all,
++            schema,
++        } => LogicalPlan::SetOp {
++            left: Box::new(pushdown(*left)?),
++            right: Box::new(pushdown(*right)?),
++            op,
++            all,
++            schema,
++        },
+     })
+ }
+diff --git a/src/parser/keyword.rs b/src/parser/keyword.rs
+index 89bc64c..30c5fe4 100644
+--- a/src/parser/keyword.rs
++++ b/src/parser/keyword.rs
+@@ -30,6 +30,10 @@ pub enum Keyword {
+     Join,
+     Inner,
+     Left,
++    Union,
++    Intersect,
++    Except,
++    All,
+     On,
+     And,
+     Or,
+@@ -86,6 +90,10 @@ pub fn from_upper(word: &str) -> Option<Keyword> {
+             "JOIN" => Keyword::Join,
+             "INNER" => Keyword::Inner,
+             "LEFT" => Keyword::Left,
++            "UNION" => Keyword::Union,
++            "INTERSECT" => Keyword::Intersect,
++            "EXCEPT" => Keyword::Except,
++            "ALL" => Keyword::All,
+             "ON" => Keyword::On,
+             "AND" => Keyword::And,
+             "OR" => Keyword::Or,
+@@ -126,4 +134,12 @@ fn recognizes_keywords_and_type_aliases() {
+         assert_eq!(Keyword::from_upper("BOOL"), Some(Keyword::Boolean));
+         assert_eq!(Keyword::from_upper("widget"), None);
+     }
++
++    #[test]
++    fn recognizes_set_operators() {
++        assert_eq!(Keyword::from_upper("UNION"), Some(Keyword::Union));
++        assert_eq!(Keyword::from_upper("INTERSECT"), Some(Keyword::Intersect));
++        assert_eq!(Keyword::from_upper("EXCEPT"), Some(Keyword::Except));
++        assert_eq!(Keyword::from_upper("ALL"), Some(Keyword::All));
++    }
+ }
+diff --git a/src/parser/parser.rs b/src/parser/parser.rs
+index b411018..f4a62ca 100644
+--- a/src/parser/parser.rs
++++ b/src/parser/parser.rs
+@@ -5,7 +5,7 @@
+ use crate::ast::operators::{BinaryOp, UnaryOp};
+ use crate::ast::statement::{
+     ColumnDef, CreateTableStmt, DropTableStmt, FromClause, InsertStmt, Join, JoinType, OrderByExpr,
+-    SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
++    SelectItem, SelectStmt, SetOpBranch, SetOperator, SortDirection, Statement, TableFactor,
+ };
+ use crate::error::{Error, Result};
+ use crate::parser::keyword::Keyword;
+@@ -188,7 +188,67 @@ fn parse_statement(&mut self) -> Result<Statement> {
+ 
+     // ---- SELECT ----
+ 
++    /// Parse a query: one or more `SELECT` branches joined by set operators,
++    /// followed by the trailing clauses that govern the whole result.
+     fn parse_select(&mut self) -> Result<SelectStmt> {
++        let mut stmt = self.parse_select_core()?;
++        while let Some((op, all)) = self.eat_set_operator() {
++            let select = self.parse_select_core()?;
++            stmt.set_ops.push(SetOpBranch { op, all, select });
++        }
++        self.parse_query_tail(&mut stmt)?;
++        // A trailing clause closes the query, so a branch cannot follow it.
++        if let TokenKind::Word {
++            keyword: Some(kw), ..
++        } = self.peek()
++        {
++            if matches!(kw, Keyword::Union | Keyword::Intersect | Keyword::Except) {
++                return Err(Error::parse(
++                    "ORDER BY, LIMIT and OFFSET may only follow the last branch of a query",
++                )
++                .at(self.position()));
++            }
++        }
++        Ok(stmt)
++    }
++
++    /// A set operator and whether it was written with `ALL`, consumed if the
++    /// current token starts one.
++    fn eat_set_operator(&mut self) -> Option<(SetOperator, bool)> {
++        let op = if self.at_keyword(Keyword::Union) {
++            SetOperator::Union
++        } else if self.at_keyword(Keyword::Intersect) {
++            SetOperator::Intersect
++        } else if self.at_keyword(Keyword::Except) {
++            SetOperator::Except
++        } else {
++            return None;
++        };
++        self.advance();
++        let all = self.eat_keyword(Keyword::All);
++        Some((op, all))
++    }
++
++    /// `ORDER BY` / `LIMIT` / `OFFSET`, which belong to the query rather than
++    /// to any one branch of it.
++    fn parse_query_tail(&mut self, stmt: &mut SelectStmt) -> Result<()> {
++        if self.eat_keyword(Keyword::Order) {
++            self.expect_keyword(Keyword::By)?;
++            stmt.order_by.push(self.parse_order_by_item()?);
++            while self.eat(&TokenKind::Comma) {
++                stmt.order_by.push(self.parse_order_by_item()?);
++            }
++        }
++        if self.eat_keyword(Keyword::Limit) {
++            stmt.limit = Some(self.parse_u64("LIMIT")?);
++        }
++        if self.eat_keyword(Keyword::Offset) {
++            stmt.offset = Some(self.parse_u64("OFFSET")?);
++        }
++        Ok(())
++    }
++
++    fn parse_select_core(&mut self) -> Result<SelectStmt> {
+         self.expect_keyword(Keyword::Select)?;
+         let mut stmt = SelectStmt::empty();
+         stmt.distinct = self.eat_keyword(Keyword::Distinct);
+@@ -214,19 +274,6 @@ fn parse_select(&mut self) -> Result<SelectStmt> {
+         if self.eat_keyword(Keyword::Having) {
+             stmt.having = Some(self.parse_expr(0)?);
+         }
+-        if self.eat_keyword(Keyword::Order) {
+-            self.expect_keyword(Keyword::By)?;
+-            stmt.order_by.push(self.parse_order_by_item()?);
+-            while self.eat(&TokenKind::Comma) {
+-                stmt.order_by.push(self.parse_order_by_item()?);
+-            }
+-        }
+-        if self.eat_keyword(Keyword::Limit) {
+-            stmt.limit = Some(self.parse_u64("LIMIT")?);
+-        }
+-        if self.eat_keyword(Keyword::Offset) {
+-            stmt.offset = Some(self.parse_u64("OFFSET")?);
+-        }
+         Ok(stmt)
+     }
+ 
+@@ -742,6 +789,7 @@ fn parse_case(&mut self) -> Result<Expr> {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    use crate::ast::statement::SetOperator;
+     use crate::ast::statement::Statement;
+ 
+     fn expr(sql: &str) -> Expr {
+@@ -755,6 +803,45 @@ fn expr(sql: &str) -> Expr {
+         }
+     }
+ 
++    #[test]
++    fn parses_a_set_operation_chain() {
++        let stmt =
++            parse_statement("SELECT a FROM t UNION ALL SELECT b FROM u INTERSECT SELECT c FROM v")
++                .unwrap();
++        let select = match stmt {
++            Statement::Select(s) => s,
++            other => panic!("expected a query, got {:?}", other),
++        };
++        assert_eq!(select.set_ops.len(), 2);
++        assert_eq!(select.set_ops[0].op, SetOperator::Union);
++        assert!(select.set_ops[0].all);
++        assert_eq!(select.set_ops[1].op, SetOperator::Intersect);
++        assert!(!select.set_ops[1].all);
++    }
++
++    #[test]
++    fn trailing_clauses_belong_to_the_query() {
++        let stmt =
++            parse_statement("SELECT a FROM t UNION SELECT b FROM u ORDER BY 1 LIMIT 4 OFFSET 2")
++                .unwrap();
++        let select = match stmt {
++            Statement::Select(s) => s,
++            other => panic!("expected a query, got {:?}", other),
++        };
++        assert_eq!(select.order_by.len(), 1);
++        assert_eq!(select.limit, Some(4));
++        assert_eq!(select.offset, Some(2));
++        // The branch itself carries none of them.
++        assert!(select.set_ops[0].select.order_by.is_empty());
++        assert_eq!(select.set_ops[0].select.limit, None);
++    }
++
++    #[test]
++    fn a_trailing_clause_closes_the_query() {
++        assert!(parse_statement("SELECT a FROM t LIMIT 2 UNION SELECT b FROM u").is_err());
++        assert!(parse_statement("SELECT a FROM t ORDER BY a EXCEPT SELECT b FROM u").is_err());
++    }
++
+     #[test]
+     fn precedence_multiplies_before_adds() {
+         // 1 + 2 * 3  ==  1 + (2 * 3)
+diff --git a/src/planner/binder.rs b/src/planner/binder.rs
+index a9bcc4d..1d27a61 100644
+--- a/src/planner/binder.rs
++++ b/src/planner/binder.rs
+@@ -7,13 +7,13 @@
+ //! an optional aggregate context.
+ 
+ use crate::ast::expr::{is_aggregate_name, Expr};
+-use crate::ast::statement::{FromClause, SelectItem, SelectStmt};
++use crate::ast::statement::{FromClause, SelectItem, SelectStmt, SetOperator};
+ use crate::error::{Error, Result};
+ use crate::functions::{AggregateFn, ScalarFn};
+ use crate::planner::binder_util::{
+     binary_result_type, check_comparable, derive_name, extend_project,
+     projection_item_has_aggregate, require_predicate, require_text_or_null, schema_from,
+-    unary_result_type, unify_result,
++    unary_result_type, unify_result, widen_branch,
+ };
+ use crate::planner::bound::{BoundAggregate, BoundExpr};
+ use crate::planner::logical::{LogicalPlan, SortKey};
+@@ -42,8 +42,142 @@ pub fn new(catalog: &'a Catalog) -> Binder<'a> {
+         Binder { catalog }
+     }
+ 
+-    /// Bind a `SELECT` into a logical plan.
++    /// Bind a query into a logical plan.
++    ///
++    /// A query is one or more `SELECT` branches combined by set operators.
++    /// The branches bind independently; the trailing `ORDER BY`, `LIMIT` and
++    /// `OFFSET` then apply to whatever the branches combined to.
+     pub fn bind_select(&self, select: &SelectStmt) -> Result<LogicalPlan> {
++        let (plan, order_scope, visible_count) = if select.set_ops.is_empty() {
++            self.bind_select_core(select)?
++        } else {
++            // Every branch of a set operation projects the operator's output
++            // columns, so an ORDER BY key resolves against those alone: there
++            // is no single input relation to carry a hidden column from.
++            let plan = self.bind_set_operation(select)?;
++            let visible = plan.schema().len();
++            (plan, None, visible)
++        };
++        self.apply_query_tail(plan, select, order_scope, visible_count)
++    }
++
++    /// Bind the branches of a set expression and fold them into one plan.
++    ///
++    /// `INTERSECT` binds tighter than `UNION` and `EXCEPT`, so its branches
++    /// pair off first; what is left folds from the left.
++    fn bind_set_operation(&self, select: &SelectStmt) -> Result<LogicalPlan> {
++        let (head, _, _) = self.bind_select_core(select)?;
++        let mut plans = vec![head];
++        let mut operators = Vec::with_capacity(select.set_ops.len());
++        for branch in &select.set_ops {
++            if !branch.select.set_ops.is_empty() {
++                return Err(Error::binder("a set operation branch is a single SELECT"));
++            }
++            let (plan, _, _) = self.bind_select_core(&branch.select)?;
++            plans.push(plan);
++            operators.push((branch.op, branch.all));
++        }
++
++        let mut at = 0;
++        while at < operators.len() {
++            if operators[at].0.binds_tighter() {
++                let right = plans.remove(at + 1);
++                let left = plans.remove(at);
++                let (op, all) = operators.remove(at);
++                plans.insert(at, self.combine_branches(left, right, op, all)?);
++            } else {
++                at += 1;
++            }
++        }
++
++        let mut plan = plans.remove(0);
++        for (op, all) in operators {
++            let right = plans.remove(0);
++            plan = self.combine_branches(plan, right, op, all)?;
++        }
++        Ok(plan)
++    }
++
++    /// Build one set-operation node over two bound branches, after checking
++    /// they line up and widening both to a common output schema.
++    fn combine_branches(
++        &self,
++        left: LogicalPlan,
++        right: LogicalPlan,
++        op: SetOperator,
++        all: bool,
++    ) -> Result<LogicalPlan> {
++        let left_schema = left.schema().clone();
++        let right_schema = right.schema().clone();
++        if left_schema.len() != right_schema.len() {
++            return Err(Error::binder(format!(
++                "{} branches must project the same number of columns, got {} and {}",
++                op.keyword(),
++                left_schema.len(),
++                right_schema.len()
++            )));
++        }
++
++        let mut fields = Vec::with_capacity(left_schema.len());
++        for (position, (l, r)) in left_schema
++            .fields()
++            .iter()
++            .zip(right_schema.fields())
++            .enumerate()
++        {
++            let data_type = l.data_type().unify(r.data_type()).ok_or_else(|| {
++                Error::binder(format!(
++                    "column {} of a {} has incompatible types {} and {}",
++                    position + 1,
++                    op.keyword(),
++                    l.data_type(),
++                    r.data_type()
++                ))
++            })?;
++            // A column of the result is NOT NULL only where neither branch can
++            // put a NULL there. Names come from the left branch.
++            fields.push(Field::with_nullability(
++                l.name(),
++                data_type,
++                l.is_nullable() || r.is_nullable(),
++            ));
++        }
++        let schema = Schema::new_unchecked(fields);
++
++        Ok(LogicalPlan::SetOp {
++            left: Box::new(widen_branch(left, &schema)),
++            right: Box::new(widen_branch(right, &schema)),
++            op,
++            all,
++            schema,
++        })
++    }
++
++    /// Apply `ORDER BY`, `LIMIT` and `OFFSET` to a bound query body.
++    fn apply_query_tail(
++        &self,
++        mut plan: LogicalPlan,
++        select: &SelectStmt,
++        order_scope: Option<Scope>,
++        visible_count: usize,
++    ) -> Result<LogicalPlan> {
++        if !select.order_by.is_empty() {
++            plan = self.build_sort(plan, select, order_scope.as_ref(), visible_count)?;
++        }
++        if select.limit.is_some() || select.offset.is_some() {
++            plan = LogicalPlan::Limit {
++                input: Box::new(plan),
++                limit: select.limit,
++                offset: select.offset,
++            };
++        }
++        Ok(plan)
++    }
++
++    /// Bind one `SELECT` branch: everything up to and including `HAVING` and
++    /// `DISTINCT`. Returns the plan, the input scope an `ORDER BY` key may fall
++    /// back to, and how many columns the branch shows its caller.
++    fn bind_select_core(&self, select: &SelectStmt) -> Result<(LogicalPlan, Option<Scope>, usize)> {
+         let (mut plan, scope) = match &select.from {
+             None => (LogicalPlan::EmptyRow, Scope::empty()),
+             Some(from) => self.bind_from(from)?,
+@@ -89,7 +223,7 @@ pub fn bind_select(&self, select: &SelectStmt) -> Result<LogicalPlan> {
+         // Non-aggregate, non-distinct queries may ORDER BY input columns that
+         // are not projected; such keys are carried as hidden columns.
+         let order_input_scope = if !aggregating && !select.distinct {
+-            Some(&scope)
++            Some(scope)
+         } else {
+             None
+         };
+@@ -100,19 +234,7 @@ pub fn bind_select(&self, select: &SelectStmt) -> Result<LogicalPlan> {
+             };
+         }
+ 
+-        if !select.order_by.is_empty() {
+-            plan = self.build_sort(plan, select, order_input_scope, visible_count)?;
+-        }
+-
+-        if select.limit.is_some() || select.offset.is_some() {
+-            plan = LogicalPlan::Limit {
+-                input: Box::new(plan),
+-                limit: select.limit,
+-                offset: select.offset,
+-            };
+-        }
+-
+-        Ok(plan)
++        Ok((plan, order_input_scope, visible_count))
+     }
+ 
+     /// Bind a standalone scalar expression against an explicit scope (used by
+@@ -720,6 +842,59 @@ fn order_by_and_limit_wrap_plan() {
+         assert_eq!(p.children()[0].node_name(), "Sort");
+     }
+ 
++    #[test]
++    fn a_set_operation_builds_one_node_per_operator() {
++        let p = plan("SELECT id FROM emp UNION SELECT salary FROM emp").unwrap();
++        assert_eq!(p.node_name(), "SetOp");
++        assert_eq!(p.children().len(), 2);
++        assert_eq!(p.detail(), "UNION");
++    }
++
++    #[test]
++    fn intersect_pairs_off_before_union() {
++        let p = plan(
++            "SELECT id FROM emp UNION SELECT salary FROM emp \
++             INTERSECT SELECT id FROM emp",
++        )
++        .unwrap();
++        assert_eq!(p.detail(), "UNION");
++        assert_eq!(p.children()[1].detail(), "INTERSECT");
++    }
++
++    #[test]
++    fn a_narrow_branch_is_wrapped_in_a_cast() {
++        let mut c = catalog();
++        c.create_table(
++            "score",
++            Schema::new(vec![Field::new("value", DataType::Float)]).unwrap(),
++        )
++        .unwrap();
++        let stmt = parse_statement("SELECT id FROM emp UNION SELECT value FROM score").unwrap();
++        let p = match stmt {
++            Statement::Select(s) => Binder::new(&c).bind_select(&s).unwrap(),
++            _ => panic!(),
++        };
++        assert_eq!(p.schema().type_at(0), Some(DataType::Float));
++        // The integer branch gained a projection to carry its values over.
++        assert_eq!(p.children()[0].node_name(), "Project");
++        assert_eq!(p.children()[1].node_name(), "Project");
++    }
++
++    #[test]
++    fn branches_must_line_up() {
++        assert!(plan("SELECT id FROM emp UNION SELECT id, name FROM emp").is_err());
++        assert!(plan("SELECT id FROM emp EXCEPT SELECT name FROM emp").is_err());
++    }
++
++    #[test]
++    fn order_by_over_branches_takes_no_hidden_column() {
++        // `salary` is not a result column, and a set operation has no single
++        // input to carry it along from.
++        assert!(plan("SELECT id FROM emp UNION SELECT id FROM emp ORDER BY salary").is_err());
++        // The same key is fine when the query projects it.
++        assert!(plan("SELECT salary FROM emp UNION SELECT id FROM emp ORDER BY salary").is_ok());
++    }
++
+     #[test]
+     fn join_builds_join_node() {
+         let mut c = catalog();
+diff --git a/src/planner/binder_util.rs b/src/planner/binder_util.rs
+index 18cafd6..2224348 100644
+--- a/src/planner/binder_util.rs
++++ b/src/planner/binder_util.rs
+@@ -56,6 +56,50 @@ pub(crate) fn extend_project(
+     }
+ }
+ 
++/// Widen a set-operation branch to the operator's output schema.
++///
++/// Branch column types are unified by the type lattice, and a branch on the
++/// narrow side of a promotion has to carry its *values* over too: rows are
++/// paired by value and type, so an `INTEGER` 1 and a `FLOAT` 1.0 are different
++/// rows until the integer branch is cast. A branch already at the output types
++/// is returned untouched.
++pub(crate) fn widen_branch(plan: LogicalPlan, schema: &Schema) -> LogicalPlan {
++    let branch_schema = plan.schema();
++    let already_wide = branch_schema
++        .fields()
++        .iter()
++        .zip(schema.fields())
++        .all(|(have, want)| have.data_type() == want.data_type());
++    if already_wide {
++        return plan;
++    }
++
++    let mut expressions = Vec::with_capacity(schema.len());
++    let mut aliases = Vec::with_capacity(schema.len());
++    for (index, want) in schema.fields().iter().enumerate() {
++        let have = branch_schema.field(index).unwrap();
++        let column = BoundExpr::Column {
++            index,
++            data_type: have.data_type(),
++        };
++        expressions.push(if have.data_type() == want.data_type() {
++            column
++        } else {
++            BoundExpr::Cast {
++                expr: Box::new(column),
++                data_type: want.data_type(),
++            }
++        });
++        aliases.push(want.name().to_string());
++    }
++    LogicalPlan::Project {
++        input: Box::new(plan),
++        expressions,
++        aliases,
++        schema: schema.clone(),
++    }
++}
++
+ pub(crate) fn schema_from(names: &[String], exprs: &[BoundExpr]) -> Schema {
+     let fields = names
+         .iter()
+diff --git a/src/planner/logical.rs b/src/planner/logical.rs
+index faf0a95..40c05d7 100644
+--- a/src/planner/logical.rs
++++ b/src/planner/logical.rs
+@@ -2,7 +2,7 @@
+ 
+ use std::sync::OnceLock;
+ 
+-use crate::ast::statement::{JoinType, SortDirection};
++use crate::ast::statement::{JoinType, SetOperator, SortDirection};
+ use crate::planner::bound::{BoundAggregate, BoundExpr};
+ use crate::types::Schema;
+ 
+@@ -66,6 +66,17 @@ pub enum LogicalPlan {
+     },
+     /// Remove duplicate rows.
+     Distinct { input: Box<LogicalPlan> },
++    /// Combine two branches with a set operator. Both branches carry the
++    /// operator's own output schema, so a row of either is already a row of
++    /// the result.
++    SetOp {
++        left: Box<LogicalPlan>,
++        right: Box<LogicalPlan>,
++        op: SetOperator,
++        /// `true` keeps duplicate rows (`UNION ALL` and friends).
++        all: bool,
++        schema: Schema,
++    },
+ }
+ 
+ fn empty_schema() -> &'static Schema {
+@@ -82,6 +93,7 @@ pub fn schema(&self) -> &Schema {
+             LogicalPlan::Project { schema, .. } => schema,
+             LogicalPlan::Aggregate { schema, .. } => schema,
+             LogicalPlan::Join { schema, .. } => schema,
++            LogicalPlan::SetOp { schema, .. } => schema,
+             LogicalPlan::Filter { input, .. }
+             | LogicalPlan::Sort { input, .. }
+             | LogicalPlan::Limit { input, .. }
+@@ -101,6 +113,7 @@ pub fn node_name(&self) -> &'static str {
+             LogicalPlan::Limit { .. } => "Limit",
+             LogicalPlan::Join { .. } => "Join",
+             LogicalPlan::Distinct { .. } => "Distinct",
++            LogicalPlan::SetOp { .. } => "SetOp",
+         }
+     }
+ 
+@@ -114,7 +127,9 @@ pub fn children(&self) -> Vec<&LogicalPlan> {
+             | LogicalPlan::Sort { input, .. }
+             | LogicalPlan::Limit { input, .. }
+             | LogicalPlan::Distinct { input } => vec![input],
+-            LogicalPlan::Join { left, right, .. } => vec![left, right],
++            LogicalPlan::Join { left, right, .. } | LogicalPlan::SetOp { left, right, .. } => {
++                vec![left, right]
++            }
+         }
+     }
+ 
+@@ -145,6 +160,13 @@ pub fn detail(&self) -> String {
+             },
+             LogicalPlan::Join { join_type, .. } => join_type.keyword().to_string(),
+             LogicalPlan::Distinct { .. } => "Distinct".to_string(),
++            LogicalPlan::SetOp { op, all, .. } => {
++                let mut label = op.keyword().to_string();
++                if *all {
++                    label.push_str(" ALL");
++                }
++                label
++            }
+         }
+     }
+ 

@@ -1,0 +1,103 @@
+"""Expression AST, parsing, type resolution and evaluation."""
+
+from __future__ import annotations
+
+from .aggregates import (
+    Accumulator,
+    AggregateFunction,
+    AggregateRegistry,
+    default_aggregate_registry,
+)
+from .ast import (
+    Alias,
+    AggregateCall,
+    Between,
+    BinaryOp,
+    CaseWhen,
+    Cast,
+    ColumnRef,
+    Expression,
+    FunctionCall,
+    InList,
+    IsNull,
+    Literal,
+    UnaryOp,
+    collect_aggregates,
+    collect_columns,
+    column,
+    contains_aggregate,
+    literal,
+    output_name,
+    transform,
+    walk,
+)
+from .evaluator import Evaluator, evaluate, evaluate_predicate
+from .functions import FunctionRegistry, ScalarFunction, default_registry, like_to_regex
+from .parser import ExpressionParser, parse_expression
+from .resolver import (
+    ExpressionResolver,
+    find_column,
+    resolve_field,
+    resolve_schema,
+    resolve_type,
+    validate_expression,
+)
+from .simplify import (
+    combine_conjunction,
+    fold_constants,
+    is_constant,
+    simplify,
+    split_conjunction,
+)
+from .tokenizer import Token, TokenType, tokenize
+
+__all__ = [
+    "Accumulator",
+    "AggregateCall",
+    "AggregateFunction",
+    "AggregateRegistry",
+    "Alias",
+    "Between",
+    "BinaryOp",
+    "CaseWhen",
+    "Cast",
+    "ColumnRef",
+    "Evaluator",
+    "Expression",
+    "ExpressionParser",
+    "ExpressionResolver",
+    "FunctionCall",
+    "FunctionRegistry",
+    "InList",
+    "IsNull",
+    "Literal",
+    "ScalarFunction",
+    "Token",
+    "TokenType",
+    "UnaryOp",
+    "collect_aggregates",
+    "collect_columns",
+    "column",
+    "combine_conjunction",
+    "contains_aggregate",
+    "default_aggregate_registry",
+    "default_registry",
+    "evaluate",
+    "evaluate_predicate",
+    "find_column",
+    "fold_constants",
+    "is_constant",
+    "like_to_regex",
+    "literal",
+    "output_name",
+    "parse_expression",
+    "resolve_field",
+    "resolve_schema",
+    "resolve_type",
+    "simplify",
+    "split_conjunction",
+    "tokenize",
+    "transform",
+    "validate_expression",
+    "walk",
+]

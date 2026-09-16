@@ -1,0 +1,384 @@
+[verifier] model.patch applied (35806 bytes)
+[verifier] Resetting files touched by test.patch
+[verifier] Applying test.patch
+[verifier] cargo: cargo
+[verifier] building from a private copy
+[verifier] test binaries run unprivileged: setpriv --reuid=65534 --regid=65534 --clear-groups
+[verifier] INTEGRITY: /app/Cargo.toml declares a target named aggregation
+[verifier] target set_assignments produced no test binary
+[verifier] target row_deletion produced no test binary
+[verifier] target aggregation produced no test binary
+[verifier] target select_basic produced no test binary
+[verifier] target null_semantics produced no test binary
+[verifier] target ddl_and_dml produced no test binary
+[verifier] target order_and_limit produced no test binary
+[verifier] 6 planted checks all reported as chosen
+[verifier] p2p: 68 ids, 68 failed
+[verifier] f2p: 53 ids, 53 failed
+===== grade =====
+[verifier] ===== FAILURES (121) =====
+[verifier] ✗ [p2p] aggregation.aggregate_expression_in_projection
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.avg_is_float
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.bare_aggregate_over_empty_input_yields_one_row
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.count_column_ignores_nulls
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.count_distinct
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.count_star_counts_rows
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.group_by_with_multiple_aggregates
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.group_concat_distinct
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.group_concat_joins_in_first_seen_order
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.group_concat_joins_values_in_order
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.grouped_aggregate_over_empty_input_is_empty
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.having_can_reference_aggregate_not_in_projection
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.having_filters_groups
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.min_and_max
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.population_variance_and_stddev
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.stddev_of_empty_is_null
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] aggregation.sum_of_integers_is_integer
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.a_rejected_row_leaves_the_table_empty
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.create_insert_select_roundtrip
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.create_table_rejects_duplicate_columns
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.drop_table_removes_it
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.duplicate_table_errors_unless_if_not_exists
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.insert_is_atomic_on_failure
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.insert_widens_integer_into_float_column
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.insert_with_explicit_columns_fills_missing_with_null
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.not_null_violation_is_rejected
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.script_runs_multiple_statements
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] ddl_and_dml.wrong_arity_insert_is_rejected
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.a_null_operand_makes_arithmetic_null
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.aggregates_skip_nulls
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.between_with_null_bound
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.case_with_no_match_and_no_else_is_null
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.comparison_with_null_is_unknown_and_filters_out
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.distinct_treats_nulls_as_equal
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.in_list_with_null_is_unknown
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.is_null_and_is_not_null
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.not_in_with_null_is_unknown
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.not_null_is_null
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.null_never_matches_case_operand
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.null_propagates_through_arithmetic
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] null_semantics.three_valued_and_or
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.limit_and_offset
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.limit_zero_returns_nothing
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.nulls_first_by_default_descending
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.nulls_first_override
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.nulls_sort_last_by_default_ascending
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.offset_past_end_returns_nothing
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.offset_past_the_end_yields_nothing
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.order_ascending_by_default
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.order_by_multiple_keys
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.order_by_non_projected_column
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.order_by_position
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.order_descending
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] order_and_limit.order_is_stable_for_equal_keys
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.a_projection_may_repeat_a_column
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.arithmetic_precedence_is_respected
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.case_expression
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.comparison_and_between
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.computed_column_with_alias
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.constant_select_without_from
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.distinct_removes_duplicates
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.in_list_filter
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.integer_and_float_arithmetic_typing
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.like_filter
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.modulo_operator
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.projects_named_columns
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.where_with_boolean_connectives
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [p2p] select_basic.wildcard_projects_all_columns_in_order
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.a_compound_predicate_selects_the_rows
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.a_delete_leaves_other_tables_alone
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.a_delete_runs_inside_a_script
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.a_negated_predicate_still_needs_to_be_true
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.a_predicate_may_compare_two_columns
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.a_predicate_that_matches_nothing_reports_zero
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.a_where_that_is_not_boolean_is_a_binder_error
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.aggregates_over_the_table_follow_the_removal
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.an_aggregate_has_no_place_in_a_delete
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.an_alias_qualifies_the_predicate_columns
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.an_unknown_column_is_a_binder_error
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.an_unknown_predicate_can_be_asked_for_directly
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.an_unknown_table_is_a_catalog_error
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.deletes_can_follow_one_another
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.deleting_from_an_empty_table_reports_zero
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.every_column_shrinks_together
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.only_rows_where_the_predicate_is_true
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.reports_the_rows_it_removed
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.rows_added_after_a_delete_sit_behind_the_survivors
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.survivors_keep_their_stored_order
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.the_table_is_named_after_from
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] row_deletion.without_a_where_it_empties_the_table
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_computed_null_is_caught_the_same_way
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_false_predicate_changes_nothing
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_mixed_statement_counts_only_the_rows_that_moved
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_narrowing_value_is_a_type_error
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_null_into_a_not_null_column_rejects_the_statement
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_null_predicate_column_keeps_its_row_out_of_every_form
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_null_written_over_a_null_is_not_a_change
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_row_that_comes_out_identical_is_not_counted
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_statement_that_fails_reports_nothing_at_all
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_value_that_cannot_be_computed_leaves_the_table_alone
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_where_that_is_not_boolean_is_a_binder_error
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.a_widened_value_that_differs_does_count
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_aggregate_has_no_place_in_an_update
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_alias_qualifies_the_columns
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_assignment_may_read_several_columns
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_integer_widens_into_a_float_column
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_unknown_column_is_a_binder_error
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_unknown_table_is_a_catalog_error
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_update_runs_inside_a_script
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.an_update_touches_only_its_own_table
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.assigning_one_column_twice_is_rejected
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.assignments_read_the_row_as_it_was
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.changed_rows_stay_where_they_were
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.one_assignment_cannot_see_another
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.one_bad_row_holds_back_the_good_ones
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.only_rows_where_the_predicate_is_true
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.reports_the_rows_it_changed
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.several_matched_rows_change_together
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.text_cannot_be_stored_in_an_integer_column
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.the_not_null_column_can_be_written_too
+    graded inputs were modified
+    graded inputs were modified
+[verifier] ✗ [f2p] set_assignments.without_a_where_it_takes_every_row
+    graded inputs were modified
+    graded inputs were modified
+P2P 0/68 pass 68 fail; F2P 0/53 pass 53 fail; PARTIAL 0.0; BINARY 0
+[verifier] reward.json={"reward": 0, "f2p_total": 53, "f2p_passed": 0, "p2p_total": 68, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}

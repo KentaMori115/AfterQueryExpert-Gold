@@ -1,0 +1,963 @@
+diff --git a/src/ast/statement.rs b/src/ast/statement.rs
+index 9ddf08b..294b764 100644
+--- a/src/ast/statement.rs
++++ b/src/ast/statement.rs
+@@ -30,6 +30,9 @@ pub enum SelectItem {
+ pub enum JoinType {
+     Inner,
+     Left,
++    Right,
++    Full,
++    Cross,
+ }
+ 
+ impl JoinType {
+@@ -37,16 +40,48 @@ pub fn keyword(self) -> &'static str {
+         match self {
+             JoinType::Inner => "INNER JOIN",
+             JoinType::Left => "LEFT JOIN",
++            JoinType::Right => "RIGHT JOIN",
++            JoinType::Full => "FULL JOIN",
++            JoinType::Cross => "CROSS JOIN",
+         }
+     }
++
++    /// Whether a left row with no match is still emitted, padded with `NULL`s
++    /// on the right.
++    pub fn keeps_unmatched_left(self) -> bool {
++        matches!(self, JoinType::Left | JoinType::Full)
++    }
++
++    /// Whether a right row with no match is still emitted, padded with `NULL`s
++    /// on the left.
++    pub fn keeps_unmatched_right(self) -> bool {
++        matches!(self, JoinType::Right)
++    }
++
++    /// Whether this join takes a constraint at all. `CROSS JOIN` does not.
++    pub fn takes_constraint(self) -> bool {
++        !matches!(self, JoinType::Cross)
++    }
+ }
+ 
+-/// A joined relation and its `ON` predicate.
++/// How a join decides which rows pair up.
++#[derive(Debug, Clone, PartialEq)]
++pub enum JoinConstraint {
++    /// `ON <predicate>`.
++    On(Expr),
++    /// `USING (c, ...)` — equality on same-named columns of both relations,
++    /// each of which collapses to one output column.
++    Using(Vec<String>),
++    /// No constraint, as `CROSS JOIN` writes it.
++    None,
++}
++
++/// A joined relation and the constraint that pairs its rows with the left.
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct Join {
+     pub join_type: JoinType,
+     pub relation: TableFactor,
+-    pub on: Expr,
++    pub constraint: JoinConstraint,
+ }
+ 
+ /// A base relation in a `FROM` clause: a named table with an optional alias.
+@@ -176,5 +211,31 @@ fn table_factor_binding_prefers_alias() {
+     fn join_keywords() {
+         assert_eq!(JoinType::Inner.keyword(), "INNER JOIN");
+         assert_eq!(JoinType::Left.keyword(), "LEFT JOIN");
++        assert_eq!(JoinType::Right.keyword(), "RIGHT JOIN");
++        assert_eq!(JoinType::Full.keyword(), "FULL JOIN");
++        assert_eq!(JoinType::Cross.keyword(), "CROSS JOIN");
++    }
++
++    #[test]
++    fn join_types_report_which_side_survives() {
++        assert!(!JoinType::Inner.keeps_unmatched_left());
++        assert!(!JoinType::Inner.keeps_unmatched_right());
++        assert!(JoinType::Left.keeps_unmatched_left());
++        assert!(!JoinType::Left.keeps_unmatched_right());
++        assert!(!JoinType::Right.keeps_unmatched_left());
++        assert!(JoinType::Right.keeps_unmatched_right());
++        assert!(JoinType::Full.keeps_unmatched_left());
++        assert!(JoinType::Full.keeps_unmatched_right());
++        assert!(!JoinType::Cross.keeps_unmatched_left());
++        assert!(!JoinType::Cross.keeps_unmatched_right());
++    }
++
++    #[test]
++    fn only_cross_join_goes_without_a_constraint() {
++        assert!(JoinType::Inner.takes_constraint());
++        assert!(JoinType::Left.takes_constraint());
++        assert!(JoinType::Right.takes_constraint());
++        assert!(JoinType::Full.takes_constraint());
++        assert!(!JoinType::Cross.takes_constraint());
+     }
+ }
+diff --git a/src/exec/executor.rs b/src/exec/executor.rs
+index f9d3cfc..f8c552a 100644
+--- a/src/exec/executor.rs
++++ b/src/exec/executor.rs
+@@ -91,12 +91,30 @@ pub fn execute(&self, plan: &LogicalPlan) -> Result<Vec<Row>> {
+                 right,
+                 on,
+                 join_type,
+-                ..
++                merged,
++                schema,
+             } => {
+                 let left_rows = self.execute(left)?;
+                 let right_rows = self.execute(right)?;
++                let left_width = left.schema().len();
+                 let right_width = right.schema().len();
+-                join_exec::execute_join(left_rows, right_rows, on, *join_type, right_width)
++                // The merged columns lead the output schema.
++                let merged_types: Vec<crate::types::DataType> = schema
++                    .fields()
++                    .iter()
++                    .take(merged.len())
++                    .map(|f| f.data_type())
++                    .collect();
++                join_exec::execute_join(
++                    left_rows,
++                    right_rows,
++                    on,
++                    *join_type,
++                    left_width,
++                    right_width,
++                    merged,
++                    &merged_types,
++                )
+             }
+ 
+             LogicalPlan::Distinct { input } => {
+diff --git a/src/exec/join_exec.rs b/src/exec/join_exec.rs
+index 92d990b..0ef8fa6 100644
+--- a/src/exec/join_exec.rs
++++ b/src/exec/join_exec.rs
+@@ -1,38 +1,135 @@
+-//! Physical joins: nested-loop inner and left joins.
++//! Physical joins: nested-loop inner, one-sided outer, full outer and cross.
+ 
+ use crate::ast::statement::JoinType;
+ use crate::error::Result;
+ use crate::exec::eval::eval;
+ use crate::planner::bound::BoundExpr;
+ use crate::storage::Row;
+-use crate::types::Value;
++use crate::types::{DataType, Value};
+ 
+ /// Join `left_rows` and `right_rows` on the `on` predicate.
+ ///
+-/// A nested-loop join. For `LEFT` joins, a left row with no matching right row
+-/// is emitted once, padded with `right_width` `NULL`s. Output preserves the
+-/// left-then-right row order, which keeps results deterministic.
++/// A nested-loop join. The predicate reads a pairing as the left row followed
++/// by the right row; `CROSS` joins ignore it and take every pairing. A left row
++/// that matched nothing is emitted once with `right_width` `NULL`s appended
++/// when the join keeps unmatched left rows, and a right row that nothing
++/// matched is emitted with `left_width` `NULL`s prepended when the join keeps
++/// unmatched right rows.
++///
++/// Output order is left-driven: pairings in left order, then within one left
++/// row in right order, and last the right rows nothing matched, in right order.
++///
++/// `merged` names the `USING` column pairs as `(left, right)` positions in the
++/// pairing frame. Each pair collapses to one output column carrying whichever
++/// side is not null, and those columns lead the output row, ahead of the left
++/// and then right columns no pair names. `merged_types` holds the type each of
++/// those columns settled on, so a pair of unequal numeric widths reads back as
++/// one type rather than as whichever side supplied the row.
+ pub(crate) fn execute_join(
+     left_rows: Vec<Row>,
+     right_rows: Vec<Row>,
+     on: &BoundExpr,
+     join_type: JoinType,
++    left_width: usize,
+     right_width: usize,
++    merged: &[(usize, usize)],
++    merged_types: &[DataType],
+ ) -> Result<Vec<Row>> {
++    let layout = Layout::new(left_width, right_width, merged, merged_types);
++    let null_right = vec![Value::Null; right_width];
++    let null_left = vec![Value::Null; left_width];
++
+     let mut out = Vec::new();
+-    let null_right = Row::new(vec![Value::Null; right_width]);
++    let mut right_matched = vec![false; right_rows.len()];
++
+     for l in &left_rows {
+         let mut matched = false;
+-        for r in &right_rows {
+-            let combined = l.concat(r);
+-            if eval(on, &combined)?.is_truthy() {
++        for (j, r) in right_rows.iter().enumerate() {
++            let paired = l.concat(r);
++            let keep = match join_type {
++                JoinType::Cross => true,
++                _ => eval(on, &paired)?.is_truthy(),
++            };
++            if keep {
+                 matched = true;
+-                out.push(combined);
++                right_matched[j] = true;
++                out.push(layout.emit(&paired)?);
+             }
+         }
+-        if !matched && matches!(join_type, JoinType::Left) {
+-            out.push(l.concat(&null_right));
++        if !matched && join_type.keeps_unmatched_left() {
++            out.push(layout.emit(&l.concat(&Row::new(null_right.clone())))?);
++        }
++    }
++
++    if join_type.keeps_unmatched_right() {
++        for (j, r) in right_rows.iter().enumerate() {
++            if !right_matched[j] {
++                out.push(layout.emit(&Row::new(null_left.clone()).concat(r))?);
++            }
+         }
+     }
++
+     Ok(out)
+ }
++
++/// How a pairing of left and right columns becomes an output row.
++struct Layout {
++    merged: Vec<(usize, usize)>,
++    merged_types: Vec<DataType>,
++    carried: Vec<usize>,
++}
++
++impl Layout {
++    fn new(
++        left_width: usize,
++        right_width: usize,
++        merged: &[(usize, usize)],
++        merged_types: &[DataType],
++    ) -> Layout {
++        let mut hidden = vec![false; left_width + right_width];
++        for &(l, r) in merged {
++            hidden[l] = true;
++            hidden[r] = true;
++        }
++        let carried = (0..left_width + right_width)
++            .filter(|&i| !hidden[i])
++            .collect();
++        Layout {
++            merged: merged.to_vec(),
++            merged_types: merged_types.to_vec(),
++            carried,
++        }
++    }
++
++    /// Build one output row from a pairing.
++    fn emit(&self, paired: &Row) -> Result<Row> {
++        if self.merged.is_empty() {
++            return Ok(paired.clone());
++        }
++        let mut values = Vec::with_capacity(self.merged.len() + self.carried.len());
++        for (k, &(l, r)) in self.merged.iter().enumerate() {
++            let left = paired.get(l).cloned().unwrap_or(Value::Null);
++            let taken = if left.is_null() {
++                paired.get(r).cloned().unwrap_or(Value::Null)
++            } else {
++                left
++            };
++            let target = self.merged_types.get(k).copied().unwrap_or(DataType::Null);
++            values.push(settle(taken, target)?);
++        }
++        for &i in &self.carried {
++            values.push(paired.get(i).cloned().unwrap_or(Value::Null));
++        }
++        Ok(Row::new(values))
++    }
++}
++
++/// Bring a merged value to the type the column settled on, the way a `CASE`
++/// widens one of its branches.
++fn settle(value: Value, data_type: DataType) -> Result<Value> {
++    if value.is_null() || data_type == DataType::Null || value.data_type() == data_type {
++        Ok(value)
++    } else {
++        value.cast(data_type)
++    }
++}
+diff --git a/src/optimizer/limit_pushdown.rs b/src/optimizer/limit_pushdown.rs
+index 8d769ec..d3bb33b 100644
+--- a/src/optimizer/limit_pushdown.rs
++++ b/src/optimizer/limit_pushdown.rs
+@@ -108,12 +108,14 @@ fn map_children(plan: LogicalPlan) -> LogicalPlan {
+             right,
+             on,
+             join_type,
++            merged,
+             schema,
+         } => LogicalPlan::Join {
+             left: Box::new(pushdown(*left)),
+             right: Box::new(pushdown(*right)),
+             on,
+             join_type,
++            merged,
+             schema,
+         },
+         LogicalPlan::Distinct { input } => LogicalPlan::Distinct {
+diff --git a/src/optimizer/plan_util.rs b/src/optimizer/plan_util.rs
+index 6cb27e4..3c4a8d0 100644
+--- a/src/optimizer/plan_util.rs
++++ b/src/optimizer/plan_util.rs
+@@ -90,6 +90,7 @@ pub fn map_plan_expressions(
+             right,
+             on,
+             join_type,
++            merged,
+             schema,
+         } => {
+             let left = Box::new(map_plan_expressions(*left, f)?);
+@@ -99,6 +100,7 @@ pub fn map_plan_expressions(
+                 right,
+                 on: f(on)?,
+                 join_type,
++                merged,
+                 schema,
+             })
+         }
+diff --git a/src/optimizer/predicate_pushdown.rs b/src/optimizer/predicate_pushdown.rs
+index 933ffb4..ffd166a 100644
+--- a/src/optimizer/predicate_pushdown.rs
++++ b/src/optimizer/predicate_pushdown.rs
+@@ -1,6 +1,5 @@
+ //! Predicate pushdown: move filter conjuncts closer to the scans they constrain.
+ 
+-use crate::ast::statement::JoinType;
+ use crate::error::Result;
+ use crate::optimizer::conjuncts::{
+     column_range, combine_conjuncts, rewrite_columns, split_conjuncts,
+@@ -12,11 +11,19 @@
+ /// Pushes `Filter` conjuncts through a `Join` into the join's inputs when a
+ /// conjunct references only one side.
+ ///
+-/// A conjunct referencing only the left side is pushed to the left input for
+-/// both inner and left joins. A conjunct referencing only the right side is
+-/// pushed to the right input **only for inner joins** — doing so for a left
+-/// join would incorrectly discard null-padded rows. Anything that spans both
+-/// sides (or is a constant) stays as a residual filter above the join.
++/// A side may only take a conjunct when the join cannot null-extend it. A left
++/// join emits a left row that matched nothing, padded with `NULL`s on the
++/// right, so a right-only conjunct above it would reject that padded row while
++/// the same conjunct inside the right input would not: the rewrite has to leave
++/// it above. A right join says the same of the left side and a full join of
++/// both, which leaves inner and cross joins as the only ones that take a
++/// conjunct on either side. Anything spanning both sides (or a constant) stays
++/// as a residual filter above the join.
++///
++/// A join that merges `USING` columns is left alone entirely. Its output frame
++/// is not the left-then-right frame the conjunct's column indices were bound
++/// against, so no index in the filter re-bases onto an input without first
++/// being mapped back through the merge.
+ pub struct PredicatePushdown;
+ 
+ impl OptimizerRule for PredicatePushdown {
+@@ -39,18 +46,34 @@ fn pushdown(plan: LogicalPlan) -> Result<LogicalPlan> {
+             right,
+             on,
+             join_type,
++            merged,
+             schema,
+         } = *input
+         {
++            if !merged.is_empty() {
++                return Ok(LogicalPlan::Filter {
++                    input: Box::new(LogicalPlan::Join {
++                        left,
++                        right,
++                        on,
++                        join_type,
++                        merged,
++                        schema,
++                    }),
++                    predicate,
++                });
++            }
+             let left_width = left.schema().len();
++            let takes_left = !join_type.keeps_unmatched_right();
++            let takes_right = !join_type.keeps_unmatched_left();
+             let mut to_left = Vec::new();
+             let mut to_right = Vec::new();
+             let mut residual = Vec::new();
+ 
+             for conjunct in split_conjuncts(predicate) {
+                 match column_range(&conjunct) {
+-                    Some((_, max)) if max < left_width => to_left.push(conjunct),
+-                    Some((min, _)) if min >= left_width && matches!(join_type, JoinType::Inner) => {
++                    Some((_, max)) if max < left_width && takes_left => to_left.push(conjunct),
++                    Some((min, _)) if min >= left_width && takes_right => {
+                         // Re-base right-only indices to the right input's frame.
+                         to_right.push(rewrite_columns(conjunct, &|i| i - left_width));
+                     }
+@@ -65,6 +88,7 @@ fn pushdown(plan: LogicalPlan) -> Result<LogicalPlan> {
+                 right: Box::new(new_right),
+                 on,
+                 join_type,
++                merged,
+                 schema,
+             };
+             return Ok(match combine_conjuncts(residual) {
+@@ -142,12 +166,14 @@ fn recurse_children(plan: LogicalPlan) -> Result<LogicalPlan> {
+             right,
+             on,
+             join_type,
++            merged,
+             schema,
+         } => LogicalPlan::Join {
+             left: Box::new(pushdown(*left)?),
+             right: Box::new(pushdown(*right)?),
+             on,
+             join_type,
++            merged,
+             schema,
+         },
+         LogicalPlan::Distinct { input } => LogicalPlan::Distinct {
+diff --git a/src/parser/keyword.rs b/src/parser/keyword.rs
+index 89bc64c..f1924d1 100644
+--- a/src/parser/keyword.rs
++++ b/src/parser/keyword.rs
+@@ -30,7 +30,12 @@ pub enum Keyword {
+     Join,
+     Inner,
+     Left,
++    Right,
++    Full,
++    Cross,
++    Outer,
+     On,
++    Using,
+     And,
+     Or,
+     Not,
+@@ -86,7 +91,12 @@ pub fn from_upper(word: &str) -> Option<Keyword> {
+             "JOIN" => Keyword::Join,
+             "INNER" => Keyword::Inner,
+             "LEFT" => Keyword::Left,
++            "RIGHT" => Keyword::Right,
++            "FULL" => Keyword::Full,
++            "CROSS" => Keyword::Cross,
++            "OUTER" => Keyword::Outer,
+             "ON" => Keyword::On,
++            "USING" => Keyword::Using,
+             "AND" => Keyword::And,
+             "OR" => Keyword::Or,
+             "NOT" => Keyword::Not,
+diff --git a/src/parser/parser.rs b/src/parser/parser.rs
+index b411018..98906e8 100644
+--- a/src/parser/parser.rs
++++ b/src/parser/parser.rs
+@@ -4,8 +4,8 @@
+ use crate::ast::expr::{ColumnRef, Expr};
+ use crate::ast::operators::{BinaryOp, UnaryOp};
+ use crate::ast::statement::{
+-    ColumnDef, CreateTableStmt, DropTableStmt, FromClause, InsertStmt, Join, JoinType, OrderByExpr,
+-    SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
++    ColumnDef, CreateTableStmt, DropTableStmt, FromClause, InsertStmt, Join, JoinConstraint,
++    JoinType, OrderByExpr, SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
+ };
+ use crate::error::{Error, Result};
+ use crate::parser::keyword::Keyword;
+@@ -270,29 +270,82 @@ fn parse_from_clause(&mut self) -> Result<FromClause> {
+         let base = self.parse_table_factor()?;
+         let mut joins = Vec::new();
+         loop {
+-            let join_type = if self.eat_keyword(Keyword::Inner) {
+-                self.expect_keyword(Keyword::Join)?;
+-                JoinType::Inner
+-            } else if self.eat_keyword(Keyword::Left) {
+-                self.eat_keyword(Keyword::Join); // optional OUTER omitted; JOIN required
+-                JoinType::Left
+-            } else if self.eat_keyword(Keyword::Join) {
+-                JoinType::Inner
+-            } else {
+-                break;
++            let join_type = match self.parse_join_type() {
++                Some(t) => t,
++                None => break,
+             };
+             let relation = self.parse_table_factor()?;
+-            self.expect_keyword(Keyword::On)?;
+-            let on = self.parse_expr(0)?;
++            let constraint = self.parse_join_constraint(join_type)?;
+             joins.push(Join {
+                 join_type,
+                 relation,
+-                on,
++                constraint,
+             });
+         }
+         Ok(FromClause { base, joins })
+     }
+ 
++    /// Read the words that open a join, or `None` when the next token starts
++    /// something else. `OUTER` is noise after `LEFT`, `RIGHT` and `FULL`.
++    fn parse_join_type(&mut self) -> Option<JoinType> {
++        if self.eat_keyword(Keyword::Inner) {
++            self.eat_keyword(Keyword::Join);
++            return Some(JoinType::Inner);
++        }
++        if self.eat_keyword(Keyword::Cross) {
++            self.eat_keyword(Keyword::Join);
++            return Some(JoinType::Cross);
++        }
++        for (word, join_type) in [
++            (Keyword::Left, JoinType::Left),
++            (Keyword::Right, JoinType::Right),
++            (Keyword::Full, JoinType::Full),
++        ] {
++            if self.eat_keyword(word) {
++                self.eat_keyword(Keyword::Outer);
++                self.eat_keyword(Keyword::Join);
++                return Some(join_type);
++            }
++        }
++        if self.eat_keyword(Keyword::Join) {
++            return Some(JoinType::Inner);
++        }
++        None
++    }
++
++    /// Read `ON <expr>` or `USING (col, ...)`. A `CROSS JOIN` takes neither and
++    /// every other join takes exactly one.
++    fn parse_join_constraint(&mut self, join_type: JoinType) -> Result<JoinConstraint> {
++        if !join_type.takes_constraint() {
++            if self.at_keyword(Keyword::On) || self.at_keyword(Keyword::Using) {
++                return Err(Error::parse(format!(
++                    "{} does not take a constraint",
++                    join_type.keyword()
++                ))
++                .at(self.position()));
++            }
++            return Ok(JoinConstraint::None);
++        }
++        if self.eat_keyword(Keyword::On) {
++            return Ok(JoinConstraint::On(self.parse_expr(0)?));
++        }
++        if self.eat_keyword(Keyword::Using) {
++            self.expect(&TokenKind::LParen)?;
++            let mut columns = vec![self.expect_identifier()?];
++            while self.eat(&TokenKind::Comma) {
++                columns.push(self.expect_identifier()?);
++            }
++            self.expect(&TokenKind::RParen)?;
++            return Ok(JoinConstraint::Using(columns));
++        }
++        Err(Error::parse(format!(
++            "expected ON or USING after {}, found {}",
++            join_type.keyword(),
++            self.peek().describe()
++        ))
++        .at(self.position()))
++    }
++
+     fn parse_table_factor(&mut self) -> Result<TableFactor> {
+         let name = self.expect_identifier()?;
+         let alias = self.parse_optional_alias()?;
+diff --git a/src/planner/binder.rs b/src/planner/binder.rs
+index a9bcc4d..148c70c 100644
+--- a/src/planner/binder.rs
++++ b/src/planner/binder.rs
+@@ -7,7 +7,10 @@
+ //! an optional aggregate context.
+ 
+ use crate::ast::expr::{is_aggregate_name, Expr};
+-use crate::ast::statement::{FromClause, SelectItem, SelectStmt};
++use crate::ast::operators::BinaryOp;
++use crate::ast::statement::{
++    FromClause, Join, JoinConstraint, JoinType, SelectItem, SelectStmt,
++};
+ use crate::error::{Error, Result};
+ use crate::functions::{AggregateFn, ScalarFn};
+ use crate::planner::binder_util::{
+@@ -19,7 +22,7 @@
+ use crate::planner::logical::{LogicalPlan, SortKey};
+ use crate::planner::scope::Scope;
+ use crate::storage::Catalog;
+-use crate::types::{DataType, Field, Schema};
++use crate::types::{DataType, Field, Schema, Value};
+ 
+ /// Binds AST statements against a catalog snapshot.
+ pub struct Binder<'a> {
+@@ -133,12 +136,23 @@ fn bind_from(&self, from: &FromClause) -> Result<(LogicalPlan, Scope)> {
+ 
+         for join in &from.joins {
+             let right_schema = self.catalog.schema_of(&join.relation.name)?;
++            let left_schema = plan.schema().clone();
++            let left_width = left_schema.len();
+             let right_scope =
+-                Scope::from_table(join.relation.binding_name(), &right_schema, scope.len());
+-            let combined = scope.concat(&right_scope);
+-            let on = self.bind_scalar(&join.on, &combined)?;
+-            require_predicate("JOIN ON", &on)?;
+-            let out_schema = plan.schema().concat(&right_schema);
++                Scope::from_table(join.relation.binding_name(), &right_schema, left_width);
++            let paired_scope = scope.concat(&right_scope);
++            let paired_schema = left_schema.concat(&right_schema);
++
++            let (on, merged) =
++                self.bind_join_constraint(join, &left_schema, &right_schema, &paired_scope)?;
++            let (out_schema, out_scope) = merged_output(
++                &paired_schema,
++                &paired_scope,
++                &merged,
++                left_width,
++                join.join_type,
++            );
++
+             let right_plan = LogicalPlan::Scan {
+                 table: join.relation.name.clone(),
+                 schema: right_schema,
+@@ -148,13 +162,85 @@ fn bind_from(&self, from: &FromClause) -> Result<(LogicalPlan, Scope)> {
+                 right: Box::new(right_plan),
+                 on,
+                 join_type: join.join_type,
++                merged,
+                 schema: out_schema,
+             };
+-            scope = combined;
++            scope = out_scope;
+         }
+         Ok((plan, scope))
+     }
+ 
++    /// Bind a join's constraint into a predicate over the paired frame, plus
++    /// the `(left, right)` column pairs `USING` merges.
++    ///
++    /// `ON` binds as written. `USING` becomes one equality per named column,
++    /// all conjoined. A `CROSS JOIN` carries no constraint and pairs
++    /// everything, which is the constant `TRUE` predicate.
++    fn bind_join_constraint(
++        &self,
++        join: &Join,
++        left_schema: &Schema,
++        right_schema: &Schema,
++        paired_scope: &Scope,
++    ) -> Result<(BoundExpr, Vec<(usize, usize)>)> {
++        match &join.constraint {
++            JoinConstraint::On(expr) => {
++                let on = self.bind_scalar(expr, paired_scope)?;
++                require_predicate("JOIN ON", &on)?;
++                Ok((on, Vec::new()))
++            }
++            JoinConstraint::None => Ok((BoundExpr::Literal(Value::Boolean(true)), Vec::new())),
++            JoinConstraint::Using(columns) => {
++                let left_width = left_schema.len();
++                let mut merged = Vec::with_capacity(columns.len());
++                let mut equalities = Vec::with_capacity(columns.len());
++                let mut seen: Vec<String> = Vec::new();
++                for name in columns {
++                    let lower = name.to_ascii_lowercase();
++                    if seen.contains(&lower) {
++                        return Err(Error::binder(format!(
++                            "column '{}' is named twice in USING",
++                            name
++                        )));
++                    }
++                    seen.push(lower);
++
++                    let left_index = left_schema.index_of(name)?;
++                    let right_index = left_width + right_schema.index_of(name)?;
++                    let left_type = left_schema.type_at(left_index).unwrap_or(DataType::Null);
++                    let right_type = right_schema
++                        .type_at(right_index - left_width)
++                        .unwrap_or(DataType::Null);
++                    check_comparable("USING", left_type, right_type)?;
++
++                    equalities.push(BoundExpr::Binary {
++                        op: BinaryOp::Eq,
++                        left: Box::new(BoundExpr::Column {
++                            index: left_index,
++                            data_type: left_type,
++                        }),
++                        right: Box::new(BoundExpr::Column {
++                            index: right_index,
++                            data_type: right_type,
++                        }),
++                        data_type: DataType::Boolean,
++                    });
++                    merged.push((left_index, right_index));
++                }
++                let mut on = equalities.remove(0);
++                for next in equalities {
++                    on = BoundExpr::Binary {
++                        op: BinaryOp::And,
++                        left: Box::new(on),
++                        right: Box::new(next),
++                        data_type: DataType::Boolean,
++                    };
++                }
++                Ok((on, merged))
++            }
++        }
++    }
++
+     // ---- projection (non-aggregate) ----
+ 
+     fn bind_projection(
+@@ -641,6 +727,90 @@ fn bind_case(
+     }
+ }
+ 
++/// Build a join's output schema and scope from the paired frame.
++///
++/// Every pair in `merged` becomes one leading output column named after its
++/// left side, and the columns no pair names follow in frame order. A column on
++/// a side the join can null-extend comes out nullable even when its own table
++/// declared it `NOT NULL`, and a merged column is nullable when either source
++/// is.
++fn merged_output(
++    paired_schema: &Schema,
++    paired_scope: &Scope,
++    merged: &[(usize, usize)],
++    left_width: usize,
++    join_type: JoinType,
++) -> (Schema, Scope) {
++    let width = paired_schema.len();
++    let mut hidden = vec![false; width];
++    for &(l, r) in merged {
++        hidden[l] = true;
++        hidden[r] = true;
++    }
++    let carried: Vec<usize> = (0..width).filter(|&i| !hidden[i]).collect();
++
++    let mut fields = Vec::with_capacity(merged.len() + carried.len());
++    // Where each paired column ends up in the output frame.
++    let mut moved_to = vec![None; width];
++
++    for (out_index, &(l, r)) in merged.iter().enumerate() {
++        let left_field = paired_schema.field(l).expect("merged left column");
++        let right_field = paired_schema.field(r).expect("merged right column");
++        let data_type = left_field
++            .data_type()
++            .unify(right_field.data_type())
++            .unwrap_or_else(|| left_field.data_type());
++        let nullable = left_field.is_nullable() || right_field.is_nullable();
++        fields.push(Field::with_nullability(left_field.name(), data_type, nullable));
++        moved_to[l] = Some(out_index);
++        moved_to[r] = Some(out_index);
++    }
++
++    for (offset, &i) in carried.iter().enumerate() {
++        let field = paired_schema.field(i).expect("carried column");
++        let widened = if i < left_width {
++            join_type.keeps_unmatched_right()
++        } else {
++            join_type.keeps_unmatched_left()
++        };
++        fields.push(Field::with_nullability(
++            field.name(),
++            field.data_type(),
++            field.is_nullable() || widened,
++        ));
++        moved_to[i] = Some(merged.len() + offset);
++    }
++
++    let schema = Schema::new_unchecked(fields);
++
++    let mut scope = Scope::empty();
++    // A merged column answers to a bare name once, and to either qualifier.
++    for (out_index, &(l, _)) in merged.iter().enumerate() {
++        let field = schema.field(out_index).expect("merged field");
++        scope.push_column(None, field.name(), out_index, field.data_type(), true);
++        let _ = l;
++    }
++    for (qualifier, name, index, _, visible) in paired_scope.entries() {
++        let out_index = match moved_to[index] {
++            Some(i) => i,
++            None => continue,
++        };
++        let data_type = schema
++            .type_at(out_index)
++            .unwrap_or(DataType::Null);
++        let still_visible = visible && out_index >= merged.len();
++        scope.push_column(
++            qualifier.as_deref(),
++            &name,
++            out_index,
++            data_type,
++            still_visible,
++        );
++    }
++
++    (schema, scope)
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/src/planner/logical.rs b/src/planner/logical.rs
+index faf0a95..fa5b987 100644
+--- a/src/planner/logical.rs
++++ b/src/planner/logical.rs
+@@ -56,12 +56,19 @@ pub enum LogicalPlan {
+         limit: Option<u64>,
+         offset: Option<u64>,
+     },
+-    /// Join two inputs on `on`. Output is the left columns then the right.
++    /// Join two inputs on `on`.
++    ///
++    /// The predicate reads a row of the left columns followed by the right
++    /// ones. Output is that same frame unless `merged` is non-empty: each
++    /// `(left, right)` pair there is one column of `USING`, and the output
++    /// frame becomes the merged columns, then the left columns no pair names,
++    /// then the right columns no pair names.
+     Join {
+         left: Box<LogicalPlan>,
+         right: Box<LogicalPlan>,
+         on: BoundExpr,
+         join_type: JoinType,
++        merged: Vec<(usize, usize)>,
+         schema: Schema,
+     },
+     /// Remove duplicate rows.
+@@ -143,7 +150,12 @@ pub fn detail(&self) -> String {
+                 (None, Some(o)) => format!("Offset {}", o),
+                 (None, None) => "Limit".to_string(),
+             },
+-            LogicalPlan::Join { join_type, .. } => join_type.keyword().to_string(),
++            LogicalPlan::Join {
++                join_type, merged, ..
++            } => match merged.len() {
++                0 => join_type.keyword().to_string(),
++                n => format!("{} (merging {} cols)", join_type.keyword(), n),
++            },
+             LogicalPlan::Distinct { .. } => "Distinct".to_string(),
+         }
+     }
+diff --git a/src/planner/scope.rs b/src/planner/scope.rs
+index 66b3113..4e4e777 100644
+--- a/src/planner/scope.rs
++++ b/src/planner/scope.rs
+@@ -13,6 +13,11 @@ struct Binding {
+     name: String,
+     index: usize,
+     data_type: DataType,
++    /// Whether `*` expands to this binding. A column merged by `USING` keeps
++    /// one visible binding and a hidden one per side, so that `a.id`, `b.id`
++    /// and a bare `id` all reach the single merged column while `*` shows it
++    /// once.
++    visible: bool,
+ }
+ 
+ /// A flat namespace of columns available to expression binding, in row order.
+@@ -42,6 +47,7 @@ pub fn from_table(qualifier: &str, schema: &Schema, start_index: usize) -> Scope
+                 name: f.name().to_string(),
+                 index: start_index + i,
+                 data_type: f.data_type(),
++                visible: true,
+             })
+             .collect();
+         Scope { bindings }
+@@ -59,6 +65,7 @@ pub fn from_output(schema: &Schema) -> Scope {
+                 name: f.name().to_string(),
+                 index: i,
+                 data_type: f.data_type(),
++                visible: true,
+             })
+             .collect();
+         Scope { bindings }
+@@ -101,7 +108,9 @@ pub fn resolve(&self, column: &ColumnRef) -> Result<(usize, DataType)> {
+         let first = matches
+             .next()
+             .ok_or_else(|| Error::binder(format!("unknown column '{}'", column.display_name())))?;
+-        if matches.next().is_some() {
++        // Several bindings may carry one name when a `USING` column was merged.
++        // That is only ambiguous if they lead to different columns.
++        if matches.any(|b| b.index != first.index) {
+             return Err(Error::binder(format!(
+                 "column reference '{}' is ambiguous",
+                 column.display_name()
+@@ -110,14 +119,56 @@ pub fn resolve(&self, column: &ColumnRef) -> Result<(usize, DataType)> {
+         Ok((first.index, first.data_type))
+     }
+ 
+-    /// All `(index, name, type)` triples, in row order — used to expand `*`.
++    /// All visible `(index, name, type)` triples, in row order — used to
++    /// expand `*`. A column hidden behind a `USING` merge is skipped here and
++    /// still resolves by name.
+     pub fn columns(&self) -> Vec<(usize, String, DataType)> {
+         self.bindings
+             .iter()
++            .filter(|b| b.visible)
+             .map(|b| (b.index, b.name.clone(), b.data_type))
+             .collect()
+     }
+ 
++    /// Every binding as `(qualifier, name, index, type, visible)`, in row
++    /// order, including the ones `*` does not expand. The binder reads these
++    /// when it rebuilds a scope over a join's output frame.
++    pub fn entries(&self) -> Vec<(Option<String>, String, usize, DataType, bool)> {
++        self.bindings
++            .iter()
++            .map(|b| {
++                (
++                    b.qualifier.clone(),
++                    b.name.clone(),
++                    b.index,
++                    b.data_type,
++                    b.visible,
++                )
++            })
++            .collect()
++    }
++
++    /// Add one column to this scope at `index` in the current row frame.
++    ///
++    /// `visible` decides whether `*` expands to it; a qualified reference finds
++    /// it either way.
++    pub fn push_column(
++        &mut self,
++        qualifier: Option<&str>,
++        name: &str,
++        index: usize,
++        data_type: DataType,
++        visible: bool,
++    ) {
++        self.bindings.push(Binding {
++            qualifier: qualifier.map(|q| q.to_string()),
++            name: name.to_string(),
++            index,
++            data_type,
++            visible,
++        });
++    }
++
+     /// The columns belonging to a given qualifier, in row order — used to
+     /// expand `t.*`.
+     pub fn columns_for(&self, qualifier: &str) -> Result<Vec<(usize, String, DataType)>> {
+@@ -169,6 +220,28 @@ fn resolves_qualified_and_unqualified() {
+         assert!(scope.resolve(&ColumnRef::qualified("u", "id")).is_err());
+     }
+ 
++    #[test]
++    fn merged_bindings_sharing_one_column_are_not_ambiguous() {
++        let mut scope = Scope::empty();
++        scope.push_column(None, "id", 0, DataType::Integer, true);
++        scope.push_column(Some("a"), "id", 0, DataType::Integer, false);
++        scope.push_column(Some("b"), "id", 0, DataType::Integer, false);
++        scope.push_column(Some("a"), "name", 1, DataType::Text, true);
++        assert_eq!(
++            scope.resolve(&ColumnRef::unqualified("id")).unwrap(),
++            (0, DataType::Integer)
++        );
++        assert_eq!(
++            scope.resolve(&ColumnRef::qualified("b", "id")).unwrap(),
++            (0, DataType::Integer)
++        );
++        // `*` shows the merged column once.
++        let names: Vec<String> = scope.columns().into_iter().map(|c| c.1).collect();
++        assert_eq!(names, vec!["id".to_string(), "name".to_string()]);
++        // ...and `a.*` still reaches it.
++        assert_eq!(scope.columns_for("a").unwrap().len(), 2);
++    }
++
+     #[test]
+     fn detects_ambiguity_across_joined_scopes() {
+         let left = Scope::from_table("a", &schema(), 0);

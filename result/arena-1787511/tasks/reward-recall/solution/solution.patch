@@ -1,0 +1,880 @@
+diff --git a/docs/api.md b/docs/api.md
+index f23dd97..8a4d78d 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -63,8 +63,38 @@
+ 
+ `POST /rewards/distribute` `{ "tournamentId": "tnm_cup", "at": 1700000000008 }`
+ 
++A tournament that already holds rewards nobody took back answers 409. Once a
++payout has been recalled the same call runs again and mints a new round.
++
+ `GET /rewards/:playerId`
+ 
++`POST /rewards/:id/claim` `{ "at": 1700000000009 }`
++
++Answers 409 once the claim window on the tournament's reward config has
++closed, and 404 for a reward nobody granted.
++
++`POST /rewards/:id/revoke` `{ "at": 1700000000010, "reason": "anti-cheat" }`
++
++`POST /rewards/recall`
++
++```json
++{ "tournamentId": "tnm_cup", "at": 1700000000011, "reason": "pool was wrong" }
++```
++
++Answers with every reward it took back, and 409 naming the offenders when one
++of the tournament's rewards has already been claimed.
++
++`POST /rewards/expire` `{ "tournamentId": "tnm_cup", "at": 1700000000012 }`
++
++Revokes every reward whose claim window has run out, and answers with them.
++
++`GET /rewards/statement/:tournamentId`
++
++Round by round: what each round granted, what still stands, and what the
++tournament has recalled, paid and still owes.
++
++`GET /rewards/:playerId/balance`
++
+ ## Errors
+ 
+ Domain failures return JSON with `code`, `message`, and `details`.
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 5be2058..52eb0e1 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -36,6 +36,12 @@
+ - Team: snake-draft balance and team totals
+ - Time challenge: remaining-time bonus on raw score
+ 
++## Payouts
++
++A tournament pays once. A payout that went out against the wrong numbers is
++recalled whole and paid again as a new round, and every round keeps its own
++records, so the ledger reads as a history rather than a current balance.
++
+ ## Persistence choices
+ 
+ Memory persistence keeps maps in process and is the default for tests.
+diff --git a/docs/cookbook.md b/docs/cookbook.md
+index 98d8a28..f6ffb5e 100644
+--- a/docs/cookbook.md
++++ b/docs/cookbook.md
+@@ -165,3 +165,27 @@
+ - Do not distribute rewards twice without revoking.
+ - Do not complete a pending match.
+ - Do not register after start.
++
++## Taking a payout back
++
++```ts
++service.recallRewards("tnm_cup", 1_720_000_000_000, "prize pool was wrong");
++service.distributeRewards("tnm_cup", 1_720_000_000_100);
++service.payoutStatement("tnm_cup");
++```
++
++Recall first, distribute second. A distribution refuses while the tournament
++still holds rewards nobody took back, which is what stops a double payout, and
++the statement afterwards shows both rounds: the first with nothing standing,
++the second holding the whole pool.
++
++Reading a balance rather than the raw records is usually what an embedding
++wants:
++
++```ts
++service.rewardBalance("plr_a");
++```
++
++Do not reach for `revokeReward` one id at a time to clear a payout. It works,
++but it stops on the first claimed prize with half the payout already gone,
++where a recall would have refused before touching anything.
+diff --git a/docs/handbook.md b/docs/handbook.md
+index 913676f..28308d8 100644
+--- a/docs/handbook.md
++++ b/docs/handbook.md
+@@ -240,3 +240,31 @@
+ 
+ A second `distribute` call conflicts until existing rewards are
+ revoked.
++
++## 21. Recalling a payout
++
++A payout that went out against the wrong numbers is taken back whole, not
++edited. `recallRewards` revokes every reward the tournament still holds and
++`distributeRewards` then runs again, minting a fresh round.
++
++Two rules keep the ledger honest. A prize somebody has claimed is gone, so a
++recall that meets one takes nothing back at all and says which rewards
++stopped it. And a round never writes over the round before it: ids carry the
++round, so an operator reading `rewards:statement` months later sees what each
++round paid and what it left standing.
++
++A statement reads the rounds back out of the reward records themselves, so it
++cannot drift from the ledger it describes. `granted` is what a round handed
++out on the day; `standing` is what is left of it, which is nothing once the
++round has been recalled. Across the whole tournament, `recalled`, `paid` and
++`outstanding` split every reward by what became of it.
++
++A balance is the same split for one player: what they have taken and what is
++still waiting. A revoked reward counts towards neither, so a recall empties a
++balance without erasing the history behind it.
++
++Claim windows close. `claimWindowMs` on the reward config is counted from the
++moment a reward was granted, the deadline itself still counts, and a claim
++after it is refused rather than silently ignored. `expireClaims` sweeps up
++afterwards: a reward past its deadline can never be claimed, so it is revoked
++rather than left sitting in somebody's balance.
+diff --git a/docs/reference.md b/docs/reference.md
+index ae3d8f3..bfb575e 100644
+--- a/docs/reference.md
++++ b/docs/reference.md
+@@ -76,6 +76,42 @@
+ Statuses: granted, claimed, revoked. Pending is reserved for future
+ async payouts and is not written by v1 engines.
+ 
++A reward id carries the distribution round that minted it. The first round
++writes `rwd_{tournament}_{player}_{tier}` and later rounds append `_r2`,
++`_r3`, and so on, so a recalled round keeps its own records instead of being
++overwritten by the round that replaces it.
++
++### PayoutStatement
++
++| Field | Type | Notes |
++| --- | --- | --- |
++| tournamentId | TournamentId | Whose payout this is |
++| rounds | PayoutRound[] | Oldest round first |
++| recalled | number | Amount revoked across every round |
++| outstanding | number | Amount granted and not yet claimed |
++| paid | number | Amount claimed |
++| explanation | DecisionExplanation | `reward.statement` |
++
++### PayoutRound
++
++| Field | Type | Notes |
++| --- | --- | --- |
++| round | number | 1 for the first distribution |
++| grantedAt | EpochMillis | Earliest grant in the round |
++| rewards | RewardRecord[] | Ordered by reward id |
++| granted | number | What the round handed out when it ran |
++| standing | number | What of it survives, so a recalled round shows 0 |
++
++### RewardBalance
++
++| Field | Type | Notes |
++| --- | --- | --- |
++| playerId | PlayerId | |
++| claimed | number | Total of the player's claimed rewards |
++| pending | number | Total of the player's granted rewards |
++
++Revoked rewards count towards neither figure.
++
+ ### SeasonRecord
+ 
+ `resetRanksOnClose` defaults to true.
+@@ -157,6 +193,11 @@
+ - rankingsFor
+ - distributeRewards
+ - claimReward
++- revokeReward
++- recallRewards
++- expireClaims
++- payoutStatement
++- rewardBalance
+ - profile
+ - listRewards
+ - listTournaments
+diff --git a/docs/sdk.md b/docs/sdk.md
+index 9594c58..0004e92 100644
+--- a/docs/sdk.md
++++ b/docs/sdk.md
+@@ -22,6 +22,6 @@
+ - `sdk.tournaments` – create, open, register, start, end
+ - `sdk.matches` – create, start, submitResult
+ - `sdk.rankings` – leaderboard, forPlayer
+-- `sdk.rewards` – distribute, forPlayer
++- `sdk.rewards` – distribute, forPlayer, claim, revoke, recall, expire, statement, balance
+ 
+ Failed requests throw `ArenaFlowRequestError` with `status` and `body`.
+diff --git a/src/api/routes/rewards.ts b/src/api/routes/rewards.ts
+index 7f61dd6..23cfd7d 100644
+--- a/src/api/routes/rewards.ts
++++ b/src/api/routes/rewards.ts
+@@ -8,6 +8,40 @@ export function registerRewardRoutes(router: Router, service: TournamentService)
+     return json(200, service.distributeRewards(String(body.tournamentId), Number(body.at)));
+   });
+ 
++  router.add("POST", "/rewards/recall", (request) => {
++    const body = asRecord(request.body);
++    return json(
++      200,
++      service.recallRewards(String(body.tournamentId), Number(body.at), String(body.reason ?? "")),
++    );
++  });
++
++  router.add("POST", "/rewards/:id/revoke", (request) => {
++    const body = asRecord(request.body);
++    return json(
++      200,
++      service.revokeReward(request.params.id!, Number(body.at), String(body.reason ?? "")),
++    );
++  });
++
++  router.add("POST", "/rewards/:id/claim", (request) => {
++    const body = asRecord(request.body);
++    return json(200, service.claimReward(request.params.id!, Number(body.at)));
++  });
++
++  router.add("POST", "/rewards/expire", (request) => {
++    const body = asRecord(request.body);
++    return json(200, service.expireClaims(String(body.tournamentId), Number(body.at)));
++  });
++
++  router.add("GET", "/rewards/statement/:tournamentId", (request) =>
++    json(200, service.payoutStatement(request.params.tournamentId!)),
++  );
++
++  router.add("GET", "/rewards/:playerId/balance", (request) =>
++    json(200, service.rewardBalance(request.params.playerId!)),
++  );
++
+   router.add("GET", "/rewards/:playerId", (request) =>
+     json(200, { playerId: request.params.playerId, rewards: service.listRewards(request.params.playerId!) }),
+   );
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 1240f99..439d822 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -57,6 +57,26 @@ export async function runCommand(
+       return service.leaderboard(requiredFlag(flags, "id"));
+     case "rewards:distribute":
+       return service.distributeRewards(requiredFlag(flags, "id"), Number(requiredFlag(flags, "at")));
++    case "rewards:claim":
++      return service.claimReward(requiredFlag(flags, "id"), Number(requiredFlag(flags, "at")));
++    case "rewards:revoke":
++      return service.revokeReward(
++        requiredFlag(flags, "id"),
++        Number(requiredFlag(flags, "at")),
++        requiredFlag(flags, "reason"),
++      );
++    case "rewards:recall":
++      return service.recallRewards(
++        requiredFlag(flags, "id"),
++        Number(requiredFlag(flags, "at")),
++        requiredFlag(flags, "reason"),
++      );
++    case "rewards:expire":
++      return service.expireClaims(requiredFlag(flags, "id"), Number(requiredFlag(flags, "at")));
++    case "rewards:statement":
++      return service.payoutStatement(requiredFlag(flags, "id"));
++    case "rewards:balance":
++      return service.rewardBalance(requiredFlag(flags, "player"));
+     default:
+       throw new Error(`unknown command: ${command}`);
+   }
+@@ -77,5 +97,11 @@ export function availableCommands(): string[] {
+     "match:result",
+     "leaderboard",
+     "rewards:distribute",
++    "rewards:claim",
++    "rewards:revoke",
++    "rewards:recall",
++    "rewards:balance",
++    "rewards:expire",
++    "rewards:statement",
+   ];
+ }
+diff --git a/src/cli/commands/reward.ts b/src/cli/commands/reward.ts
+index 4ae34cc..2c948c3 100644
+--- a/src/cli/commands/reward.ts
++++ b/src/cli/commands/reward.ts
+@@ -1 +1,10 @@
+-export const REWARD_COMMANDS = ["rewards:distribute", "leaderboard"] as const;
++export const REWARD_COMMANDS = [
++  "rewards:distribute",
++  "rewards:claim",
++  "rewards:revoke",
++  "rewards:recall",
++  "rewards:balance",
++  "rewards:expire",
++  "rewards:statement",
++  "leaderboard",
++] as const;
+diff --git a/src/cli/index.ts b/src/cli/index.ts
+index d0b5e9c..f6f03b3 100644
+--- a/src/cli/index.ts
++++ b/src/cli/index.ts
+@@ -25,6 +25,12 @@ Commands:
+   match:result
+   leaderboard
+   rewards:distribute
++  rewards:claim
++  rewards:revoke
++  rewards:recall
++  rewards:balance
++  rewards:expire
++  rewards:statement
+ `);
+     return 0;
+   }
+diff --git a/src/domain/rewards/prize-pool.ts b/src/domain/rewards/prize-pool.ts
+index cfe42ed..d82e2df 100644
+--- a/src/domain/rewards/prize-pool.ts
++++ b/src/domain/rewards/prize-pool.ts
+@@ -46,6 +46,27 @@ export function amountForTier(tier: RewardTierConfig, prizePool: number): number
+   return tier.amount;
+ }
+ 
++/** What a set of allocations takes out of the pool. */
++export function poolSpent(allocations: readonly PoolAllocation[]): number {
++  return allocations.reduce((total, allocation) => total + allocation.amount, 0);
++}
++
++/**
++ * What is left of a prize pool once the tiers have taken their share. A flat
++ * tier can take more than the pool holds, so this goes negative rather than
++ * clamping: an operator wants to see that a payout is over budget.
++ */
++export function poolRemainder(
++  allocations: readonly PoolAllocation[],
++  config: RewardConfig,
++): number {
++  return config.prizePool - poolSpent(allocations);
++}
++
++export function tierNames(config: RewardConfig): string[] {
++  return config.tiers.map((tier) => tier.name);
++}
++
+ export function assertTiers(tiers: readonly RewardTierConfig[]): void {
+   for (const tier of tiers) {
+     if (tier.minRank < 1 || tier.maxRank < tier.minRank) {
+diff --git a/src/engine/rewards/claims.ts b/src/engine/rewards/claims.ts
+index 947983f..6a2daf1 100644
+--- a/src/engine/rewards/claims.ts
++++ b/src/engine/rewards/claims.ts
+@@ -24,6 +24,38 @@ export function assertClaimWindow(reward: RewardRecord, at: EpochMillis, claimWi
+   }
+ }
+ 
++/** When a granted reward stops being claimable, if it ever does. */
++export function claimDeadline(
++  reward: RewardRecord,
++  claimWindowMs?: number,
++): EpochMillis | undefined {
++  return claimWindowMs === undefined ? undefined : reward.grantedAt + claimWindowMs;
++}
++
++export function isExpired(reward: RewardRecord, at: EpochMillis, claimWindowMs?: number): boolean {
++  const deadline = claimDeadline(reward, claimWindowMs);
++  return deadline !== undefined && at > deadline;
++}
++
++export interface RewardBalance {
++  readonly playerId: string;
++  readonly claimed: number;
++  readonly pending: number;
++}
++
++/**
++ * What a player has been paid and what is still waiting for them. Revoked
++ * rewards count towards neither: a recall leaves the ledger holding the
++ * record and the balance holding nothing.
++ */
++export function rewardBalance(rewards: readonly RewardRecord[], playerId: string): RewardBalance {
++  return {
++    playerId,
++    claimed: claimedTotal(rewards, playerId),
++    pending: pendingTotal(rewards, playerId),
++  };
++}
++
+ export function claimedTotal(rewards: readonly RewardRecord[], playerId: string): number {
+   return rewards
+     .filter((reward) => reward.playerId === playerId && reward.status === "claimed")
+diff --git a/src/engine/rewards/index.ts b/src/engine/rewards/index.ts
+index 4e22687..893291e 100644
+--- a/src/engine/rewards/index.ts
++++ b/src/engine/rewards/index.ts
+@@ -1,3 +1,5 @@
+ export * from "./distribution.js";
+ export * from "./reward-engine.js";
+ export * from "./claims.js";
++export * from "./recall.js";
++export * from "./statement.js";
+diff --git a/src/engine/rewards/recall.ts b/src/engine/rewards/recall.ts
+new file mode 100644
+index 0000000..a8d5ac5
+--- /dev/null
++++ b/src/engine/rewards/recall.ts
+@@ -0,0 +1,119 @@
++import { ConflictError, InvalidArgumentError } from "../../errors.js";
++import type { EpochMillis } from "../../clock.js";
++import { explain, type DecisionExplanation } from "../../explain.js";
++import type { RewardId, RewardRecord, TournamentId } from "../../types.js";
++
++/**
++ * Distribution rounds. A tournament pays out once, and if the standings it
++ * paid against turn out to be wrong the whole payout is taken back and a new
++ * round is paid. Rounds are written into the reward id so the earlier round
++ * keeps its own records instead of being overwritten by the later one.
++ */
++export const FIRST_ROUND = 1;
++
++const ROUND_SUFFIX = /_r([0-9]+)$/;
++
++export function roundSuffix(round: number): string {
++  if (!Number.isInteger(round) || round < FIRST_ROUND) {
++    throw new InvalidArgumentError("a distribution round starts at one", { round });
++  }
++  return round === FIRST_ROUND ? "" : `_r${round}`;
++}
++
++/** The round a reward id belongs to. An id with no suffix is the first. */
++export function roundOf(rewardId: RewardId): number {
++  const match = ROUND_SUFFIX.exec(rewardId);
++  if (!match) {
++    return FIRST_ROUND;
++  }
++  const round = Number.parseInt(match[1] ?? "", 10);
++  return Number.isInteger(round) && round >= FIRST_ROUND ? round : FIRST_ROUND;
++}
++
++/** The round the next distribution for this tournament writes. */
++export function nextRound(tournamentId: TournamentId, rewards: readonly RewardRecord[]): number {
++  const mine = rewards.filter((reward) => reward.tournamentId === tournamentId);
++  if (mine.length === 0) {
++    return FIRST_ROUND;
++  }
++  return mine.reduce((highest, reward) => Math.max(highest, roundOf(reward.id)), FIRST_ROUND) + 1;
++}
++
++export interface RecallPlan {
++  readonly tournamentId: TournamentId;
++  readonly revoking: readonly RewardRecord[];
++  readonly claimed: readonly RewardRecord[];
++  readonly round: number;
++  readonly explanation: DecisionExplanation;
++}
++
++/**
++ * What a recall would do. Rewards already revoked are left alone, and a
++ * reward somebody has claimed is a blocker rather than something to take
++ * back: the prize has left the arena and the ledger has to say so.
++ */
++export function planRecall(
++  tournamentId: TournamentId,
++  rewards: readonly RewardRecord[],
++  at: EpochMillis,
++): RecallPlan {
++  const mine = [...rewards]
++    .filter((reward) => reward.tournamentId === tournamentId)
++    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
++  const revoking = mine.filter((reward) => reward.status === "granted");
++  const claimed = mine.filter((reward) => reward.status === "claimed");
++  return {
++    tournamentId,
++    revoking: Object.freeze(revoking),
++    claimed: Object.freeze(claimed),
++    round: nextRound(tournamentId, rewards),
++    explanation: explain("reward.recalled", `recalling ${revoking.length} rewards`, {
++      tournamentId,
++      recalling: revoking.length,
++      blocked: claimed.length,
++      round: nextRound(tournamentId, rewards),
++      at,
++    }),
++  };
++}
++
++export function assertRecallable(plan: RecallPlan): RecallPlan {
++  if (plan.claimed.length > 0) {
++    throw new ConflictError("a claimed reward cannot be recalled", {
++      tournamentId: plan.tournamentId,
++      claimed: plan.claimed.map((reward) => reward.id),
++    });
++  }
++  return plan;
++}
++
++/**
++ * The rewards a tournament can no longer pay: granted, and past the deadline
++ * their config gave them. A window nobody set never closes.
++ */
++export function expiredRewards(
++  tournamentId: TournamentId,
++  rewards: readonly RewardRecord[],
++  at: EpochMillis,
++  claimWindowMs?: number,
++): RewardRecord[] {
++  if (claimWindowMs === undefined) {
++    return [];
++  }
++  return [...rewards]
++    .filter(
++      (reward) =>
++        reward.tournamentId === tournamentId &&
++        reward.status === "granted" &&
++        at > reward.grantedAt + claimWindowMs,
++    )
++    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
++}
++
++export function recallReason(reason: string): string {
++  const trimmed = reason?.trim() ?? "";
++  if (!trimmed) {
++    throw new InvalidArgumentError("a recall needs a reason", { reason });
++  }
++  return trimmed;
++}
+diff --git a/src/engine/rewards/reward-engine.ts b/src/engine/rewards/reward-engine.ts
+index 83dc983..6050d17 100644
+--- a/src/engine/rewards/reward-engine.ts
++++ b/src/engine/rewards/reward-engine.ts
+@@ -3,7 +3,9 @@ import type { EpochMillis } from "../../clock.js";
+ import { createPrefixedId } from "../../ids.js";
+ import { explain } from "../../explain.js";
+ import type { RankingEntry, RewardConfig, RewardRecord, TournamentId } from "../../types.js";
+-import { claimReward, grantReward, isClaimable } from "../../domain/rewards/reward.js";
++import { claimReward, grantReward, isClaimable, revokeReward } from "../../domain/rewards/reward.js";
++import { assertClaimWindow } from "./claims.js";
++import { FIRST_ROUND, roundSuffix } from "./recall.js";
+ import { distributePrizePool } from "./distribution.js";
+ 
+ export class RewardEngine {
+@@ -13,13 +15,17 @@ export class RewardEngine {
+     config: RewardConfig,
+     at: EpochMillis,
+     existing: readonly RewardRecord[] = [],
++    round: number = FIRST_ROUND,
+   ): RewardRecord[] {
+     if (existing.some((reward) => reward.tournamentId === tournamentId && reward.status !== "revoked")) {
+       throw new ConflictError("rewards already distributed for tournament", { tournamentId });
+     }
+     return distributePrizePool(entries, config).map((allocation) =>
+       grantReward({
+-        id: createPrefixedId("rwd", `${tournamentId}_${allocation.playerId}_${allocation.tier}`),
++        id: createPrefixedId(
++          "rwd",
++          `${tournamentId}_${allocation.playerId}_${allocation.tier}${roundSuffix(round)}`,
++        ),
+         playerId: allocation.playerId,
+         tournamentId,
+         amount: allocation.amount,
+@@ -28,12 +34,18 @@ export class RewardEngine {
+         explanation: explain("reward.qualified", `qualified for ${allocation.tier}`, {
+           rank: allocation.rank,
+           amount: allocation.amount,
++          round,
+         }),
+       }),
+     );
+   }
+ 
+-  claim(rewards: readonly RewardRecord[], rewardId: string, at: EpochMillis): RewardRecord[] {
++  claim(
++    rewards: readonly RewardRecord[],
++    rewardId: string,
++    at: EpochMillis,
++    claimWindowMs?: number,
++  ): RewardRecord[] {
+     const current = rewards.find((reward) => reward.id === rewardId);
+     if (!current) {
+       throw new NotFoundError("reward", rewardId);
+@@ -41,9 +53,31 @@ export class RewardEngine {
+     if (!isClaimable(current)) {
+       throw new IllegalStateError("reward cannot be claimed", { rewardId, status: current.status });
+     }
++    assertClaimWindow(current, at, claimWindowMs);
+     return rewards.map((reward) => (reward.id === rewardId ? claimReward(reward, at) : reward));
+   }
+ 
++  /**
++   * Take one reward back. A claimed prize is gone: the ledger says a person
++   * has it, and rewriting that record would make the ledger lie.
++   */
++  revoke(rewards: readonly RewardRecord[], rewardId: string, reason: string): RewardRecord {
++    const current = rewards.find((reward) => reward.id === rewardId);
++    if (!current) {
++      throw new NotFoundError("reward", rewardId);
++    }
++    if (current.status === "revoked") {
++      throw new ConflictError("reward is already revoked", { rewardId });
++    }
++    if (current.status === "claimed") {
++      throw new IllegalStateError("a claimed reward cannot be revoked", {
++        rewardId,
++        claimedAt: current.claimedAt,
++      });
++    }
++    return revokeReward(current, reason);
++  }
++
+   forPlayer(rewards: readonly RewardRecord[], playerId: string): RewardRecord[] {
+     return rewards.filter((reward) => reward.playerId === playerId);
+   }
+diff --git a/src/engine/rewards/statement.ts b/src/engine/rewards/statement.ts
+new file mode 100644
+index 0000000..7d97063
+--- /dev/null
++++ b/src/engine/rewards/statement.ts
+@@ -0,0 +1,95 @@
++import type { EpochMillis } from "../../clock.js";
++import { explain, type DecisionExplanation } from "../../explain.js";
++import type { RewardRecord, TournamentId } from "../../types.js";
++import { roundOf } from "./recall.js";
++
++/**
++ * One distribution round of a tournament's payout. `granted` is what the
++ * round handed out when it ran; `standing` is what survived, so a recalled
++ * round shows what it once was next to nothing at all.
++ */
++export interface PayoutRound {
++  readonly round: number;
++  readonly grantedAt: EpochMillis;
++  readonly rewards: readonly RewardRecord[];
++  readonly granted: number;
++  readonly standing: number;
++}
++
++export interface PayoutStatement {
++  readonly tournamentId: TournamentId;
++  readonly rounds: readonly PayoutRound[];
++  readonly recalled: number;
++  readonly outstanding: number;
++  readonly paid: number;
++  readonly explanation: DecisionExplanation;
++}
++
++function sum(rewards: readonly RewardRecord[]): number {
++  return rewards.reduce((total, reward) => total + reward.amount, 0);
++}
++
++/**
++ * Everything a tournament has paid, taken back, and still owes, round by
++ * round. Read out of the reward records themselves rather than kept beside
++ * them, so a statement can never drift from the ledger it describes.
++ */
++export function payoutStatement(
++  tournamentId: TournamentId,
++  rewards: readonly RewardRecord[],
++): PayoutStatement {
++  const mine = [...rewards]
++    .filter((reward) => reward.tournamentId === tournamentId)
++    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
++
++  const byRound = new Map<number, RewardRecord[]>();
++  for (const reward of mine) {
++    const round = roundOf(reward.id);
++    byRound.set(round, [...(byRound.get(round) ?? []), reward]);
++  }
++
++  const rounds: PayoutRound[] = [...byRound.entries()]
++    .sort((a, b) => a[0] - b[0])
++    .map(([round, records]) => {
++      const alive = records.filter((reward) => reward.status !== "revoked");
++      return Object.freeze({
++        round,
++        grantedAt: records.reduce(
++          (earliest, reward) => Math.min(earliest, reward.grantedAt),
++          Number.MAX_SAFE_INTEGER,
++        ),
++        rewards: Object.freeze(records),
++        granted: sum(records),
++        standing: sum(alive),
++      });
++    });
++
++  const recalled = sum(mine.filter((reward) => reward.status === "revoked"));
++  const outstanding = sum(mine.filter((reward) => reward.status === "granted"));
++  const paid = sum(mine.filter((reward) => reward.status === "claimed"));
++
++  return {
++    tournamentId,
++    rounds: Object.freeze(rounds),
++    recalled,
++    outstanding,
++    paid,
++    explanation: explain("reward.statement", `${rounds.length} rounds for ${tournamentId}`, {
++      tournamentId,
++      rounds: rounds.length,
++      recalled,
++      outstanding,
++      paid,
++    }),
++  };
++}
++
++/** The rounds a tournament has run, oldest first. */
++export function roundNumbers(statement: PayoutStatement): number[] {
++  return statement.rounds.map((round) => round.round);
++}
++
++/** What a round would have paid one player, whether or not it still stands. */
++export function roundShare(round: PayoutRound, playerId: string): number {
++  return sum(round.rewards.filter((reward) => reward.playerId === playerId));
++}
+diff --git a/src/engine/tournament/tournament-service.ts b/src/engine/tournament/tournament-service.ts
+index f6b2436..675a310 100644
+--- a/src/engine/tournament/tournament-service.ts
++++ b/src/engine/tournament/tournament-service.ts
+@@ -1,4 +1,5 @@
+ import { IllegalStateError, InvalidArgumentError, NotFoundError } from "../../errors.js";
++import { explain } from "../../explain.js";
+ import type { EpochMillis } from "../../clock.js";
+ import { eventExplanation, type AppendEventInput } from "../../events/journal/journal.js";
+ import type { DomainEventType } from "../../events/types.js";
+@@ -34,6 +35,15 @@ import { scoringEngine } from "../scoring/scoring-engine.js";
+ import { rankingEngine } from "../ranking/ranking-engine.js";
+ import { ruleEngine } from "../rules/rule-engine.js";
+ import { rewardEngine } from "../rewards/reward-engine.js";
++import { rewardBalance, type RewardBalance } from "../rewards/claims.js";
++import {
++  assertRecallable,
++  expiredRewards,
++  nextRound,
++  planRecall,
++  recallReason,
++} from "../rewards/recall.js";
++import { payoutStatement, type PayoutStatement } from "../rewards/statement.js";
+ import { antiCheatEngine } from "../anti-cheat/anti-cheat-engine.js";
+ 
+ export type ArenaStore = PersistenceAdapter & Partial<Pick<MemoryPersistence, "current" | "requirePlayer" | "requireTournament">>;
+@@ -247,7 +257,15 @@ export class TournamentService {
+       });
+     }
+     const entries = rankingEngine.compute(tournamentId, this.store.listScores(tournamentId)).entries;
+-    const rewards = rewardEngine.qualify(tournamentId, entries, tournament.rewards, at, this.store.listRewards());
++    const ledger = this.store.listRewards();
++    const rewards = rewardEngine.qualify(
++      tournamentId,
++      entries,
++      tournament.rewards,
++      at,
++      ledger,
++      nextRound(tournamentId, ledger),
++    );
+     for (const reward of rewards) {
+       this.store.saveReward(reward);
+       this.record({
+@@ -267,8 +285,79 @@ export class TournamentService {
+     return rewards;
+   }
+ 
++  /**
++   * Take one reward back and say why. The event goes on the reward's own
++   * stream, so the record and the reason travel together.
++   */
++  revokeReward(rewardId: string, at: EpochMillis, reason: string): RewardRecord {
++    const why = recallReason(reason);
++    const revoked = rewardEngine.revoke(this.store.listRewards(), rewardId, why);
++    this.store.saveReward(revoked);
++    this.record({
++      type: "RewardRevoked",
++      at,
++      streamId: `reward:${revoked.id}`,
++      payload: { rewardId: revoked.id, playerId: revoked.playerId, reason: why },
++      explanation: explain("reward.revoked", why, {
++        rewardId: revoked.id,
++        tournamentId: revoked.tournamentId,
++        amount: revoked.amount,
++      }),
++    });
++    return revoked;
++  }
++
++  /**
++   * Take a whole payout back so the tournament can be paid again. Nothing is
++   * taken back at all when one of its rewards has been claimed.
++   */
++  recallRewards(tournamentId: TournamentId, at: EpochMillis, reason: string): RewardRecord[] {
++    this.requireTournament(tournamentId);
++    const why = recallReason(reason);
++    const plan = assertRecallable(planRecall(tournamentId, this.store.listRewards(), at));
++    return plan.revoking.map((reward) => this.revokeReward(reward.id, at, why));
++  }
++
++  /**
++   * Close out the rewards nobody came for. A window that has run out leaves a
++   * reward that can never be claimed, so it is taken back rather than left
++   * sitting in a player's balance forever.
++   */
++  expireClaims(tournamentId: TournamentId, at: EpochMillis): RewardRecord[] {
++    const tournament = this.requireTournament(tournamentId);
++    const stale = expiredRewards(
++      tournamentId,
++      this.store.listRewards(),
++      at,
++      tournament.rewards.claimWindowMs,
++    );
++    return stale.map((reward) => this.revokeReward(reward.id, at, "claim window closed"));
++  }
++
++  /** Every payout round a tournament has run, and what each one left behind. */
++  payoutStatement(tournamentId: TournamentId): PayoutStatement {
++    this.requireTournament(tournamentId);
++    return payoutStatement(tournamentId, this.store.listRewards());
++  }
++
++  rewardBalance(playerId: PlayerId): RewardBalance {
++    this.requirePlayer(playerId);
++    return rewardBalance(this.store.listRewards(), playerId);
++  }
++
+   claimReward(rewardId: string, at: EpochMillis): RewardRecord {
+-    const updated = rewardEngine.claim(this.store.listRewards(), rewardId, at);
++    const ledger = this.store.listRewards();
++    const existing = ledger.find((reward) => reward.id === rewardId);
++    if (!existing) {
++      throw new NotFoundError("reward", rewardId);
++    }
++    const tournament = this.requireTournament(existing.tournamentId);
++    const updated = rewardEngine.claim(
++      ledger,
++      rewardId,
++      at,
++      tournament.rewards.claimWindowMs,
++    );
+     const claimed = updated.find((reward) => reward.id === rewardId);
+     if (!claimed) {
+       throw new NotFoundError("reward", rewardId);
+diff --git a/src/sdk/rewards.ts b/src/sdk/rewards.ts
+index 3eff89f..f567e05 100644
+--- a/src/sdk/rewards.ts
++++ b/src/sdk/rewards.ts
+@@ -1,3 +1,5 @@
++import type { RewardBalance } from "../engine/rewards/claims.js";
++import type { PayoutStatement } from "../engine/rewards/statement.js";
+ import type { RewardRecord } from "../types.js";
+ import type { ArenaFlowClient } from "./client.js";
+ 
+@@ -11,4 +13,28 @@ export class RewardApi {
+   forPlayer(playerId: string): Promise<{ playerId: string; rewards: RewardRecord[] }> {
+     return this.client.request("GET", `/rewards/${playerId}`);
+   }
++
++  claim(rewardId: string, at: number): Promise<RewardRecord> {
++    return this.client.request("POST", `/rewards/${rewardId}/claim`, { at });
++  }
++
++  revoke(rewardId: string, at: number, reason: string): Promise<RewardRecord> {
++    return this.client.request("POST", `/rewards/${rewardId}/revoke`, { at, reason });
++  }
++
++  recall(tournamentId: string, at: number, reason: string): Promise<RewardRecord[]> {
++    return this.client.request("POST", "/rewards/recall", { tournamentId, at, reason });
++  }
++
++  expire(tournamentId: string, at: number): Promise<RewardRecord[]> {
++    return this.client.request("POST", "/rewards/expire", { tournamentId, at });
++  }
++
++  statement(tournamentId: string): Promise<PayoutStatement> {
++    return this.client.request("GET", `/rewards/statement/${tournamentId}`);
++  }
++
++  balance(playerId: string): Promise<RewardBalance> {
++    return this.client.request("GET", `/rewards/${playerId}/balance`);
++  }
+ }

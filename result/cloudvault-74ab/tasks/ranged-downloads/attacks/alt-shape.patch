@@ -1,0 +1,208 @@
+diff --git a/lib/range-plan.ts b/lib/range-plan.ts
+new file mode 100644
+index 0000000..0d483e6
+--- /dev/null
++++ b/lib/range-plan.ts
+@@ -0,0 +1,202 @@
++/**
++ * Ranged downloads, kept in one place.
++ *
++ * A different arrangement of the same rules: one class, spans held as pairs
++ * rather than objects, the header read by a single regular expression, and the
++ * framing measured by writing the lines out and taking their length rather
++ * than by adding label widths together.
++ */
++
++type Manifest = { chunkSizes: number[]; contentType: string }
++type Read = { chunk: number; offset: number; length: number }
++type Part = { first: number; last: number; reads: Read[] }
++type Plan = {
++    status: number
++    contentType: string
++    contentRange: string | null
++    contentLength: number
++    parts: Part[]
++    bytesServed: number
++}
++
++const MEMBER = /^(?:(\d+)-(\d*)|-(\d+))$/
++const CRLF = "\r\n"
++const LIMIT = 4
++
++class RangePlanner {
++    private readonly sizes: number[]
++    private readonly starts: number[]
++    private readonly type: string
++    private readonly total: number
++
++    constructor(
++        manifest: Manifest,
++        private readonly boundary: string,
++    ) {
++        this.sizes = manifest.chunkSizes
++        this.type = manifest.contentType
++        this.starts = []
++        let running = 0
++        this.sizes.forEach((size) => {
++            this.starts.push(running)
++            running += size
++        })
++        this.total = running
++    }
++
++    // Header to pairs, or null where the header is not usable at all.
++    private members(header: string | null | undefined): Array<[number | null, number | null]> | null {
++        if (typeof header !== "string") return null
++        const text = header.trim()
++        if (!/^bytes=/i.test(text)) return null
++        const rest = text.slice(6)
++        if (rest.trim().length === 0) return null
++        const out: Array<[number | null, number | null]> = []
++        for (const raw of rest.split(",")) {
++            const found = MEMBER.exec(raw.trim())
++            if (found === null) return null
++            if (found[3] !== undefined) {
++                out.push([null, Number(found[3])])
++                continue
++            }
++            const first = Number(found[1])
++            if (found[2] === "") {
++                out.push([first, null])
++                continue
++            }
++            const last = Number(found[2])
++            if (last < first) return null
++            out.push([first, last])
++        }
++        return out
++    }
++
++    // Pairs to spans that the file actually holds.
++    private live(members: Array<[number | null, number | null]>): Array<[number, number]> {
++        const spans: Array<[number, number]> = []
++        members.forEach(([first, last]) => {
++            if (first === null) {
++                const want = last === null ? 0 : last
++                if (want > 0) spans.push([want >= this.total ? 0 : this.total - want, this.total - 1])
++                return
++            }
++            if (first >= this.total) return
++            spans.push([first, last === null ? this.total - 1 : Math.min(last, this.total - 1)])
++        })
++        return spans
++    }
++
++    // The lines one part writes around its payload.
++    private frame(first: number, last: number): string {
++        return (
++            `--${this.boundary}${CRLF}` +
++            `Content-Type: ${this.type}${CRLF}` +
++            `Content-Range: bytes ${first}-${last}/${this.total}${CRLF}` +
++            CRLF
++        )
++    }
++
++    private framed(first: number, last: number): number {
++        return this.frame(first, last).length + CRLF.length
++    }
++
++    private fold(spans: Array<[number, number]>): Array<[number, number]> {
++        const sorted = [...spans].sort((a, b) => a[0] - b[0] || a[1] - b[1])
++        return sorted.reduce<Array<[number, number]>>((kept, span) => {
++            const open = kept[kept.length - 1]
++            if (open === undefined) return [[span[0], span[1]]]
++            if (span[0] <= open[1] + 1) {
++                open[1] = Math.max(open[1], span[1])
++                return kept
++            }
++            const apart = this.framed(open[0], open[1]) + this.framed(span[0], span[1])
++            const together = this.framed(open[0], span[1])
++            if (span[0] - open[1] - 1 < apart - together) {
++                open[1] = span[1]
++                return kept
++            }
++            kept.push([span[0], span[1]])
++            return kept
++        }, [])
++    }
++
++    private reads(first: number, last: number): Read[] {
++        const out: Read[] = []
++        for (let index = 0; index < this.sizes.length; index += 1) {
++            const start = this.starts[index]
++            const end = start + this.sizes[index] - 1
++            if (this.sizes[index] === 0 || end < first || start > last) continue
++            const from = first > start ? first : start
++            const to = last < end ? last : end
++            out.push({ chunk: index, offset: from - start, length: to - from + 1 })
++        }
++        return out
++    }
++
++    private part(span: [number, number]): Part {
++        return { first: span[0], last: span[1], reads: this.reads(span[0], span[1]) }
++    }
++
++    private everything(): Plan {
++        return {
++            status: 200,
++            contentType: this.type,
++            contentRange: null,
++            contentLength: this.total,
++            parts: [this.part([0, this.total - 1])],
++            bytesServed: this.total,
++        }
++    }
++
++    plan(header: string | null | undefined): Plan {
++        const members = this.members(header)
++        if (members === null) return this.everything()
++
++        const live = this.live(members)
++        if (live.length === 0) {
++            return {
++                status: 416,
++                contentType: this.type,
++                contentRange: `bytes */${this.total}`,
++                contentLength: 0,
++                parts: [],
++                bytesServed: 0,
++            }
++        }
++
++        const spans = this.fold(live)
++        if (spans.length > LIMIT) return this.everything()
++
++        const parts = spans.map((span) => this.part(span))
++        const served = spans.reduce((sum, [first, last]) => sum + last - first + 1, 0)
++
++        if (spans.length === 1) {
++            return {
++                status: 206,
++                contentType: this.type,
++                contentRange: `bytes ${spans[0][0]}-${spans[0][1]}/${this.total}`,
++                contentLength: served,
++                parts,
++                bytesServed: served,
++            }
++        }
++
++        const framing = spans.reduce((sum, [first, last]) => sum + this.framed(first, last), 0)
++        return {
++            status: 206,
++            contentType: `multipart/byteranges; boundary=${this.boundary}`,
++            contentRange: null,
++            contentLength: framing + served + `--${this.boundary}--${CRLF}`.length,
++            parts,
++            bytesServed: served,
++        }
++    }
++}
++
++export function planRangedResponse(
++    manifest: Manifest,
++    rangeHeader: string | null | undefined,
++    boundary: string,
++): Plan {
++    return new RangePlanner(manifest, boundary).plan(rangeHeader)
++}

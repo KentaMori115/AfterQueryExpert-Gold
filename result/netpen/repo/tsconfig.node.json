@@ -1,0 +1,26 @@
+{
+  /*
+   * The build tooling runs in node rather than in a browser, so it gets its
+   * own project. @vue/tsconfig ships a dom and a lib base but no node one in
+   * this version, so the settings are written out here.
+   *
+   * DOM is in the lib list despite this being node code: Vite's own type
+   * declarations reference Worker and a handful of other browser globals, and
+   * without them the config files fail to check on types that are not ours.
+   */
+  "extends": "@vue/tsconfig/tsconfig.lib.json",
+  "include": ["vite.config.ts", "vitest.config.ts"],
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  }
+}

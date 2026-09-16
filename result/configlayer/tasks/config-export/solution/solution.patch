@@ -1,0 +1,573 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7ab2da1..ddd9176 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,6 +3,20 @@
+ All notable changes to configlayer are documented here.
+ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+ 
++## [0.8.0] — Unreleased
++
++### Added
++- `configlayer.export` — render resolved configuration back out as text:
++  `export_config(data, format=...)` with canonical JSON (sorted keys, stable
++  indentation), dotenv (`db.host` → `DB__HOST`, quoting only where needed)
++  and INI (top-level sections, dotted option names), plus
++  `redact_secrets=` masking via
++  `configlayer.secrets.redact` and an `ExportError` naming the dotted path
++  of anything unrepresentable.
++- `export_path(data, path)` — render and write in one step, picking the
++  format from the file extension (`.json`, `.env`, `.ini`).
++- `export_config` and `ExportError` re-exported from the top-level package.
++
+ ## [0.7.0] — 2026-07-20
+ 
+ ### Added
+diff --git a/configlayer/__init__.py b/configlayer/__init__.py
+index 548b2aa..04d57ef 100644
+--- a/configlayer/__init__.py
++++ b/configlayer/__init__.py
+@@ -11,6 +11,7 @@ from configlayer.access import deep_get, deep_set
+ from configlayer.contract import ConfigContract, ValidationReport
+ from configlayer.exceptions import (
+     ConfigError,
++    ExportError,
+     InterpolationError,
+     LoaderError,
+     PolicyError,
+@@ -19,6 +20,7 @@ from configlayer.exceptions import (
+     SourceError,
+     ValidationError,
+ )
++from configlayer.export import export_config
+ from configlayer.layers import LayeredConfig, LayerStack
+ from configlayer.policy import LayerPolicy, PolicyReport
+ 
+@@ -29,6 +31,7 @@ __all__ = [
+     "deep_set",
+     "LayeredConfig",
+     "LayerStack",
++    "export_config",
+     "ConfigContract",
+     "ValidationReport",
+     "LayerPolicy",
+@@ -39,6 +42,7 @@ __all__ = [
+     "ValidationError",
+     "SchemaError",
+     "SecretError",
++    "ExportError",
+     "PolicyError",
+     "LoaderError",
+     "__version__",
+diff --git a/configlayer/exceptions.py b/configlayer/exceptions.py
+index b219226..82f51cb 100644
+--- a/configlayer/exceptions.py
++++ b/configlayer/exceptions.py
+@@ -61,3 +61,12 @@ class LoaderError(SourceError):
+     loader.  It subclasses :class:`SourceError` because loading is a
+     specialised form of reading a configuration source.
+     """
++
++
++class ExportError(ConfigError):
++    """Raised when a configuration mapping cannot be rendered as text.
++
++    Examples: a non-string key, a value no line-oriented format can
++    carry (an embedded newline, a nested collection inside a list), or
++    an unknown export format name.
++    """
+diff --git a/configlayer/export/__init__.py b/configlayer/export/__init__.py
+new file mode 100644
+index 0000000..b51081e
+--- /dev/null
++++ b/configlayer/export/__init__.py
+@@ -0,0 +1,97 @@
++"""configlayer.export — render resolved configuration back out as text.
++
++A merged configuration usually flows *into* an application, but it also
++needs to flow out: written to disk for another process, templated into a
++container environment, or logged for a support ticket.  This package
++renders a nested mapping into three formats — canonical JSON, dotenv
++``KEY=VALUE`` lines and INI sections — deterministically (keys sorted,
++stable quoting) so exports diff cleanly, with an option to mask secrets
++on the way out via :func:`configlayer.secrets.redact`.
++
++:func:`export_config` is the entry point most callers want; the
++per-format functions are exported for direct use.
++"""
++
++from collections.abc import Mapping
++from typing import Any
++
++from configlayer.exceptions import ExportError
++from configlayer.export.dotenv_export import export_dotenv
++from configlayer.export.files import export_path
++from configlayer.export.ini_export import export_ini
++from configlayer.export.json_export import export_json
++from configlayer.secrets import redact
++
++# Canonical format name -> renderer.
++_RENDERERS = {
++    "json": export_json,
++    "dotenv": export_dotenv,
++    "ini": export_ini,
++}
++
++
++def export_formats() -> list[str]:
++    """Return the sorted list of formats :func:`export_config` accepts."""
++    return sorted(_RENDERERS)
++
++
++def export_config(
++    config: Mapping[str, Any],
++    format: str = "json",  # noqa: A002 — matches loader/source vocabulary
++    *,
++    redact_secrets: bool = False,
++    prefix: str = "",
++) -> str:
++    """Render *config* in the given *format*.
++
++    Parameters
++    ----------
++    config:
++        The nested configuration mapping to render (e.g. a merged dict
++        or ``LayeredConfig.as_dict()``).
++    format:
++        ``"json"``, ``"dotenv"`` or ``"ini"`` (case-insensitive).
++    redact_secrets:
++        When ``True`` the mapping is first passed through
++        :func:`configlayer.secrets.redact`, so secret-bearing keys are
++        masked in the rendered text.
++    prefix:
++        Environment-name prefix, honoured by the dotenv format only.
++
++    Returns
++    -------
++    str
++        The rendered document.
++
++    Raises
++    ------
++    ExportError
++        If *format* is unknown, or the data cannot be represented in
++        the chosen format.
++    """
++    if not isinstance(config, Mapping):
++        raise ExportError(
++            f"export_config needs a mapping, got {type(config).__name__}"
++        )
++    key = format.lower()
++    renderer = _RENDERERS.get(key)
++    if renderer is None:
++        raise ExportError(
++            f"Unknown export format {format!r}. "
++            f"Known formats: {export_formats()}."
++        )
++    data: Mapping[str, Any] = redact(config) if redact_secrets else config
++    if key == "dotenv":
++        return export_dotenv(data, prefix=prefix)
++    return renderer(data)
++
++
++__all__ = [
++    "ExportError",
++    "export_config",
++    "export_dotenv",
++    "export_formats",
++    "export_ini",
++    "export_json",
++    "export_path",
++]
+diff --git a/configlayer/export/dotenv_export.py b/configlayer/export/dotenv_export.py
+new file mode 100644
+index 0000000..b2dca73
+--- /dev/null
++++ b/configlayer/export/dotenv_export.py
+@@ -0,0 +1,75 @@
++"""Render a configuration mapping as dotenv text."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from typing import Any
++
++from configlayer.exceptions import ExportError
++from configlayer.export.flatten import env_segment, flatten, render_leaf
++
++# Characters that force a value into quotes: whitespace at either end,
++# an embedded '#', '=' or quote would otherwise change how the line
++# reads back.
++_NEEDS_QUOTING = set("#'\"")
++
++
++def export_dotenv(config: Mapping[str, Any], *, prefix: str = "") -> str:
++    """Render *config* as dotenv ``KEY=VALUE`` lines.
++
++    Dotted paths become environment-style names: each segment is
++    uppercased and segments are joined with double underscores, the
++    inverse of the ``APP_DB__HOST`` convention
++    :class:`configlayer.env.EnvParser` reads.  With ``prefix="APP"``
++    the key ``db.host`` therefore renders as ``APP_DB__HOST``.
++
++    Lines are sorted by key so the output is deterministic.  Values are
++    quoted only when they need it: a value with leading or trailing
++    whitespace, an embedded ``#``, ``=`` or quote character, wraps in
++    double quotes (or single quotes when it contains a double quote);
++    a value containing both quote characters cannot be represented and
++    raises :class:`ExportError`.
++
++    Parameters
++    ----------
++    config:
++        Nested configuration mapping.
++    prefix:
++        Optional application prefix prepended with a single underscore.
++
++    Returns
++    -------
++    str
++        The dotenv document, one ``KEY=VALUE`` per line, trailing
++        newline included; an empty config renders as the empty string.
++    """
++    flat = flatten(config)
++    lines = []
++    for path in sorted(flat):
++        name = "__".join(
++            env_segment(segment, path) for segment in path.split(".")
++        )
++        if prefix:
++            name = f"{env_segment(prefix, prefix)}_{name}"
++        text = render_leaf(flat[path], path)
++        lines.append(f"{name}={_quote(text, path)}")
++    return "".join(line + "\n" for line in lines)
++
++
++def _quote(text: str, path: str) -> str:
++    """Quote *text* for a dotenv line when it cannot stand bare."""
++    needs = (
++        text != text.strip()
++        or any(ch in _NEEDS_QUOTING or ch == "=" for ch in text)
++        or " " in text
++    )
++    if not needs:
++        return text
++    if '"' not in text:
++        return f'"{text}"'
++    if "'" not in text:
++        return f"'{text}'"
++    raise ExportError(
++        f"{path}: a value containing both quote characters cannot be "
++        "written to dotenv"
++    )
+diff --git a/configlayer/export/files.py b/configlayer/export/files.py
+new file mode 100644
+index 0000000..8ec451f
+--- /dev/null
++++ b/configlayer/export/files.py
+@@ -0,0 +1,80 @@
++"""Write exported configuration straight to a file."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from pathlib import Path
++from typing import Any
++
++from configlayer.exceptions import ExportError
++
++# File extension (lowercased) -> export format.  Mirrors the reader-side
++# conventions: FileSource reads .json and .env, INILoader text usually
++# lives in .ini files.
++_EXT_TO_FORMAT: dict[str, str] = {
++    ".json": "json",
++    ".env": "dotenv",
++    ".ini": "ini",
++}
++
++
++def export_path(
++    config: Mapping[str, Any],
++    path: str,
++    *,
++    format: str | None = None,  # noqa: A002 — matches package vocabulary
++    redact_secrets: bool = False,
++    prefix: str = "",
++    encoding: str = "utf-8",
++) -> str:
++    """Render *config* and write it to *path* in one step.
++
++    The format comes from the file extension — ``.json``, ``.env`` for
++    dotenv, ``.ini`` — unless *format* names one explicitly.  The
++    rendered text is written with *encoding* and also returned, so a
++    caller can log or diff what landed on disk.
++
++    Parameters
++    ----------
++    config:
++        Nested configuration mapping.
++    path:
++        Destination file path.
++    format:
++        Explicit format override; when given, the extension is only
++        cosmetic.
++    redact_secrets:
++        Forwarded to :func:`configlayer.export.export_config`.
++    prefix:
++        Forwarded to the dotenv renderer.
++    encoding:
++        Text encoding for the written file.
++
++    Returns
++    -------
++    str
++        The text that was written.
++
++    Raises
++    ------
++    ExportError
++        If neither *format* nor the extension identifies a format, or
++        the data cannot be represented in it.
++    """
++    from configlayer.export import export_config
++
++    chosen = format
++    if chosen is None:
++        ext = Path(path).suffix.lower()
++        chosen = _EXT_TO_FORMAT.get(ext)
++        if chosen is None:
++            raise ExportError(
++                f"Cannot pick an export format for {path!r}. "
++                f"Known extensions: {sorted(_EXT_TO_FORMAT)}. "
++                "Pass format= explicitly."
++            )
++    text = export_config(
++        config, chosen, redact_secrets=redact_secrets, prefix=prefix
++    )
++    Path(path).write_text(text, encoding=encoding)
++    return text
+diff --git a/configlayer/export/flatten.py b/configlayer/export/flatten.py
+new file mode 100644
+index 0000000..293c874
+--- /dev/null
++++ b/configlayer/export/flatten.py
+@@ -0,0 +1,111 @@
++"""Shared machinery for the exporters: flattening and scalar rendering."""
++
++from __future__ import annotations
++
++import re
++from collections.abc import Mapping
++from typing import Any
++
++from configlayer.exceptions import ExportError
++
++# Scalar types every exporter can render.
++_SCALARS = (str, int, float, bool, type(None))
++
++# A dotenv/INI key segment after normalisation: letters, digits and
++# underscores, not starting with a digit.
++_SEGMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
++
++
++def flatten(config: Mapping[str, Any], *, parent: str = "") -> dict[str, Any]:
++    """Flatten nested mappings into ``{dotted.path: leaf}`` pairs.
++
++    Mapping values recurse; everything else — scalars and lists — is a
++    leaf.  Insertion order is preserved; the exporters sort afterwards
++    so their output is deterministic regardless of source ordering.
++
++    Parameters
++    ----------
++    config:
++        The nested configuration mapping.
++    parent:
++        Dotted prefix accumulated during recursion.
++
++    Raises
++    ------
++    ExportError
++        If a key is not a string or is empty.
++    """
++    flat: dict[str, Any] = {}
++    for key, value in config.items():
++        if not isinstance(key, str) or not key:
++            raise ExportError(
++                f"cannot export non-string key {key!r} under "
++                f"{parent or '<root>'!r}"
++            )
++        path = f"{parent}.{key}" if parent else key
++        if isinstance(value, Mapping):
++            flat.update(flatten(value, parent=path))
++        else:
++            flat[path] = value
++    return flat
++
++
++def render_scalar(value: Any, path: str) -> str:
++    """Render one scalar leaf as text, uniformly across exporters.
++
++    Booleans render as ``true``/``false``, ``None`` as the empty string,
++    numbers via ``str`` and strings as themselves.  Anything else — and
++    any string containing a newline, which no line-oriented format can
++    carry — raises :class:`ExportError` naming the dotted path.
++    """
++    if isinstance(value, bool):
++        return "true" if value else "false"
++    if value is None:
++        return ""
++    if isinstance(value, (int, float)):
++        return str(value)
++    if isinstance(value, str):
++        if "\n" in value or "\r" in value:
++            raise ExportError(
++                f"{path}: strings with line breaks cannot be exported "
++                "to a line-oriented format"
++            )
++        return value
++    raise ExportError(
++        f"{path}: cannot render {type(value).__name__} as a scalar"
++    )
++
++
++def render_leaf(value: Any, path: str) -> str:
++    """Render a leaf that may also be a list of scalars.
++
++    Lists join their rendered elements with ``", "``; an element that is
++    itself a list or mapping raises :class:`ExportError`.
++    """
++    if isinstance(value, list):
++        parts = []
++        for index, element in enumerate(value):
++            if isinstance(element, (list, Mapping)):
++                raise ExportError(
++                    f"{path}[{index}]: nested collections cannot be "
++                    "exported to a line-oriented format"
++                )
++            parts.append(render_scalar(element, f"{path}[{index}]"))
++        return ", ".join(parts)
++    return render_scalar(value, path)
++
++
++def env_segment(segment: str, path: str) -> str:
++    """Normalise one dotted-path segment into an environment-style token.
++
++    The segment is uppercased and must then match
++    ``[A-Z_][A-Z0-9_]*`` — anything else (dashes, spaces, a leading
++    digit) raises :class:`ExportError` naming the dotted path.
++    """
++    upper = segment.upper()
++    if not _SEGMENT_RE.match(upper):
++        raise ExportError(
++            f"{path}: key segment {segment!r} cannot become an "
++            "environment variable name"
++        )
++    return upper
+diff --git a/configlayer/export/ini_export.py b/configlayer/export/ini_export.py
+new file mode 100644
+index 0000000..3643f38
+--- /dev/null
++++ b/configlayer/export/ini_export.py
+@@ -0,0 +1,49 @@
++"""Render a configuration mapping as INI text."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from typing import Any
++
++from configlayer.exceptions import ExportError
++from configlayer.export.flatten import flatten, render_leaf
++
++
++def export_ini(config: Mapping[str, Any]) -> str:
++    """Render *config* as INI sections.
++
++    Every top-level key must map to a mapping and becomes a
++    ``[section]``; deeper nesting flattens into dotted option names
++    inside its section, so ``{"db": {"pool": {"size": 10}}}`` renders
++    as ``[db]`` with ``pool.size = 10``.  A scalar at the top level has
++    no section to live in and raises :class:`ExportError`.
++
++    Sections and the options inside them are sorted and options render
++    as ``name = value``, exactly as
++    :class:`configlayer.loader.INILoader` — which parses with
++    interpolation disabled — reads them back.
++
++    Returns
++    -------
++    str
++        The INI document; sections are separated by a blank line and
++        the text ends with a trailing newline.  An empty config renders
++        as the empty string.
++    """
++    blocks = []
++    for section in sorted(config):
++        value = config[section]
++        if not isinstance(value, Mapping):
++            raise ExportError(
++                f"{section}: INI export needs every top-level value to "
++                "be a mapping"
++            )
++        options = flatten(value)
++        lines = [f"[{section}]"]
++        for name in sorted(options):
++            text = render_leaf(options[name], f"{section}.{name}")
++            lines.append(f"{name} = {text}")
++        blocks.append("\n".join(lines))
++    if not blocks:
++        return ""
++    return "\n\n".join(blocks) + "\n"
+diff --git a/configlayer/export/json_export.py b/configlayer/export/json_export.py
+new file mode 100644
+index 0000000..2ac571e
+--- /dev/null
++++ b/configlayer/export/json_export.py
+@@ -0,0 +1,47 @@
++"""Render a configuration mapping as canonical JSON text."""
++
++from __future__ import annotations
++
++import json
++from collections.abc import Mapping
++from typing import Any
++
++from configlayer.exceptions import ExportError
++
++
++def export_json(config: Mapping[str, Any]) -> str:
++    """Render *config* as canonical, diff-friendly JSON.
++
++    Keys are sorted at every level, indentation is two spaces, and the
++    text ends with a trailing newline, so exporting the same data always
++    produces byte-identical output.  Values must be JSON-representable
++    (mappings, lists, strings, numbers, booleans, None); anything else
++    raises :class:`ExportError` naming the offending type.
++
++    Returns
++    -------
++    str
++        The JSON document.
++    """
++    plain = _plain(config, "<root>")
++    return json.dumps(plain, indent=2, sort_keys=True) + "\n"
++
++
++def _plain(value: Any, path: str) -> Any:
++    """Copy *value* into plain JSON-ready structures, checking types."""
++    if isinstance(value, Mapping):
++        out = {}
++        for key, item in value.items():
++            if not isinstance(key, str) or not key:
++                raise ExportError(
++                    f"cannot export non-string key {key!r} under {path!r}"
++                )
++            out[key] = _plain(item, f"{path}.{key}")
++        return out
++    if isinstance(value, list):
++        return [_plain(item, f"{path}[{i}]") for i, item in enumerate(value)]
++    if isinstance(value, (str, int, float, bool)) or value is None:
++        return value
++    raise ExportError(
++        f"{path}: cannot render {type(value).__name__} as JSON"
++    )

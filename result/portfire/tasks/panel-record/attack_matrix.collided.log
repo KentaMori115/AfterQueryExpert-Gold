@@ -1,0 +1,173 @@
+built chai-tamper: 1 file(s)
+built fake-heldout: 2 file(s)
+built config-and-setup: 3 file(s)
+built node-modules: 1 file(s)
+built report-rewrite: 1 file(s)
+built own-support: 1 file(s)
+built solution-edits-base-test: 13 file(s)
+built solution-wrong-clock: 12 file(s)
+
+=== staging the base tree
+local base commit: 6c856b61974485610d7dc7dba3e6c4e8902cf999
+
+=== building the environment image
+
+=== building the verifier image
+
+=== oracle run (reference solution applied)
+oracle     reward.json = {"reward": 1, "f2p_total": 73, "f2p_passed": 73, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== nop run (base state, nothing applied)
+nop        reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 0.0, "p2p": 1.0, "partial": 0.9666666666666667}
+
+=== chai-tamper run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/chai-tamper.patch)
+chai-tamper reward.json = {"reward": 0, "f2p_total": 73, "f2p_passed": 0, "p2p_total": 2117, "p2p_passed": 2117, "f2p": 0.0, "p2p": 1.0, "partial": 0.9666666666666667}
+
+=== fake-heldout run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/fake-heldout.patch)
+fake-heldout reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== config-and-setup run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/config-and-setup.patch)
+config-and-setup reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== node-modules run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/node-modules.patch)
+node-modules reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0, "apply_failed": 1}
+
+=== report-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/report-rewrite.patch)
+report-rewrite reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== own-support run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/own-support.patch)
+own-support reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== solution-edits-base-test run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/solution-edits-base-test.patch)
+solution-edits-base-test reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== solution-wrong-clock run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/attacks/solution-wrong-clock.patch)
+solution-wrong-clock reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== summary
+--- oracle
+P2P 2117/2117 pass 0 fail; F2P 73/73 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- nop
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > does not call that stray burnt without the first walk
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a burnt stray found with both walks
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a dead cue found with both walks, as an error
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin still reads connected
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin was never walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > passes a walk on which every match burnt
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans a refire only onto a pin the after walk read open
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans no refire onto a pin nobody walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > refuses to read a walk against a show that does not compile
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > reports an after walk it cannot read
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > stops on an after walk that will not parse
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > works without the first walk
+--- chai-tamper
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > does not call that stray burnt without the first walk
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a burnt stray found with both walks
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails on a dead cue found with both walks, as an error
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin still reads connected
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > fails when a show pin was never walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > passes a walk on which every match burnt
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans a refire only onto a pin the after walk read open
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > plans no refire onto a pin nobody walked
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > refuses to read a walk against a show that does not compile
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > reports an after walk it cannot read
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > stops on an after walk that will not parse
+[verifier] ✗ [f2p] tests/cli/morningAfter.test.ts.continuity --after > works without the first walk
+--- fake-heldout
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > gives the earliest cues the stock and leaves the last ones without
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > never lends a shell that a later cue of its own still needs
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends only what is left after every own cue has drawn
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- config-and-setup
+[verifier] ERROR: model.patch touches tests/setup.ts; every declared id will report failed
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > carries on past an unresolved name
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > still runs the load check on what did resolve
+--- node-modules
+[verifier] ERROR: submitted model.patch failed to apply
+--- report-rewrite
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > gives the earliest cues the stock and leaves the last ones without
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > never lends a shell that a later cue of its own still needs
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends only what is left after every own cue has drawn
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- own-support
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > gives the earliest cues the stock and leaves the last ones without
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > never lends a shell that a later cue of its own still needs
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends only what is left after every own cue has drawn
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- solution-edits-base-test
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > gives the earliest cues the stock and leaves the last ones without
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > never lends a shell that a later cue of its own still needs
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends only what is left after every own cue has drawn
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- solution-wrong-clock
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > gives the earliest cues the stock and leaves the last ones without
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > never lends a shell that a later cue of its own still needs
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends only what is left after every own cue has drawn
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+
+logs kept under /root/mindriftwork/AQ_dragan/result/portfire/tasks/panel-record/work-attacks/
+
+=== why each attack scored what it did
+--- chai-tamper
+     47     missing from report (test did not run or produced no result — see raw output)
+      1 P2P 2117/2117 pass 0 fail; F2P 0/73 pass 73 fail; PARTIAL 0.9666666666666667; BINARY 0
+--- fake-heldout
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0
+--- config-and-setup
+   2164     missing from report (test did not run or produced no result — see raw output)
+      1 [verifier] ERROR: model.patch touches tests/setup.ts; every declared id will report failed
+      1 P2P 0/2116 pass 2116 fail; F2P 0/48 pass 48 fail; PARTIAL 0.0; BINARY 0
+--- node-modules
+--- report-rewrite
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0
+--- own-support
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0

@@ -1,0 +1,1005 @@
+diff --git a/README.md b/README.md
+index dd2464f..2a186e9 100644
+--- a/README.md
++++ b/README.md
+@@ -68,6 +68,7 @@
+ 
+ - `POST /matches`
+ - `POST /matches/:id/result`
++- `POST /matches/:id/void`
+ 
+ ### Ranking
+ 
+diff --git a/docs/api.md b/docs/api.md
+index f23dd97..de2b5e1 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -53,6 +53,16 @@
+ { "winnerId": "plr_a", "loserId": "plr_b", "at": 1700000000007 }
+ ```
+ 
++`POST /matches/:id/void`
++
++```json
++{ "reason": "opponent disconnected", "at": 1700000000008 }
++```
++
++Withdraws a completed match and rebuilds the scores it fed, answering with
++the withdrawal record. The tournament must still be active, and the reason
++may not be blank.
++
+ ## Rankings
+ 
+ `GET /leaderboards/:id`
+diff --git a/docs/cli.md b/docs/cli.md
+index 0dd3b17..583f089 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -10,6 +10,7 @@
+ arenaflow tournament:start --id tnm_cup --at 1700000000003
+ arenaflow match:create --id mch_1 --tournament tnm_cup --players plr_a,plr_b --at 1700000000004
+ arenaflow match:result --id mch_1 --winner plr_a --loser plr_b --at 1700000000005
++arenaflow match:void --id mch_1 --reason "opponent disconnected" --at 1700000000006
+ arenaflow leaderboard --id tnm_cup
+ arenaflow rewards:distribute --id tnm_cup --at 1700000000006
+ ```
+diff --git a/docs/cookbook.md b/docs/cookbook.md
+index 98d8a28..83d8957 100644
+--- a/docs/cookbook.md
++++ b/docs/cookbook.md
+@@ -165,3 +165,30 @@
+ - Do not distribute rewards twice without revoking.
+ - Do not complete a pending match.
+ - Do not register after start.
++
++## Withdrawing a result
++
++```ts
++const store = new MemoryPersistence();
++const arena = new TournamentService(store);
++// ... players registered, tournament started ...
++arena.createMatch({ id: "mch_2", tournamentId: "tnm_cup", playerIds: ["plr_ann", "plr_ben"], createdAt: T0 + 10 });
++arena.startMatch("mch_2", T0 + 11);
++arena.submitPairResult({ matchId: "mch_2", winnerId: "plr_ann", loserId: "plr_ben", at: T0 + 12 });
++
++const withdrawal = arena.voidMatch({
++  matchId: "mch_2",
++  reason: "opponent disconnected",
++  at: T0 + 20,
++});
++withdrawal.rebuilt.map((score) => [score.playerId, score.total]);
++```
++
++Ann and Ben are rebuilt from whatever else they played in `tnm_cup`. If
++`mch_2` was Ann's only match she keeps a record reading zero, stamped
++`T0 + 20`. Anyone who never met either of them is left alone.
++
++The rebuild runs the scoring config again rather than subtracting what was
++awarded, so a win that paid a five-win streak bonus stops paying it once the
++win before it is withdrawn. Replaying the journal afterwards reaches the same
++numbers.
+diff --git a/docs/event-sourcing.md b/docs/event-sourcing.md
+index 0de3b12..d75e67d 100644
+--- a/docs/event-sourcing.md
++++ b/docs/event-sourcing.md
+@@ -70,6 +70,20 @@
+ compatibility flag is set. v1 fails closed: an unknown type is a replay
+ error.
+ 
++## Withdrawn results
++
++`MatchVoided` is a fact like any other, and the state it implies is larger
++than one match. Every score the match fed is rebuilt from the results still
++standing when the event is applied, which is why the projector holds each
++`ScoreSubmitted` on its match: without the outcome and raw score of a match
++that is already sealed there is nothing to rebuild from, and a replayed
++journal would drift away from the run it describes.
++
++Two properties keep the rebuild deterministic. Matches are walked in
++settlement order, by `completedAt` and then by match id, and awards are
++recomputed by the scoring engine rather than reversed arithmetically, so a
++streak bonus that a withdrawn win once paid for is simply not paid again.
++
+ ## Snapshots
+ 
+ A snapshot is a frozen copy of projected state plus the last applied
+diff --git a/docs/handbook.md b/docs/handbook.md
+index 913676f..4a20521 100644
+--- a/docs/handbook.md
++++ b/docs/handbook.md
+@@ -240,3 +240,38 @@
+ 
+ A second `distribute` call conflicts until existing rewards are
+ revoked.
++
++## 21. Withdrawing a result
++
++A result that should never have counted is withdrawn with
++`voidMatch({ matchId, reason, at })` while the tournament is still active.
++The match moves to `voided` and keeps the results it was completed with, so
++the record of what was claimed survives the correction. The call answers with
++a withdrawal record: `match`, `tournamentId`, the trimmed `reason`, `at`, the
++`rebuilt` score records in player id order, and an explanation whose details
++carry every rebuilt player's total before and after.
++
++Withdrawal is not a subtraction. A score record carries a running total, a
++win/loss/draw count, a live streak, the best streak reached and the reason
++behind every award, and all of those depend on the order results arrived in.
++Take one match away and a streak bonus somewhere later may never have been
++earned. So each player the voided match touched has this tournament's score
++rebuilt from the matches that still stand, oldest settlement first, every
++result scored again through the tournament's scoring config against the score
++built so far.
++
++A player left with nothing keeps a record, zeroed and stamped at the moment of
++the withdrawal. Players the match never touched are not rebuilt at all: their
++own results have not moved.
++
++`MatchVoided` carries the reason on the match stream, and a projector rebuilds
++the same way, so a journal replayed later reaches the totals the live run
++reached. Rewards are a different matter: a completed tournament refuses a
++withdrawal, because its board has been ranked and its pool may already be
++paid.
++
++A tournament report counts what was pulled: hand `buildTournamentReport` the
++tournament's matches and it reports `withdrawn`.
++
++Operators reach the same correction over HTTP with `POST /matches/:id/void`,
++from the CLI with `match:void`, and from the SDK with `matches.voidMatch`.
+diff --git a/docs/reference.md b/docs/reference.md
+index ae3d8f3..482f08f 100644
+--- a/docs/reference.md
++++ b/docs/reference.md
+@@ -60,8 +60,9 @@
+ 
+ ### MatchRecord
+ 
+-Pending matches have empty results. Started matches keep empty results
+-until completion. Completed matches have one result per player.
++Pending matches have empty results. Started matches collect one result
++per participant as scores are submitted. Completed matches have one
++result per player, and a voided match keeps the results it carried.
+ 
+ ### ScoreRecord
+ 
+@@ -113,7 +114,8 @@
+ 
+ ### MatchStarted / MatchCompleted / MatchVoided
+ 
+-Stream `match:{id}`. Voided includes reason.
++Stream `match:{id}`. Voided includes reason, and rebuilds the score of
++every player the match touched.
+ 
+ ### ScoreSubmitted
+ 
+@@ -153,6 +155,7 @@
+ - createMatch
+ - startMatch
+ - submitPairResult
++- voidMatch
+ - leaderboard
+ - rankingsFor
+ - distributeRewards
+@@ -162,6 +165,11 @@
+ - listTournaments
+ - supportedFormats
+ 
++### TournamentReport
++
++`withdrawn` counts the tournament's voided matches. Pass the tournament's
++matches as the fifth argument to `buildTournamentReport` to fill it.
++
+ ## HTTP routes
+ 
+ See `docs/api.md`. Path parameters are decoded. Unknown routes return
+diff --git a/docs/sdk.md b/docs/sdk.md
+index 9594c58..f44cf45 100644
+--- a/docs/sdk.md
++++ b/docs/sdk.md
+@@ -20,7 +20,7 @@
+ 
+ - `sdk.players` – create, profile, history
+ - `sdk.tournaments` – create, open, register, start, end
+-- `sdk.matches` – create, start, submitResult
++- `sdk.matches` – create, start, submitResult, voidMatch
+ - `sdk.rankings` – leaderboard, forPlayer
+ - `sdk.rewards` – distribute, forPlayer
+ 
+diff --git a/src/api/routes/matches.ts b/src/api/routes/matches.ts
+index 6f6d010..d9f4220 100644
+--- a/src/api/routes/matches.ts
++++ b/src/api/routes/matches.ts
+@@ -19,6 +19,18 @@ export function registerMatchRoutes(router: Router, service: TournamentService):
+     return json(200, service.startMatch(request.params.id!, Number(body.at)));
+   });
+ 
++  router.add("POST", "/matches/:id/void", (request) => {
++    const body = asRecord(request.body);
++    return json(
++      200,
++      service.voidMatch({
++        matchId: request.params.id!,
++        reason: String(body.reason ?? ""),
++        at: Number(body.at),
++      }),
++    );
++  });
++
+   router.add("POST", "/matches/:id/result", (request) => {
+     const body = asRecord(request.body);
+     return json(
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 1240f99..3847d23 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -53,6 +53,12 @@ export async function runCommand(
+         loserId: requiredFlag(flags, "loser"),
+         at: Number(requiredFlag(flags, "at")),
+       });
++    case "match:void":
++      return service.voidMatch({
++        matchId: requiredFlag(flags, "id"),
++        reason: requiredFlag(flags, "reason"),
++        at: Number(requiredFlag(flags, "at")),
++      });
+     case "leaderboard":
+       return service.leaderboard(requiredFlag(flags, "id"));
+     case "rewards:distribute":
+@@ -75,6 +81,7 @@ export function availableCommands(): string[] {
+     "match:create",
+     "match:start",
+     "match:result",
++    "match:void",
+     "leaderboard",
+     "rewards:distribute",
+   ];
+diff --git a/src/cli/index.ts b/src/cli/index.ts
+index d0b5e9c..e773361 100644
+--- a/src/cli/index.ts
++++ b/src/cli/index.ts
+@@ -23,6 +23,7 @@ Commands:
+   tournament:end
+   match:create
+   match:result
++  match:void
+   leaderboard
+   rewards:distribute
+ `);
+diff --git a/src/domain/matches/match.ts b/src/domain/matches/match.ts
+index aec3c05..4c58a2d 100644
+--- a/src/domain/matches/match.ts
++++ b/src/domain/matches/match.ts
+@@ -79,6 +79,25 @@ export function completeMatch(
+   });
+ }
+ 
++/**
++ * Attach one participant's result to a match that is still running. Results
++ * arrive one at a time, and a match holds them until it is completed, so a
++ * rebuild later on can read what each player actually did.
++ */
++export function withResult(match: MatchRecord, result: MatchResultRecord): MatchRecord {
++  if (match.status === "completed" || match.status === "voided") {
++    throw new InvalidArgumentError("a settled match takes no further results", {
++      matchId: match.id,
++      status: match.status,
++    });
++  }
++  const others = match.results.filter((existing) => existing.playerId !== result.playerId);
++  return Object.freeze({
++    ...match,
++    results: Object.freeze([...others, Object.freeze({ ...result })]),
++  });
++}
++
+ export function voidMatch(match: MatchRecord, at: EpochMillis): MatchRecord {
+   assertEpochMillis(at, "voidMatch.at");
+   if (match.status === "voided") {
+diff --git a/src/engine/corrections/index.ts b/src/engine/corrections/index.ts
+new file mode 100644
+index 0000000..d22410a
+--- /dev/null
++++ b/src/engine/corrections/index.ts
+@@ -0,0 +1,2 @@
++export * from "./rescore.js";
++export * from "./void-match.js";
+diff --git a/src/engine/corrections/rescore.ts b/src/engine/corrections/rescore.ts
+new file mode 100644
+index 0000000..187a3d6
+--- /dev/null
++++ b/src/engine/corrections/rescore.ts
+@@ -0,0 +1,103 @@
++import type { EpochMillis } from "../../clock.js";
++import type {
++  MatchRecord,
++  PlayerId,
++  PlayerRecord,
++  ScoreRecord,
++  TournamentId,
++  TournamentRecord,
++} from "../../types.js";
++import { emptyScore } from "../../domain/scores/score.js";
++import { resultFor } from "../../domain/matches/result.js";
++import { scoringEngine } from "../scoring/scoring-engine.js";
++
++/**
++ * Rebuilding a score is the only honest way to undo a match. A score record
++ * carries a running total, a streak, a best streak and an append-only list of
++ * explanations, and every one of those depends on the order results arrived
++ * in. Subtracting the awarded points of a single match leaves the streak, the
++ * bonuses that streak paid for and the history describing them all wrong, so
++ * the rebuild walks what is left instead.
++ */
++export interface RescoreInput {
++  readonly tournament: TournamentRecord;
++  readonly players: readonly PlayerRecord[];
++  readonly matches: readonly MatchRecord[];
++  readonly playerIds: readonly PlayerId[];
++  readonly at: EpochMillis;
++}
++
++/**
++ * Settled order for a tournament's matches: the moment a match completed,
++ * then its id. Both keys are recorded facts, so a rebuild run now and the
++ * same rebuild run during a replay walk the results the same way.
++ */
++export function compareSettled(a: MatchRecord, b: MatchRecord): number {
++  const left = a.completedAt ?? a.createdAt;
++  const right = b.completedAt ?? b.createdAt;
++  if (left !== right) {
++    return left - right;
++  }
++  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
++}
++
++/**
++ * The matches of a tournament that still count: completed, never voided,
++ * oldest first.
++ */
++export function standingMatches(
++  matches: readonly MatchRecord[],
++  tournamentId: TournamentId,
++): MatchRecord[] {
++  return matches
++    .filter((match) => match.tournamentId === tournamentId && match.status === "completed")
++    .sort(compareSettled);
++}
++
++/**
++ * Replay one player's results through the tournament's scoring config. The
++ * scoring engine decides each award against the score built so far, so a win
++ * that once paid a streak bonus stops paying it when the win before it is
++ * gone.
++ */
++export function rescorePlayer(
++  tournament: TournamentRecord,
++  player: PlayerRecord,
++  matches: readonly MatchRecord[],
++  at: EpochMillis,
++): ScoreRecord {
++  let score = emptyScore(player.id, tournament.id, at);
++  for (const match of standingMatches(matches, tournament.id)) {
++    const result = resultFor(match, player.id);
++    if (!result) {
++      continue;
++    }
++    const decision = scoringEngine.decide({
++      player,
++      tournament,
++      current: score,
++      outcome: result.outcome,
++      rawScore: result.rawScore,
++      at: match.completedAt ?? at,
++    });
++    score = decision.next;
++  }
++  return score;
++}
++
++/**
++ * Rebuild the named players. Everyone else keeps the record they already
++ * have: their own results did not move.
++ */
++export function rescoreTournament(input: RescoreInput): ScoreRecord[] {
++  const byId = new Map(input.players.map((player) => [player.id, player] as const));
++  const rebuilt: ScoreRecord[] = [];
++  for (const playerId of [...new Set(input.playerIds)].sort()) {
++    const player = byId.get(playerId);
++    if (!player) {
++      continue;
++    }
++    rebuilt.push(rescorePlayer(input.tournament, player, input.matches, input.at));
++  }
++  return rebuilt;
++}
+diff --git a/src/engine/corrections/void-match.ts b/src/engine/corrections/void-match.ts
+new file mode 100644
+index 0000000..5fe6374
+--- /dev/null
++++ b/src/engine/corrections/void-match.ts
+@@ -0,0 +1,132 @@
++import { IllegalStateError, InvalidArgumentError } from "../../errors.js";
++import type { EpochMillis } from "../../clock.js";
++import { explain, type DecisionExplanation } from "../../explain.js";
++import type {
++  MatchRecord,
++  PlayerId,
++  PlayerRecord,
++  ScoreRecord,
++  TournamentId,
++  TournamentRecord,
++} from "../../types.js";
++import { voidMatch } from "../../domain/matches/match.js";
++import { rescoreTournament } from "./rescore.js";
++
++export interface VoidMatchInput {
++  readonly match: MatchRecord;
++  readonly tournament: TournamentRecord;
++  readonly players: readonly PlayerRecord[];
++  readonly matches: readonly MatchRecord[];
++  readonly scores: readonly ScoreRecord[];
++  readonly reason: string;
++  readonly at: EpochMillis;
++}
++
++/**
++ * What a withdrawal did: the match that was pulled, why, when, and the score
++ * records that had to be rebuilt because of it.
++ */
++export interface WithdrawalRecord {
++  readonly match: MatchRecord;
++  readonly tournamentId: TournamentId;
++  readonly reason: string;
++  readonly at: EpochMillis;
++  readonly rebuilt: readonly ScoreRecord[];
++  readonly explanation: DecisionExplanation;
++}
++
++/** One player's total before and after the rebuild, for the audit trail. */
++export interface WithdrawalMovement {
++  readonly playerId: PlayerId;
++  readonly before: number;
++  readonly after: number;
++  readonly delta: number;
++}
++
++/**
++ * A result is only withdrawn while the competition is still running. Once a
++ * tournament is completed its board has been ranked and its prize pool may
++ * already be paid, and a v1 payout is not reversible.
++ */
++export function assertVoidable(match: MatchRecord, tournament: TournamentRecord): void {
++  if (tournament.status !== "active") {
++    throw new IllegalStateError("matches can only be voided while a tournament is active", {
++      tournamentId: tournament.id,
++      status: tournament.status,
++    });
++  }
++  if (match.status !== "completed") {
++    throw new IllegalStateError("only a completed match can be voided", {
++      matchId: match.id,
++      status: match.status,
++    });
++  }
++}
++
++export function assertReason(reason: string): string {
++  const trimmed = reason.trim();
++  if (trimmed.length === 0) {
++    throw new InvalidArgumentError("a void needs a reason");
++  }
++  return trimmed;
++}
++
++/** The players whose scores the voided match touched. */
++export function affectedPlayerIds(match: MatchRecord): PlayerId[] {
++  return [...new Set(match.results.map((result) => result.playerId))].sort();
++}
++
++/**
++ * Structured evidence for the withdrawal: what each rebuilt player was
++ * carrying, and what they carry now. Nothing else in the engine can answer
++ * that afterwards, because the old totals are gone once the rebuild lands.
++ */
++export function withdrawalMovements(
++  before: readonly ScoreRecord[],
++  after: readonly ScoreRecord[],
++): WithdrawalMovement[] {
++  return after.map((score) => {
++    const previous = before.find(
++      (candidate) =>
++        candidate.playerId === score.playerId && candidate.tournamentId === score.tournamentId,
++    );
++    const was = previous?.total ?? 0;
++    return {
++      playerId: score.playerId,
++      before: was,
++      after: score.total,
++      delta: score.total - was,
++    };
++  });
++}
++
++export function voidMatchOutcome(input: VoidMatchInput): WithdrawalRecord {
++  assertVoidable(input.match, input.tournament);
++  const reason = assertReason(input.reason);
++  const voided = voidMatch(input.match, input.at);
++  const remaining = [
++    ...input.matches.filter((match) => match.id !== voided.id),
++    voided,
++  ];
++  const playerIds = affectedPlayerIds(input.match);
++  const rebuilt = rescoreTournament({
++    tournament: input.tournament,
++    players: input.players,
++    matches: remaining,
++    playerIds,
++    at: input.at,
++  });
++  return {
++    match: voided,
++    tournamentId: input.tournament.id,
++    reason,
++    at: input.at,
++    rebuilt,
++    explanation: explain("match.voided", reason, {
++      matchId: voided.id,
++      tournamentId: input.tournament.id,
++      rebuilt: playerIds,
++      movements: withdrawalMovements(input.scores, rebuilt),
++    }),
++  };
++}
+diff --git a/src/engine/index.ts b/src/engine/index.ts
+index 40c6dd4..d4b9abf 100644
+--- a/src/engine/index.ts
++++ b/src/engine/index.ts
+@@ -8,5 +8,6 @@ export * from "./anti-cheat/index.js";
+ export * from "./seasons/index.js";
+ export * from "./tournament/index.js";
+ export * from "./audit/index.js";
++export * from "./corrections/index.js";
+ export * from "./catalog/index.js";
+ export * from "./reporting/index.js";
+diff --git a/src/engine/reporting/report.ts b/src/engine/reporting/report.ts
+index bf17298..783ebf2 100644
+--- a/src/engine/reporting/report.ts
++++ b/src/engine/reporting/report.ts
+@@ -1,4 +1,10 @@
+-import type { RankingEntry, RewardRecord, ScoreRecord, TournamentRecord } from "../../types.js";
++import type {
++  MatchRecord,
++  RankingEntry,
++  RewardRecord,
++  ScoreRecord,
++  TournamentRecord,
++} from "../../types.js";
+ import { movementLabel } from "../../domain/rankings/ranking.js";
+ import { guideFor } from "../tournament/formats/handbook.js";
+ 
+@@ -9,6 +15,7 @@ export interface TournamentReport {
+   readonly formatSummary: string;
+   readonly status: string;
+   readonly registered: number;
++  readonly withdrawn: number;
+   readonly standings: readonly ReportStanding[];
+   readonly rewards: readonly ReportReward[];
+   readonly narrative: string;
+@@ -48,11 +55,22 @@ export function buildRewards(rewards: readonly RewardRecord[]): ReportReward[] {
+   }));
+ }
+ 
++/** Matches of this tournament that were withdrawn and no longer score. */
++export function countWithdrawn(
++  tournament: TournamentRecord,
++  matches: readonly MatchRecord[],
++): number {
++  return matches.filter(
++    (match) => match.tournamentId === tournament.id && match.status === "voided",
++  ).length;
++}
++
+ export function buildTournamentReport(
+   tournament: TournamentRecord,
+   entries: readonly RankingEntry[],
+   rewards: readonly RewardRecord[],
+   scores: readonly ScoreRecord[] = [],
++  matches: readonly MatchRecord[] = [],
+ ): TournamentReport {
+   const standings = buildStandings(entries);
+   const leader = standings[0];
+@@ -67,6 +85,7 @@ export function buildTournamentReport(
+     formatSummary: guideFor(tournament.format).summary,
+     status: tournament.status,
+     registered: tournament.registeredPlayerIds.length,
++    withdrawn: countWithdrawn(tournament, matches),
+     standings,
+     rewards: buildRewards(rewards),
+     narrative,
+@@ -79,6 +98,7 @@ export function renderReport(report: TournamentReport): string {
+     `Format: ${report.format} — ${report.formatSummary}`,
+     `Status: ${report.status}`,
+     `Registered: ${report.registered}`,
++    `Withdrawn: ${report.withdrawn}`,
+     "",
+     report.narrative,
+     "",
+diff --git a/src/engine/tournament/tournament-service.ts b/src/engine/tournament/tournament-service.ts
+index f6b2436..9fe2ec7 100644
+--- a/src/engine/tournament/tournament-service.ts
++++ b/src/engine/tournament/tournament-service.ts
+@@ -35,6 +35,7 @@ import { rankingEngine } from "../ranking/ranking-engine.js";
+ import { ruleEngine } from "../rules/rule-engine.js";
+ import { rewardEngine } from "../rewards/reward-engine.js";
+ import { antiCheatEngine } from "../anti-cheat/anti-cheat-engine.js";
++import { voidMatchOutcome, type WithdrawalRecord } from "../corrections/void-match.js";
+ 
+ export type ArenaStore = PersistenceAdapter & Partial<Pick<MemoryPersistence, "current" | "requirePlayer" | "requireTournament">>;
+ 
+@@ -228,6 +229,42 @@ export class TournamentService {
+     return completed;
+   }
+ 
++  /**
++   * Withdraw a completed match. The match is marked voided and every player
++   * who held a result on it has this tournament's score rebuilt from the
++   * matches that still stand, so totals, records, streaks and the reasons
++   * behind them describe the competition that is left.
++   */
++  voidMatch(input: { matchId: string; reason: string; at: EpochMillis }): WithdrawalRecord {
++    const match = this.requireMatch(input.matchId);
++    const tournament = this.requireTournament(match.tournamentId);
++    const outcome = voidMatchOutcome({
++      match,
++      tournament,
++      players: this.store.listPlayers(),
++      matches: this.store.listMatches(tournament.id),
++      scores: this.store.listScores(tournament.id),
++      reason: input.reason,
++      at: input.at,
++    });
++    this.store.saveMatch(outcome.match);
++    for (const score of outcome.rebuilt) {
++      this.store.saveScore(score);
++    }
++    this.record({
++      type: "MatchVoided",
++      at: input.at,
++      streamId: `match:${outcome.match.id}`,
++      payload: {
++        matchId: outcome.match.id,
++        tournamentId: tournament.id,
++        reason: outcome.reason,
++      },
++      explanation: outcome.explanation,
++    });
++    return outcome;
++  }
++
+   leaderboard(tournamentId: TournamentId) {
+     return rankingEngine.leaderboard(tournamentId, this.store.listScores(tournamentId));
+   }
+diff --git a/src/events/replay/projector.ts b/src/events/replay/projector.ts
+index d7022b0..f073f15 100644
+--- a/src/events/replay/projector.ts
++++ b/src/events/replay/projector.ts
+@@ -9,7 +9,10 @@ import {
+   startTournament,
+   withRegisteredPlayers,
+ } from "../../domain/tournaments/index.js";
+-import { completeMatch, createMatch, startMatch, voidMatch } from "../../domain/matches/match.js";
++import { completeMatch, createMatch, startMatch, voidMatch, withResult } from "../../domain/matches/match.js";
++import { resultFor } from "../../domain/matches/result.js";
++import { affectedPlayerIds } from "../../engine/corrections/void-match.js";
++import { rescoreTournament } from "../../engine/corrections/rescore.js";
+ import { applyScoreDelta, emptyScore } from "../../domain/scores/score.js";
+ import { claimReward, grantReward, revokeReward } from "../../domain/rewards/reward.js";
+ import { activateSeason, closeSeason, createSeason } from "../../domain/seasons/season.js";
+@@ -116,17 +119,36 @@ export function projectEvent(state: ArenaState, event: DomainEvent): ArenaState
+           event.payload.outcome,
+         ),
+       );
++      // A submitted score is also the record of what a player did in that
++      // match. Hold it on the match, or a projection has no way to tell a win
++      // from a draw once the match is sealed, and a later void cannot rebuild
++      // anything from what is left.
++      const pending = maps.matches.get(event.payload.matchId);
++      if (pending && pending.status !== "completed" && pending.status !== "voided") {
++        maps.matches.set(
++          pending.id,
++          withResult(pending, {
++            playerId: event.payload.playerId,
++            outcome: event.payload.outcome,
++            rawScore: event.payload.rawScore,
++            placement: undefined,
++          }),
++        );
++      }
+       break;
+     }
+     case "MatchCompleted": {
+       const current = requireMatch(maps.matches, event.payload.matchId);
+       if (current.status === "started") {
+-        const results = current.playerIds.map((playerId) => ({
+-          playerId,
+-          outcome: "draw" as const,
+-          rawScore: 0,
+-          placement: 1 as number | undefined,
+-        }));
++        const results = current.playerIds.map(
++          (playerId) =>
++            resultFor(current, playerId) ?? {
++              playerId,
++              outcome: "draw" as const,
++              rawScore: 0,
++              placement: 1 as number | undefined,
++            },
++        );
+         maps.matches.set(current.id, completeMatch(current, results, event.at));
+       }
+       break;
+@@ -134,6 +156,23 @@ export function projectEvent(state: ArenaState, event: DomainEvent): ArenaState
+     case "MatchVoided": {
+       const current = requireMatch(maps.matches, event.payload.matchId);
+       maps.matches.set(current.id, voidMatch(current, event.at));
++      // Withdrawing a result is not a note on one match. Every score the
++      // match fed has to come back to what the remaining matches say, and a
++      // projection reaches the same numbers the live run did by rebuilding
++      // them the same way.
++      const tournament = maps.tournaments.get(current.tournamentId);
++      if (tournament) {
++        const rebuilt = rescoreTournament({
++          tournament,
++          players: [...maps.players.values()],
++          matches: [...maps.matches.values()],
++          playerIds: affectedPlayerIds(current),
++          at: event.at,
++        });
++        for (const score of rebuilt) {
++          maps.scores.set(scoreKey(score.tournamentId, score.playerId), score);
++        }
++      }
+       break;
+     }
+     case "PenaltyApplied": {
+diff --git a/src/sdk/matches.ts b/src/sdk/matches.ts
+index 1f7a43b..6f3c5b0 100644
+--- a/src/sdk/matches.ts
++++ b/src/sdk/matches.ts
+@@ -15,4 +15,8 @@ export class MatchApi {
+   submitResult(id: string, body: Record<string, unknown>): Promise<MatchRecord> {
+     return this.client.request("POST", `/matches/${id}/result`, body);
+   }
++
++  voidMatch(id: string, body: Record<string, unknown>): Promise<MatchRecord> {
++    return this.client.request("POST", `/matches/${id}/void`, body);
++  }
+ }
+diff --git a/tests/engine/corrections.test.ts b/tests/engine/corrections.test.ts
+new file mode 100644
+index 0000000..7c5c4f9
+--- /dev/null
++++ b/tests/engine/corrections.test.ts
+@@ -0,0 +1,222 @@
++import { describe, expect, it } from "vitest";
++import { MemoryPersistence } from "../../src/persistence/index.js";
++import { TournamentService } from "../../src/engine/tournament/index.js";
++import { replayJournal } from "../../src/events/replay/replay.js";
++import { IllegalStateError, InvalidArgumentError } from "../../src/errors.js";
++import { rescorePlayer, standingMatches } from "../../src/engine/corrections/index.js";
++import { buildTournamentReport } from "../../src/engine/reporting/index.js";
++import { createArena } from "../../src/api/server.js";
++import { runCli } from "../../src/cli/index.js";
++
++const T0 = 1_700_003_000_000;
++
++function arena() {
++  const store = new MemoryPersistence();
++  const service = new TournamentService(store);
++  service.createPlayer({ id: "plr_a", displayName: "Ann", createdAt: T0 });
++  service.createPlayer({ id: "plr_b", displayName: "Ben", createdAt: T0 });
++  service.createPlayer({ id: "plr_c", displayName: "Cal", createdAt: T0 });
++  service.createTournament({ id: "tnm_cup", name: "Cup", format: "leaderboard", createdAt: T0 });
++  service.openRegistration("tnm_cup", T0 + 1);
++  service.register("tnm_cup", "plr_a", T0 + 2);
++  service.register("tnm_cup", "plr_b", T0 + 3);
++  service.register("tnm_cup", "plr_c", T0 + 4);
++  service.start("tnm_cup", T0 + 5);
++  return { store, service };
++}
++
++function play(service: TournamentService, id: string, winner: string, loser: string, at: number) {
++  service.createMatch({ id, tournamentId: "tnm_cup", playerIds: [winner, loser], createdAt: at - 2 });
++  service.startMatch(id, at - 1);
++  service.submitPairResult({ matchId: id, winnerId: winner, loserId: loser, at });
++}
++
++function scoreOf(store: MemoryPersistence, playerId: string) {
++  return store.listScores("tnm_cup").find((score) => score.playerId === playerId);
++}
++
++describe("voiding a match", () => {
++  it("marks the match voided and keeps its results", () => {
++    const { store, service } = arena();
++    play(service, "mch_1", "plr_a", "plr_b", T0 + 10);
++    const withdrawal = service.voidMatch({ matchId: "mch_1", reason: "wrong winner", at: T0 + 20 });
++    expect(withdrawal.match.status).toBe("voided");
++    expect(withdrawal.match.completedAt).toBe(T0 + 20);
++    expect(withdrawal.match.results).toHaveLength(2);
++    expect(withdrawal.tournamentId).toBe("tnm_cup");
++    expect(withdrawal.reason).toBe("wrong winner");
++    expect(withdrawal.at).toBe(T0 + 20);
++    expect(withdrawal.rebuilt.map((score) => score.playerId)).toEqual(["plr_a", "plr_b"]);
++    expect(store.getMatch("mch_1")?.status).toBe("voided");
++  });
++
++  it("rebuilds totals, records and streaks from what is left", () => {
++    const { store, service } = arena();
++    play(service, "mch_1", "plr_a", "plr_b", T0 + 10);
++    play(service, "mch_2", "plr_a", "plr_c", T0 + 20);
++    play(service, "mch_3", "plr_b", "plr_a", T0 + 30);
++    expect(scoreOf(store, "plr_a")?.total).toBe(180);
++    expect(scoreOf(store, "plr_a")?.bestStreak).toBe(2);
++
++    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnected", at: T0 + 40 });
++    const ann = scoreOf(store, "plr_a");
++    expect(ann?.total).toBe(80);
++    expect(ann?.wins).toBe(1);
++    expect(ann?.losses).toBe(1);
++    expect(ann?.bestStreak).toBe(1);
++    expect(ann?.streak).toBe(0);
++    expect(ann?.lastUpdatedAt).toBe(T0 + 30);
++    expect(ann?.explanations).toHaveLength(2);
++  });
++
++  it("zeroes a player with nothing left and stamps the withdrawal", () => {
++    const { store, service } = arena();
++    play(service, "mch_1", "plr_a", "plr_c", T0 + 10);
++    service.voidMatch({ matchId: "mch_1", reason: "duplicate submission", at: T0 + 40 });
++    const cal = scoreOf(store, "plr_c");
++    expect(cal?.total).toBe(0);
++    expect(cal?.losses).toBe(0);
++    expect(cal?.lastUpdatedAt).toBe(T0 + 40);
++    expect(cal?.explanations).toHaveLength(0);
++  });
++
++  it("leaves players the match never touched alone", () => {
++    const { store, service } = arena();
++    play(service, "mch_1", "plr_a", "plr_b", T0 + 10);
++    play(service, "mch_2", "plr_c", "plr_b", T0 + 20);
++    const before = scoreOf(store, "plr_c");
++    service.voidMatch({ matchId: "mch_1", reason: "wrong winner", at: T0 + 30 });
++    expect(scoreOf(store, "plr_c")).toEqual(before);
++  });
++
++  it("drops a streak bonus the withdrawn win paid for", () => {
++    const { store, service } = arena();
++    const streaky = new Array(5).fill(0).map((_, index) => `mch_s${index}`);
++    streaky.forEach((id, index) => {
++      play(service, id, "plr_a", "plr_b", T0 + 10 + index * 10);
++    });
++    expect(scoreOf(store, "plr_a")?.total).toBe(550);
++    service.voidMatch({ matchId: "mch_s0", reason: "wrong winner", at: T0 + 100 });
++    expect(scoreOf(store, "plr_a")?.total).toBe(400);
++    expect(scoreOf(store, "plr_a")?.bestStreak).toBe(4);
++  });
++
++  it("refuses anything but a completed match on an active tournament", () => {
++    const { service } = arena();
++    service.createMatch({
++      id: "mch_1",
++      tournamentId: "tnm_cup",
++      playerIds: ["plr_a", "plr_b"],
++      createdAt: T0 + 6,
++    });
++    expect(() => service.voidMatch({ matchId: "mch_1", reason: "early", at: T0 + 7 })).toThrow(
++      IllegalStateError,
++    );
++    play(service, "mch_2", "plr_a", "plr_b", T0 + 10);
++    expect(() => service.voidMatch({ matchId: "mch_2", reason: "  ", at: T0 + 11 })).toThrow(
++      InvalidArgumentError,
++    );
++    service.end("tnm_cup", T0 + 12);
++    expect(() => service.voidMatch({ matchId: "mch_2", reason: "late", at: T0 + 13 })).toThrow(
++      IllegalStateError,
++    );
++  });
++
++  it("explains the withdrawal with a total before and after", () => {
++    const { service } = arena();
++    play(service, "mch_1", "plr_a", "plr_b", T0 + 10);
++    play(service, "mch_2", "plr_a", "plr_c", T0 + 20);
++    const withdrawal = service.voidMatch({ matchId: "mch_2", reason: "wrong winner", at: T0 + 30 });
++    const movements = withdrawal.explanation.details.movements as Array<{
++      playerId: string;
++      before: number;
++      after: number;
++      delta: number;
++    }>;
++    expect(movements.map((movement) => movement.playerId)).toEqual(["plr_a", "plr_c"]);
++    expect(movements[0]).toEqual({ playerId: "plr_a", before: 200, after: 100, delta: -100 });
++    expect(movements[1]?.after).toBe(0);
++  });
++
++  it("replays to the same scores it left behind", () => {
++    const { store, service } = arena();
++    play(service, "mch_1", "plr_a", "plr_b", T0 + 10);
++    play(service, "mch_2", "plr_b", "plr_c", T0 + 20);
++    service.voidMatch({ matchId: "mch_1", reason: "wrong winner", at: T0 + 30 });
++    const replayed = replayJournal(store.journal);
++    for (const score of store.listScores("tnm_cup")) {
++      const projected = replayed.scores.get(`tnm_cup::${score.playerId}`);
++      expect(projected?.total).toBe(score.total);
++      expect(projected?.wins).toBe(score.wins);
++      expect(projected?.bestStreak).toBe(score.bestStreak);
++      expect(projected?.lastUpdatedAt).toBe(score.lastUpdatedAt);
++    }
++    const events = store.journal.readStream("match:mch_1");
++    expect(events.at(-1)?.type).toBe("MatchVoided");
++  });
++});
++
++describe("rescoring helpers", () => {
++  it("walks settled matches oldest first and skips voided ones", () => {
++    const { store, service } = arena();
++    play(service, "mch_2", "plr_a", "plr_b", T0 + 10);
++    play(service, "mch_1", "plr_a", "plr_c", T0 + 20);
++    service.voidMatch({ matchId: "mch_2", reason: "wrong winner", at: T0 + 30 });
++    const matches = store.listMatches("tnm_cup");
++    expect(standingMatches(matches, "tnm_cup").map((match) => match.id)).toEqual(["mch_1"]);
++    const ann = rescorePlayer(
++      service.getTournament("tnm_cup"),
++      service.getPlayer("plr_a"),
++      matches,
++      T0 + 30,
++    );
++    expect(ann.total).toBe(100);
++    expect(ann.wins).toBe(1);
++  });
++});
++
++describe("withdrawals on the other surfaces", () => {
++  it("counts withdrawn matches in a tournament report", () => {
++    const { store, service } = arena();
++    play(service, "mch_1", "plr_a", "plr_b", T0 + 10);
++    play(service, "mch_2", "plr_a", "plr_c", T0 + 20);
++    service.voidMatch({ matchId: "mch_1", reason: "wrong winner", at: T0 + 30 });
++    const report = buildTournamentReport(
++      service.getTournament("tnm_cup"),
++      service.leaderboard("tnm_cup").entries,
++      [],
++      store.listScores("tnm_cup"),
++      store.listMatches("tnm_cup"),
++    );
++    expect(report.withdrawn).toBe(1);
++  });
++
++  it("voids over http and from the command line", async () => {
++    const { router, service } = createArena();
++    service.createPlayer({ id: "plr_a", displayName: "Ann", createdAt: T0 });
++    service.createPlayer({ id: "plr_b", displayName: "Ben", createdAt: T0 });
++    service.createTournament({ id: "tnm_cup", name: "Cup", format: "leaderboard", createdAt: T0 });
++    service.openRegistration("tnm_cup", T0 + 1);
++    service.register("tnm_cup", "plr_a", T0 + 2);
++    service.register("tnm_cup", "plr_b", T0 + 3);
++    service.start("tnm_cup", T0 + 5);
++    play(service, "mch_1", "plr_a", "plr_b", T0 + 10);
++    const response = await router.handle("POST", "/matches/mch_1/void", {
++      reason: "wrong winner",
++      at: T0 + 20,
++    });
++    expect(response.status).toBe(200);
++    const conflict = await router.handle("POST", "/matches/mch_1/void", {
++      reason: "again",
++      at: T0 + 21,
++    });
++    expect(conflict.status).toBe(409);
++
++    let output = "";
++    const code = await runCli(["match:void", "--id", "mch_x", "--reason", "nope", "--at", "1"], (text) => {
++      output += text;
++    });
++    expect(code).toBe(1);
++    expect(output).toContain("mch_x");
++  });
++});

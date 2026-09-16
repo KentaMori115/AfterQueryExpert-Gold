@@ -1,0 +1,1215 @@
+diff --git a/README.md b/README.md
+index a795043..abc9077 100644
+--- a/README.md
++++ b/README.md
+@@ -41,6 +41,9 @@ println!("{}", tanager::render_table(&result));
+   and `LIMIT` / `OFFSET`.
+ - **Expressions** — arithmetic, comparison, `AND`/`OR`/`NOT`, `BETWEEN`, `IN`,
+   `LIKE` (`%` and `_`), `IS [NOT] NULL`, `CAST`, and searched/simple `CASE`.
++- **Subqueries** — a parenthesized `SELECT` as a value, `EXISTS`, and
++  `IN`/`NOT IN` over a query. A subquery may read columns of the query that
++  encloses it, and is then answered once per outer row.
+ - **Functions** — a broad scalar library (math: `ABS`, `ROUND`, `CEIL`, `FLOOR`,
+   `MOD`, `POWER`, `SQRT`, `SIGN`, `GREATEST`, `LEAST`; text: `LENGTH`, `UPPER`,
+   `LOWER`, `TRIM`, `LTRIM`, `RTRIM`, `SUBSTR`, `CONCAT`, `REPLACE`, `REVERSE`,
+diff --git a/docs/DESIGN.md b/docs/DESIGN.md
+index 2afea81..1056083 100644
+--- a/docs/DESIGN.md
++++ b/docs/DESIGN.md
+@@ -45,6 +45,12 @@ earlier stage:
+   then one column per aggregate. Projection and `HAVING` above it reference those
+   columns positionally, which is why the binder can express `HAVING SUM(x) > 1`
+   even when `SUM(x)` is not projected.
++- **Correlation.** A subquery binds against its own relations first; a name they
++  do not offer is looked up in the enclosing query's scope and binds to an outer
++  reference, which reads the enclosing row rather than the subquery's own. Only
++  one level is visible, so a name from two queries out is unknown. Because an
++  outer reference addresses the row of the operator the expression sits on, a
++  predicate carrying one is never relocated by the optimizer.
+ - **ORDER BY resolution.** Keys resolve by position, then against output columns,
+   then (for non-aggregate non-distinct queries) against input columns, in which
+   case they ride along as hidden projection columns that a final projection
+@@ -64,6 +70,7 @@ earlier stage:
+ ## Deliberate non-goals
+ 
+ tanager is a teaching-grade analytical engine, not a storage engine. There is no
+-persistence, transactions, indexes, subqueries, or set operations. Execution is
++persistence, transactions, indexes, or set operations. Subqueries are supported
++in expressions, but never as a relation in `FROM`. Execution is
+ fully materializing, which keeps operators simple at the cost of memory on very
+ large inputs.
+diff --git a/src/api.rs b/src/api.rs
+index fee1011..cabbdac 100644
+--- a/src/api.rs
++++ b/src/api.rs
+@@ -2,6 +2,7 @@
+ 
+ use crate::ast::statement::{CreateTableStmt, DropTableStmt, InsertStmt, SelectStmt, Statement};
+ use crate::error::{Error, Result};
++use crate::exec::eval::{eval_in, EvalContext};
+ use crate::exec::Executor;
+ use crate::optimizer::Optimizer;
+ use crate::parser::{parse_program, parse_statement};
+@@ -158,6 +159,9 @@ fn exec_insert(&mut self, stmt: InsertStmt) -> Result<Outcome> {
+         let binder = Binder::new(&self.catalog);
+         let empty_scope = Scope::empty();
+         let empty_row = Row::empty();
++        // A value expression may hold a subquery, which reads tables, so the
++        // evaluation here is given the catalog rather than nothing.
++        let ctx = EvalContext::new(&self.catalog, None);
+ 
+         let mut built_rows = Vec::with_capacity(stmt.rows.len());
+         for row_exprs in &stmt.rows {
+@@ -172,7 +176,7 @@ fn exec_insert(&mut self, stmt: InsertStmt) -> Result<Outcome> {
+             let mut values = vec![Value::Null; width];
+             for (expr, &pos) in row_exprs.iter().zip(&target) {
+                 let bound = binder.bind_scalar(expr, &empty_scope)?;
+-                values[pos] = crate::exec::eval::eval(&bound, &empty_row)?;
++                values[pos] = eval_in(&bound, &empty_row, &ctx)?;
+             }
+             built_rows.push(Row::new(values));
+         }
+diff --git a/src/ast/display.rs b/src/ast/display.rs
+index 7c19109..d4e41ff 100644
+--- a/src/ast/display.rs
++++ b/src/ast/display.rs
+@@ -64,6 +64,22 @@ fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                 }
+                 f.write_str(")")
+             }
++            // A subquery renders as the keyword and a placeholder rather than
++            // the whole inner statement: this Display is for error messages and
++            // plan detail lines, where the enclosing expression is the point.
++            Expr::ScalarSubquery(_) => f.write_str("(SELECT ...)"),
++            Expr::Exists(_) => f.write_str("EXISTS (SELECT ...)"),
++            Expr::InSubquery {
++                expr,
++                negated,
++                ..
++            } => {
++                write!(f, "{}", expr)?;
++                if *negated {
++                    f.write_str(" NOT")?;
++                }
++                f.write_str(" IN (SELECT ...)")
++            }
+             Expr::Case {
+                 operand,
+                 when_then,
+diff --git a/src/ast/expr.rs b/src/ast/expr.rs
+index 6d064ba..a904060 100644
+--- a/src/ast/expr.rs
++++ b/src/ast/expr.rs
+@@ -1,6 +1,7 @@
+ //! The expression AST produced by the parser.
+ 
+ use crate::ast::operators::{BinaryOp, UnaryOp};
++use crate::ast::statement::SelectStmt;
+ use crate::types::{DataType, Value};
+ 
+ /// A column reference, optionally qualified by a table name/alias.
+@@ -86,6 +87,16 @@ pub enum Expr {
+         pattern: Box<Expr>,
+         negated: bool,
+     },
++    /// A parenthesized `SELECT` used where a value is expected.
++    ScalarSubquery(Box<SelectStmt>),
++    /// `EXISTS (SELECT ...)`.
++    Exists(Box<SelectStmt>),
++    /// `expr [NOT] IN (SELECT ...)`.
++    InSubquery {
++        expr: Box<Expr>,
++        query: Box<SelectStmt>,
++        negated: bool,
++    },
+     /// `CASE [operand] WHEN cond THEN result ... [ELSE default] END`.
+     Case {
+         /// The simple-CASE operand, if any (`CASE x WHEN 1 ...`).
+@@ -139,10 +150,23 @@ pub fn contains_aggregate(&self) -> bool {
+                 let _ = star;
+                 self.any_child(|c| c.contains_aggregate())
+             }
++            // A subquery is its own query: an aggregate written inside one is
++            // computed there, and lifting it into the enclosing SELECT would
++            // group the wrong rows.
++            Expr::ScalarSubquery(_) | Expr::Exists(_) => false,
++            Expr::InSubquery { expr, .. } => expr.contains_aggregate(),
+             _ => self.any_child(|c| c.contains_aggregate()),
+         }
+     }
+ 
++    /// Whether this expression contains a subquery anywhere.
++    pub fn contains_subquery(&self) -> bool {
++        match self {
++            Expr::ScalarSubquery(_) | Expr::Exists(_) | Expr::InSubquery { .. } => true,
++            _ => self.any_child(|c| c.contains_subquery()),
++        }
++    }
++
+     /// Apply `f` to each immediate child expression, returning `true` if any
+     /// call does. Keeps traversal logic in one place.
+     pub fn any_child(&self, mut f: impl FnMut(&Expr) -> bool) -> bool {
+@@ -188,6 +212,11 @@ pub fn for_each_child(&self, f: &mut dyn FnMut(&Expr)) {
+                 f(expr);
+                 f(pattern);
+             }
++            // The SELECT inside a subquery is not a child expression of the
++            // enclosing one: it is bound as a query of its own, so traversals
++            // over expressions stop at the boundary.
++            Expr::ScalarSubquery(_) | Expr::Exists(_) => {}
++            Expr::InSubquery { expr, .. } => f(expr),
+             Expr::Case {
+                 operand,
+                 when_then,
+@@ -257,4 +286,31 @@ fn column_ref_display() {
+         assert_eq!(ColumnRef::qualified("t", "c").display_name(), "t.c");
+         assert_eq!(ColumnRef::unqualified("c").display_name(), "c");
+     }
++
++    #[test]
++    fn an_aggregate_inside_a_subquery_stays_there() {
++        let inner = SelectStmt::empty();
++        let e = Expr::ScalarSubquery(Box::new(inner));
++        assert!(!e.contains_aggregate());
++        assert!(e.contains_subquery());
++    }
++
++    #[test]
++    fn in_subquery_reports_its_own_left_side() {
++        let e = Expr::InSubquery {
++            expr: Box::new(Expr::column("dept_id")),
++            query: Box::new(SelectStmt::empty()),
++            negated: true,
++        };
++        assert!(e.contains_subquery());
++        assert!(!e.contains_aggregate());
++    }
++
++    #[test]
++    fn exists_hides_its_body_from_expression_traversal() {
++        let e = Expr::Exists(Box::new(SelectStmt::empty()));
++        let mut children = 0;
++        e.for_each_child(&mut |_| children += 1);
++        assert_eq!(children, 0);
++    }
+ }
+diff --git a/src/exec/agg_exec.rs b/src/exec/agg_exec.rs
+index 5a5e7b5..e960887 100644
+--- a/src/exec/agg_exec.rs
++++ b/src/exec/agg_exec.rs
+@@ -3,7 +3,7 @@
+ use std::collections::HashMap;
+ 
+ use crate::error::Result;
+-use crate::exec::eval::eval;
++use crate::exec::eval::{eval_in, EvalContext};
+ use crate::functions::Accumulator;
+ use crate::planner::bound::{BoundAggregate, BoundExpr};
+ use crate::storage::Row;
+@@ -19,6 +19,7 @@ pub(crate) fn execute_aggregate(
+     rows: Vec<Row>,
+     group_expr: &[BoundExpr],
+     aggregates: &[BoundAggregate],
++    ctx: &EvalContext<'_>,
+ ) -> Result<Vec<Row>> {
+     let mut index: HashMap<Vec<GroupKey>, usize> = HashMap::new();
+     let mut order: Vec<Vec<Value>> = Vec::new();
+@@ -40,7 +41,7 @@ pub(crate) fn execute_aggregate(
+     for row in &rows {
+         let mut key_values = Vec::with_capacity(group_expr.len());
+         for g in group_expr {
+-            key_values.push(eval(g, row)?);
++            key_values.push(eval_in(g, row, ctx)?);
+         }
+         let key: Vec<GroupKey> = key_values.iter().map(|v| v.group_key()).collect();
+         let slot = match index.get(&key) {
+@@ -57,7 +58,7 @@ pub(crate) fn execute_aggregate(
+             match &agg.arg {
+                 None => acc.update_count_star(),
+                 Some(arg) => {
+-                    let v = eval(arg, row)?;
++                    let v = eval_in(arg, row, ctx)?;
+                     acc.update(&v)?;
+                 }
+             }
+diff --git a/src/exec/eval.rs b/src/exec/eval.rs
+index 40407f1..ccd5891 100644
+--- a/src/exec/eval.rs
++++ b/src/exec/eval.rs
+@@ -7,11 +7,67 @@
+ use crate::error::{Error, Result};
+ use crate::exec::predicate::{and_tv, as_tv_bool, like_match, not_tv, or_tv, three_valued};
+ use crate::planner::bound::BoundExpr;
+-use crate::storage::Row;
++use crate::planner::logical::LogicalPlan;
++use crate::storage::{Catalog, Row};
+ use crate::types::{DataType, Value};
+ 
+-/// Evaluate `expr` against `row`.
++/// What an expression may need beyond the row it is evaluated against.
++///
++/// Most expressions need neither field. A subquery needs the catalog, because
++/// answering it means running a plan over real tables, and a correlated one
++/// needs the row of the query that encloses it. Both are optional so that
++/// evaluation still works where neither exists, such as the optimizer folding a
++/// constant before any table has been read.
++pub struct EvalContext<'a> {
++    catalog: Option<&'a Catalog>,
++    outer: Option<&'a Row>,
++}
++
++impl<'a> EvalContext<'a> {
++    /// A context offering nothing. Anything that needs a table or an enclosing
++    /// row fails here rather than inventing an answer.
++    pub fn detached() -> EvalContext<'a> {
++        EvalContext {
++            catalog: None,
++            outer: None,
++        }
++    }
++
++    /// A context over `catalog`, with `outer` as the enclosing query's row.
++    pub fn new(catalog: &'a Catalog, outer: Option<&'a Row>) -> EvalContext<'a> {
++        EvalContext {
++            catalog: Some(catalog),
++            outer,
++        }
++    }
++
++    /// Read a column of the enclosing query's row.
++    fn outer_value(&self, index: usize) -> Result<Value> {
++        let row = self.outer.ok_or_else(|| {
++            Error::execution("a correlated reference has no enclosing row to read")
++        })?;
++        row.get(index).cloned().ok_or_else(|| {
++            Error::execution(format!("outer column index {} out of range", index))
++        })
++    }
++
++    /// Run a subquery, with `row` standing as the enclosing row for anything
++    /// correlated inside it.
++    fn run(&self, plan: &LogicalPlan, row: &Row) -> Result<Vec<Row>> {
++        let catalog = self
++            .catalog
++            .ok_or_else(|| Error::execution("a subquery cannot be evaluated without a catalog"))?;
++        crate::exec::Executor::with_outer(catalog, row).execute(plan)
++    }
++}
++
++/// Evaluate `expr` against `row`, with nothing else available.
+ pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
++    eval_in(expr, row, &EvalContext::detached())
++}
++
++/// Evaluate `expr` against `row` within `ctx`.
++pub fn eval_in(expr: &BoundExpr, row: &Row, ctx: &EvalContext<'_>) -> Result<Value> {
+     match expr {
+         BoundExpr::Literal(v) => Ok(v.clone()),
+ 
+@@ -22,10 +78,10 @@ pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
+ 
+         BoundExpr::Binary {
+             op, left, right, ..
+-        } => eval_binary(*op, left, right, row),
++        } => eval_binary(*op, left, right, row, ctx),
+ 
+         BoundExpr::Unary { op, expr, .. } => {
+-            let v = eval(expr, row)?;
++            let v = eval_in(expr, row, ctx)?;
+             match op {
+                 UnaryOp::Negate => v.neg(),
+                 UnaryOp::Not => Ok(three_valued(not_tv(as_tv_bool(&v)?))),
+@@ -33,12 +89,12 @@ pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
+         }
+ 
+         BoundExpr::Cast { expr, data_type } => {
+-            let v = eval(expr, row)?;
++            let v = eval_in(expr, row, ctx)?;
+             v.cast(*data_type)
+         }
+ 
+         BoundExpr::IsNull { expr, negated } => {
+-            let v = eval(expr, row)?;
++            let v = eval_in(expr, row, ctx)?;
+             let is_null = v.is_null();
+             Ok(Value::Boolean(if *negated { !is_null } else { is_null }))
+         }
+@@ -49,12 +105,12 @@ pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
+             high,
+             negated,
+         } => {
+-            let v = eval(expr, row)?;
++            let v = eval_in(expr, row, ctx)?;
+             if v.is_null() {
+                 return Ok(Value::Null);
+             }
+-            let lo = eval(low, row)?;
+-            let hi = eval(high, row)?;
++            let lo = eval_in(low, row, ctx)?;
++            let hi = eval_in(high, row, ctx)?;
+             let ge = v.compare(&lo)?.map(|o| o != Ordering::Less);
+             let le = v.compare(&hi)?.map(|o| o != Ordering::Greater);
+             let within = and_tv(ge, le);
+@@ -66,14 +122,14 @@ pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
+             list,
+             negated,
+         } => {
+-            let v = eval(expr, row)?;
++            let v = eval_in(expr, row, ctx)?;
+             if v.is_null() {
+                 return Ok(Value::Null);
+             }
+             let mut saw_null = false;
+             let mut found = false;
+             for item in list {
+-                let iv = eval(item, row)?;
++                let iv = eval_in(item, row, ctx)?;
+                 match v.logical_eq(&iv)? {
+                     Some(true) => {
+                         found = true;
+@@ -98,8 +154,8 @@ pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
+             pattern,
+             negated,
+         } => {
+-            let v = eval(expr, row)?;
+-            let p = eval(pattern, row)?;
++            let v = eval_in(expr, row, ctx)?;
++            let p = eval_in(pattern, row, ctx)?;
+             if v.is_null() || p.is_null() {
+                 return Ok(Value::Null);
+             }
+@@ -112,23 +168,91 @@ pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
+             when_then,
+             else_result,
+             data_type,
+-        } => eval_case(operand, when_then, else_result, *data_type, row),
++        } => eval_case(operand, when_then, else_result, *data_type, row, ctx),
+ 
+         BoundExpr::Scalar { func, args, .. } => {
+             let mut values = Vec::with_capacity(args.len());
+             for a in args {
+-                values.push(eval(a, row)?);
++                values.push(eval_in(a, row, ctx)?);
+             }
+             func.eval(&values)
+         }
++
++        BoundExpr::OuterColumn { index, .. } => ctx.outer_value(*index),
++
++        // One row gives its single column; no row is a NULL, since the query
++        // asked a question the data does not answer. More than one row has no
++        // value to stand for, so it is an error rather than a choice.
++        BoundExpr::ScalarSubquery { plan, .. } => {
++            let rows = ctx.run(plan, row)?;
++            match rows.len() {
++                0 => Ok(Value::Null),
++                1 => Ok(rows[0].get(0).cloned().unwrap_or(Value::Null)),
++                n => Err(Error::execution(format!(
++                    "a subquery used as a value returned {} rows",
++                    n
++                ))),
++            }
++        }
++
++        // EXISTS asks whether anything came back, so it is true or false and
++        // never unknown, whatever the rows hold.
++        BoundExpr::Exists { plan } => {
++            let rows = ctx.run(plan, row)?;
++            Ok(Value::Boolean(rows.iter().any(|r| {
++                !r.get(0).map(|v| v.is_null()).unwrap_or(true)
++            })))
++        }
++
++        BoundExpr::InSubquery {
++            expr,
++            plan,
++            negated,
++        } => {
++            let v = eval_in(expr, row, ctx)?;
++            if v.is_null() {
++                return Ok(Value::Null);
++            }
++            let rows = ctx.run(plan, row)?;
++            let mut saw_null = false;
++            let mut found = false;
++            for candidate in &rows {
++                let cv = candidate.get(0).cloned().unwrap_or(Value::Null);
++                match v.logical_eq(&cv)? {
++                    Some(true) => {
++                        found = true;
++                        break;
++                    }
++                    Some(false) => {}
++                    None => saw_null = true,
++                }
++            }
++            // A row that did not match but could not be compared leaves the
++            // answer unknown, which is what keeps NOT IN from ever being true
++            // against a column holding a NULL.
++            let result = if found {
++                Some(true)
++            } else if saw_null {
++                None
++            } else {
++                Some(false)
++            };
++            Ok(three_valued(if *negated { not_tv(result) } else { result }))
++        }
+     }
+ }
+ 
+-fn eval_binary(op: BinaryOp, left: &BoundExpr, right: &BoundExpr, row: &Row) -> Result<Value> {
++fn eval_binary(
++    op: BinaryOp,
++    left: &BoundExpr,
++    right: &BoundExpr,
++    row: &Row,
++    ctx: &EvalContext<'_>,
++) -> Result<Value> {
+     // AND / OR use short-circuit-free three-valued logic (both sides evaluated).
+     if op.is_logical() {
+-        let l = as_tv_bool(&eval(left, row)?)?;
+-        let r = as_tv_bool(&eval(right, row)?)?;
++        let l = as_tv_bool(&eval_in(left, row, ctx)?)?;
++        let r = as_tv_bool(&eval_in(right, row, ctx)?)?;
+         let result = match op {
+             BinaryOp::And => and_tv(l, r),
+             BinaryOp::Or => or_tv(l, r),
+@@ -137,8 +261,8 @@ fn eval_binary(op: BinaryOp, left: &BoundExpr, right: &BoundExpr, row: &Row) ->
+         return Ok(three_valued(result));
+     }
+ 
+-    let l = eval(left, row)?;
+-    let r = eval(right, row)?;
++    let l = eval_in(left, row, ctx)?;
++    let r = eval_in(right, row, ctx)?;
+     if op.is_concat() {
+         if l.is_null() || r.is_null() {
+             return Ok(Value::Null);
+@@ -176,13 +300,14 @@ fn eval_case(
+     else_result: &Option<Box<BoundExpr>>,
+     data_type: DataType,
+     row: &Row,
++    ctx: &EvalContext<'_>,
+ ) -> Result<Value> {
+     let operand_val = match operand {
+-        Some(o) => Some(eval(o, row)?),
++        Some(o) => Some(eval_in(o, row, ctx)?),
+         None => None,
+     };
+     for (cond, result) in when_then {
+-        let cond_val = eval(cond, row)?;
++        let cond_val = eval_in(cond, row, ctx)?;
+         let hit = match &operand_val {
+             // Simple CASE: operand = when-value (NULL never matches).
+             Some(op) => matches!(op.logical_eq(&cond_val)?, Some(true)),
+@@ -190,11 +315,11 @@ fn eval_case(
+             None => cond_val.is_truthy(),
+         };
+         if hit {
+-            return coerce_case(eval(result, row)?, data_type);
++            return coerce_case(eval_in(result, row, ctx)?, data_type);
+         }
+     }
+     match else_result {
+-        Some(e) => coerce_case(eval(e, row)?, data_type),
++        Some(e) => coerce_case(eval_in(e, row, ctx)?, data_type),
+         None => Ok(Value::Null),
+     }
+ }
+diff --git a/src/exec/executor.rs b/src/exec/executor.rs
+index f9d3cfc..fee089d 100644
+--- a/src/exec/executor.rs
++++ b/src/exec/executor.rs
+@@ -5,7 +5,7 @@
+ //! deduplication preserve first-seen input order, and sorting is stable.
+ 
+ use crate::error::Result;
+-use crate::exec::eval::eval;
++use crate::exec::eval::{eval_in, EvalContext};
+ use crate::exec::{agg_exec, join_exec, sort_exec};
+ use crate::planner::logical::LogicalPlan;
+ use crate::storage::{Catalog, Row};
+@@ -14,11 +14,31 @@
+ /// Executes plans against a catalog.
+ pub struct Executor<'a> {
+     catalog: &'a Catalog,
++    /// The row of the enclosing query, present while a subquery runs. Every
++    /// expression this executor evaluates can read it, which is what makes a
++    /// correlated subquery answer per outer row rather than once.
++    outer: Option<&'a Row>,
+ }
+ 
+ impl<'a> Executor<'a> {
+     pub fn new(catalog: &'a Catalog) -> Executor<'a> {
+-        Executor { catalog }
++        Executor {
++            catalog,
++            outer: None,
++        }
++    }
++
++    /// An executor for a subquery running underneath `outer`.
++    pub fn with_outer(catalog: &'a Catalog, outer: &'a Row) -> Executor<'a> {
++        Executor {
++            catalog,
++            outer: Some(outer),
++        }
++    }
++
++    /// The context every expression in this plan is evaluated within.
++    fn context(&self) -> EvalContext<'_> {
++        EvalContext::new(self.catalog, self.outer)
+     }
+ 
+     /// Execute `plan`, returning its output rows.
+@@ -34,8 +54,9 @@ pub fn execute(&self, plan: &LogicalPlan) -> Result<Vec<Row>> {
+             LogicalPlan::Filter { input, predicate } => {
+                 let rows = self.execute(input)?;
+                 let mut out = Vec::new();
++                let ctx = self.context();
+                 for row in rows {
+-                    if eval(predicate, &row)?.is_truthy() {
++                    if eval_in(predicate, &row, &ctx)?.is_truthy() {
+                         out.push(row);
+                     }
+                 }
+@@ -47,10 +68,11 @@ pub fn execute(&self, plan: &LogicalPlan) -> Result<Vec<Row>> {
+             } => {
+                 let rows = self.execute(input)?;
+                 let mut out = Vec::with_capacity(rows.len());
++                let ctx = self.context();
+                 for row in rows {
+                     let mut values = Vec::with_capacity(expressions.len());
+                     for e in expressions {
+-                        values.push(eval(e, &row)?);
++                        values.push(eval_in(e, &row, &ctx)?);
+                     }
+                     out.push(Row::new(values));
+                 }
+@@ -64,12 +86,12 @@ pub fn execute(&self, plan: &LogicalPlan) -> Result<Vec<Row>> {
+                 ..
+             } => {
+                 let rows = self.execute(input)?;
+-                agg_exec::execute_aggregate(rows, group_expr, aggregates)
++                agg_exec::execute_aggregate(rows, group_expr, aggregates, &self.context())
+             }
+ 
+             LogicalPlan::Sort { input, keys } => {
+                 let rows = self.execute(input)?;
+-                sort_exec::execute_sort(rows, keys)
++                sort_exec::execute_sort(rows, keys, &self.context())
+             }
+ 
+             LogicalPlan::Limit {
+@@ -96,7 +118,14 @@ pub fn execute(&self, plan: &LogicalPlan) -> Result<Vec<Row>> {
+                 let left_rows = self.execute(left)?;
+                 let right_rows = self.execute(right)?;
+                 let right_width = right.schema().len();
+-                join_exec::execute_join(left_rows, right_rows, on, *join_type, right_width)
++                join_exec::execute_join(
++                    left_rows,
++                    right_rows,
++                    on,
++                    *join_type,
++                    right_width,
++                    &self.context(),
++                )
+             }
+ 
+             LogicalPlan::Distinct { input } => {
+diff --git a/src/exec/join_exec.rs b/src/exec/join_exec.rs
+index 92d990b..2c7cac3 100644
+--- a/src/exec/join_exec.rs
++++ b/src/exec/join_exec.rs
+@@ -2,7 +2,7 @@
+ 
+ use crate::ast::statement::JoinType;
+ use crate::error::Result;
+-use crate::exec::eval::eval;
++use crate::exec::eval::{eval_in, EvalContext};
+ use crate::planner::bound::BoundExpr;
+ use crate::storage::Row;
+ use crate::types::Value;
+@@ -18,6 +18,7 @@ pub(crate) fn execute_join(
+     on: &BoundExpr,
+     join_type: JoinType,
+     right_width: usize,
++    ctx: &EvalContext<'_>,
+ ) -> Result<Vec<Row>> {
+     let mut out = Vec::new();
+     let null_right = Row::new(vec![Value::Null; right_width]);
+@@ -25,7 +26,7 @@ pub(crate) fn execute_join(
+         let mut matched = false;
+         for r in &right_rows {
+             let combined = l.concat(r);
+-            if eval(on, &combined)?.is_truthy() {
++            if eval_in(on, &combined, ctx)?.is_truthy() {
+                 matched = true;
+                 out.push(combined);
+             }
+diff --git a/src/exec/sort_exec.rs b/src/exec/sort_exec.rs
+index 615f6b4..0138df8 100644
+--- a/src/exec/sort_exec.rs
++++ b/src/exec/sort_exec.rs
+@@ -4,7 +4,7 @@
+ 
+ use crate::ast::statement::SortDirection;
+ use crate::error::Result;
+-use crate::exec::eval::eval;
++use crate::exec::eval::{eval_in, EvalContext};
+ use crate::planner::logical::SortKey;
+ use crate::storage::Row;
+ use crate::types::Value;
+@@ -15,13 +15,17 @@
+ /// placement is governed solely by each key's `nulls_first` flag and is **not**
+ /// affected by `ASC`/`DESC`; only the ordering of non-null values is reversed
+ /// for a descending key.
+-pub(crate) fn execute_sort(rows: Vec<Row>, keys: &[SortKey]) -> Result<Vec<Row>> {
++pub(crate) fn execute_sort(
++    rows: Vec<Row>,
++    keys: &[SortKey],
++    ctx: &EvalContext<'_>,
++) -> Result<Vec<Row>> {
+     // Precompute each row's sort key values once.
+     let mut keyed: Vec<(Vec<Value>, Row)> = Vec::with_capacity(rows.len());
+     for row in rows {
+         let mut kvs = Vec::with_capacity(keys.len());
+         for k in keys {
+-            kvs.push(eval(&k.expr, &row)?);
++            kvs.push(eval_in(&k.expr, &row, ctx)?);
+         }
+         keyed.push((kvs, row));
+     }
+diff --git a/src/optimizer/predicate_pushdown.rs b/src/optimizer/predicate_pushdown.rs
+index 933ffb4..28f07bc 100644
+--- a/src/optimizer/predicate_pushdown.rs
++++ b/src/optimizer/predicate_pushdown.rs
+@@ -17,6 +17,11 @@
+ /// pushed to the right input **only for inner joins** — doing so for a left
+ /// join would incorrectly discard null-padded rows. Anything that spans both
+ /// sides (or is a constant) stays as a residual filter above the join.
++///
++/// A conjunct that reads a column of the surrounding query never moves. Its
++/// outer references address the row this filter sees, and an input of the join
++/// produces a different row, so relocating it would silently read the wrong
++/// column rather than fail.
+ pub struct PredicatePushdown;
+ 
+ impl OptimizerRule for PredicatePushdown {
+@@ -48,6 +53,10 @@ fn pushdown(plan: LogicalPlan) -> Result<LogicalPlan> {
+             let mut residual = Vec::new();
+ 
+             for conjunct in split_conjuncts(predicate) {
++                if conjunct.references_outer() {
++                    residual.push(conjunct);
++                    continue;
++                }
+                 match column_range(&conjunct) {
+                     Some((_, max)) if max < left_width => to_left.push(conjunct),
+                     Some((min, _)) if min >= left_width && matches!(join_type, JoinType::Inner) => {
+diff --git a/src/parser/parser.rs b/src/parser/parser.rs
+index b411018..971cd81 100644
+--- a/src/parser/parser.rs
++++ b/src/parser/parser.rs
+@@ -554,6 +554,17 @@ fn parse_keyword_postfix(&mut self, lhs: Expr) -> Result<Expr> {
+         }
+         if self.eat_keyword(Keyword::In) {
+             self.expect(&TokenKind::LParen)?;
++            // `IN (SELECT ...)` reads the rows of a query; anything else is the
++            // value list that was already supported.
++            if self.at_keyword(Keyword::Select) {
++                let query = self.parse_select()?;
++                self.expect(&TokenKind::RParen)?;
++                return Ok(Expr::InSubquery {
++                    expr: Box::new(lhs),
++                    query: Box::new(query),
++                    negated,
++                });
++            }
+             let mut list = vec![self.parse_expr(0)?];
+             while self.eat(&TokenKind::Comma) {
+                 list.push(self.parse_expr(0)?);
+@@ -596,6 +607,16 @@ fn parse_prefix(&mut self) -> Result<Expr> {
+                 let expr = self.parse_expr(3)?;
+                 Ok(Expr::unary(UnaryOp::Not, expr))
+             }
++            TokenKind::Word {
++                keyword: Some(Keyword::Exists),
++                ..
++            } => {
++                self.advance();
++                self.expect(&TokenKind::LParen)?;
++                let query = self.parse_select()?;
++                self.expect(&TokenKind::RParen)?;
++                Ok(Expr::Exists(Box::new(query)))
++            }
+             _ => self.parse_primary(),
+         }
+     }
+@@ -617,6 +638,13 @@ fn parse_primary(&mut self) -> Result<Expr> {
+             }
+             TokenKind::LParen => {
+                 self.advance();
++                // `(SELECT ...)` in a value position is a subquery, not a
++                // parenthesized expression.
++                if self.at_keyword(Keyword::Select) {
++                    let query = self.parse_select()?;
++                    self.expect(&TokenKind::RParen)?;
++                    return Ok(Expr::ScalarSubquery(Box::new(query)));
++                }
+                 let expr = self.parse_expr(0)?;
+                 self.expect(&TokenKind::RParen)?;
+                 Ok(expr)
+diff --git a/src/planner/binder.rs b/src/planner/binder.rs
+index a9bcc4d..7e4456c 100644
+--- a/src/planner/binder.rs
++++ b/src/planner/binder.rs
+@@ -24,6 +24,10 @@
+ /// Binds AST statements against a catalog snapshot.
+ pub struct Binder<'a> {
+     catalog: &'a Catalog,
++    /// Columns of the query that encloses the one being bound, present only
++    /// while binding a subquery. A name that the subquery's own relations do
++    /// not offer is looked up here, one level and no further.
++    outer: Option<&'a Scope>,
+ }
+ 
+ /// Aggregate-binding context threaded through the expression core while binding
+@@ -35,11 +39,30 @@ struct AggCtx<'a> {
+     aggregates: &'a mut Vec<BoundAggregate>,
+     /// Number of leading group columns in the aggregate output row.
+     group_count: usize,
++    /// What a subquery written here may read of this query.
++    ///
++    /// Expressions in a grouped projection are evaluated against the aggregate
++    /// operator's output row, not against its input, so an outer reference has
++    /// to address that row. Only the grouping columns are in it by name, which
++    /// is the same restriction an ordinary column reference already lives
++    /// under.
++    grouped_scope: Scope,
+ }
+ 
+ impl<'a> Binder<'a> {
+     pub fn new(catalog: &'a Catalog) -> Binder<'a> {
+-        Binder { catalog }
++        Binder {
++            catalog,
++            outer: None,
++        }
++    }
++
++    /// A binder for a subquery, able to see `outer`'s columns.
++    fn nested(catalog: &'a Catalog, outer: &'a Scope) -> Binder<'a> {
++        Binder {
++            catalog,
++            outer: Some(outer),
++        }
+     }
+ 
+     /// Bind a `SELECT` into a logical plan.
+@@ -121,6 +144,16 @@ pub fn bind_scalar(&self, expr: &Expr, scope: &Scope) -> Result<BoundExpr> {
+         self.bind_core(expr, scope, &mut None)
+     }
+ 
++    /// Bind the `SELECT` inside a subquery, with `enclosing` visible to it.
++    ///
++    /// The subquery is a query in its own right: its aggregates are its own,
++    /// its `ORDER BY` is its own, and its column indices address its own rows.
++    /// Only unresolved names reach back out, and only by one level, because the
++    /// binder built here offers `enclosing` and nothing further.
++    fn bind_subquery(&self, select: &SelectStmt, enclosing: &Scope) -> Result<LogicalPlan> {
++        Binder::nested(self.catalog, enclosing).bind_select(select)
++    }
++
+     // ---- FROM ----
+ 
+     fn bind_from(&self, from: &FromClause) -> Result<(LogicalPlan, Scope)> {
+@@ -213,11 +246,22 @@ fn bind_aggregate(
+         let mut proj_names = Vec::new();
+         let mut having_bound = None;
+ 
++        // The grouping columns, in the positions they take in the aggregate
++        // output row. Built before the projection is bound, because a subquery
++        // in that projection reads this and nothing else.
++        let group_fields: Vec<Field> = group_ast
++            .iter()
++            .enumerate()
++            .map(|(i, g)| Field::new(derive_name(g), group_expr[i].data_type()))
++            .collect();
++        let grouped_scope = Scope::from_output(&Schema::new_unchecked(group_fields));
++
+         {
+             let mut ctx = Some(AggCtx {
+                 group_exprs: &group_ast,
+                 aggregates: &mut aggregates,
+                 group_count,
++                grouped_scope,
+             });
+ 
+             for item in &select.projection {
+@@ -390,8 +434,65 @@ fn bind_core(&self, expr: &Expr, scope: &Scope, ctx: &mut Option<AggCtx>) -> Res
+                         cref.display_name()
+                     )));
+                 }
+-                let (index, data_type) = scope.resolve(cref)?;
+-                Ok(BoundExpr::Column { index, data_type })
++                match scope.resolve(cref) {
++                    Ok((index, data_type)) => Ok(BoundExpr::Column { index, data_type }),
++                    // Inside a subquery, a name its own relations do not offer
++                    // may belong to the query around it. That reference reads
++                    // the enclosing row, so it binds to a different variant.
++                    Err(err) => match self.outer {
++                        Some(outer) => {
++                            let (index, data_type) = outer.resolve(cref).map_err(|_| err)?;
++                            Ok(BoundExpr::OuterColumn { index, data_type })
++                        }
++                        None => Err(err),
++                    },
++                }
++            }
++
++            Expr::ScalarSubquery(query) => {
++                let plan = self.bind_subquery(query, outer_scope(scope, ctx))?;
++                let schema = plan.schema();
++                if schema.len() != 1 {
++                    return Err(Error::binder(format!(
++                        "a subquery used as a value must return one column, this one returns {}",
++                        schema.len()
++                    )));
++                }
++                let data_type = schema.type_at(0).unwrap_or(DataType::Null);
++                Ok(BoundExpr::ScalarSubquery {
++                    plan: Box::new(plan),
++                    data_type,
++                })
++            }
++
++            Expr::Exists(query) => {
++                let plan = self.bind_subquery(query, outer_scope(scope, ctx))?;
++                Ok(BoundExpr::Exists {
++                    plan: Box::new(plan),
++                })
++            }
++
++            Expr::InSubquery {
++                expr,
++                query,
++                negated,
++            } => {
++                let left = self.bind_core(expr, scope, ctx)?;
++                let plan = self.bind_subquery(query, outer_scope(scope, ctx))?;
++                let schema = plan.schema();
++                if schema.len() != 1 {
++                    return Err(Error::binder(format!(
++                        "IN requires a subquery of one column, this one returns {}",
++                        schema.len()
++                    )));
++                }
++                let right = schema.type_at(0).unwrap_or(DataType::Null);
++                check_comparable("IN", left.data_type(), right)?;
++                Ok(BoundExpr::InSubquery {
++                    expr: Box::new(left),
++                    plan: Box::new(plan),
++                    negated: *negated,
++                })
+             }
+ 
+             Expr::Function {
+@@ -641,6 +742,18 @@ fn bind_case(
+     }
+ }
+ 
++/// Which columns of the enclosing query a subquery written here may read.
++///
++/// Outside a grouped query that is the query's own row. Inside one the
++/// projection is evaluated over the aggregate's output, so the grouping columns
++/// are what exists to be read.
++fn outer_scope<'s>(scope: &'s Scope, ctx: &'s Option<AggCtx<'_>>) -> &'s Scope {
++    match ctx {
++        Some(c) => &c.grouped_scope,
++        None => scope,
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/src/planner/bound.rs b/src/planner/bound.rs
+index 68dcc1c..980880e 100644
+--- a/src/planner/bound.rs
++++ b/src/planner/bound.rs
+@@ -9,6 +9,7 @@
+ use crate::ast::operators::{BinaryOp, UnaryOp};
+ use crate::error::Result;
+ use crate::functions::{AggregateFn, ScalarFn};
++use crate::planner::logical::{plan_expressions, LogicalPlan};
+ use crate::types::{DataType, Value};
+ 
+ /// A type-checked expression over a positional input row.
+@@ -66,6 +67,29 @@ pub enum BoundExpr {
+         args: Vec<BoundExpr>,
+         data_type: DataType,
+     },
++    /// A column of the row of the *enclosing* query, read from inside a
++    /// correlated subquery. The index addresses that row, not the row this
++    /// expression is otherwise evaluated against, which is why it is a variant
++    /// of its own rather than a [`BoundExpr::Column`].
++    OuterColumn {
++        index: usize,
++        data_type: DataType,
++    },
++    /// A subquery read for one value.
++    ScalarSubquery {
++        plan: Box<LogicalPlan>,
++        data_type: DataType,
++    },
++    /// `EXISTS (subquery)`: whether the subquery produced any row.
++    Exists {
++        plan: Box<LogicalPlan>,
++    },
++    /// `expr [NOT] IN (subquery)`, over the subquery's single column.
++    InSubquery {
++        expr: Box<BoundExpr>,
++        plan: Box<LogicalPlan>,
++        negated: bool,
++    },
+ }
+ 
+ impl BoundExpr {
+@@ -83,6 +107,10 @@ pub fn data_type(&self) -> DataType {
+             BoundExpr::Like { .. } => DataType::Boolean,
+             BoundExpr::Case { data_type, .. } => *data_type,
+             BoundExpr::Scalar { data_type, .. } => *data_type,
++            BoundExpr::OuterColumn { data_type, .. } => *data_type,
++            BoundExpr::ScalarSubquery { data_type, .. } => *data_type,
++            BoundExpr::Exists { .. } => DataType::Boolean,
++            BoundExpr::InSubquery { .. } => DataType::Boolean,
+         }
+     }
+ 
+@@ -91,6 +119,13 @@ pub fn data_type(&self) -> DataType {
+     pub fn is_constant(&self) -> bool {
+         match self {
+             BoundExpr::Column { .. } => false,
++            // Running a query is not folding. A subquery reads tables, and an
++            // outer reference reads a row that does not exist at plan time, so
++            // neither is ever a constant however few columns it mentions.
++            BoundExpr::OuterColumn { .. }
++            | BoundExpr::ScalarSubquery { .. }
++            | BoundExpr::Exists { .. }
++            | BoundExpr::InSubquery { .. } => false,
+             BoundExpr::Literal(_) => true,
+             _ => {
+                 let mut constant = true;
+@@ -154,9 +189,56 @@ pub fn for_each_child(&self, f: &mut dyn FnMut(&BoundExpr)) {
+                     f(a);
+                 }
+             }
++            // A subquery's own expressions belong to its plan, which is a
++            // relation rather than a child expression, so traversal stops here.
++            BoundExpr::OuterColumn { .. }
++            | BoundExpr::ScalarSubquery { .. }
++            | BoundExpr::Exists { .. } => {}
++            BoundExpr::InSubquery { expr, .. } => f(expr),
+         }
+     }
+ 
++    /// Whether this expression, or any subquery inside it, reads a column of an
++    /// enclosing query.
++    ///
++    /// Correlation is reported at any depth. A rule that moves an expression to
++    /// another operator changes which row an outer reference would read, and
++    /// treating a deeply correlated subquery as movable would be wrong, so the
++    /// conservative answer is the useful one.
++    pub fn references_outer(&self) -> bool {
++        let mut found = false;
++        self.walk(&mut |e| match e {
++            BoundExpr::OuterColumn { .. } => found = true,
++            BoundExpr::ScalarSubquery { plan, .. }
++            | BoundExpr::Exists { plan }
++            | BoundExpr::InSubquery { plan, .. } => {
++                plan_expressions(plan, &mut |inner| {
++                    if inner.references_outer() {
++                        found = true;
++                    }
++                });
++            }
++            _ => {}
++        });
++        found
++    }
++
++    /// Whether this expression contains a subquery.
++    pub fn contains_subquery(&self) -> bool {
++        let mut found = false;
++        self.walk(&mut |e| {
++            if matches!(
++                e,
++                BoundExpr::ScalarSubquery { .. }
++                    | BoundExpr::Exists { .. }
++                    | BoundExpr::InSubquery { .. }
++            ) {
++                found = true;
++            }
++        });
++        found
++    }
++
+     /// The maximum column index referenced by this expression, plus one — i.e.
+     /// the minimum input width the expression requires. Returns 0 for a
+     /// constant expression.
+@@ -291,6 +373,20 @@ pub fn map_children(
+                     data_type,
+                 }
+             }
++            // A subquery plan is rebuilt by plan rewrites, not by expression
++            // rewrites, so these nodes hand back only their own operands.
++            BoundExpr::OuterColumn { .. }
++            | BoundExpr::ScalarSubquery { .. }
++            | BoundExpr::Exists { .. } => self,
++            BoundExpr::InSubquery {
++                expr,
++                plan,
++                negated,
++            } => BoundExpr::InSubquery {
++                expr: Box::new(f(*expr)?),
++                plan,
++                negated,
++            },
+         };
+         Ok(mapped)
+     }
+@@ -343,4 +439,45 @@ fn required_width_tracks_max_index() {
+         };
+         assert_eq!(e.required_width(), 4);
+     }
++
++    #[test]
++    fn a_subquery_is_never_constant() {
++        let plan = LogicalPlan::EmptyRow;
++        let e = BoundExpr::Exists {
++            plan: Box::new(plan),
++        };
++        assert!(!e.is_constant());
++        assert!(e.contains_subquery());
++        assert!(!e.references_outer());
++    }
++
++    #[test]
++    fn an_outer_reference_is_not_a_column_of_this_row() {
++        let e = BoundExpr::OuterColumn {
++            index: 2,
++            data_type: DataType::Integer,
++        };
++        // required_width counts the columns this row must have; an outer
++        // reference reads a different row, so it demands nothing here.
++        assert_eq!(e.required_width(), 0);
++        assert!(!e.is_constant());
++        assert!(e.references_outer());
++    }
++
++    #[test]
++    fn correlation_is_seen_through_a_subquery_plan() {
++        let inner = LogicalPlan::Filter {
++            input: Box::new(LogicalPlan::EmptyRow),
++            predicate: BoundExpr::OuterColumn {
++                index: 0,
++                data_type: DataType::Integer,
++            },
++        };
++        let e = BoundExpr::InSubquery {
++            expr: Box::new(BoundExpr::Literal(Value::Integer(1))),
++            plan: Box::new(inner),
++            negated: false,
++        };
++        assert!(e.references_outer());
++    }
+ }
+diff --git a/src/planner/logical.rs b/src/planner/logical.rs
+index faf0a95..1e2d27a 100644
+--- a/src/planner/logical.rs
++++ b/src/planner/logical.rs
+@@ -68,6 +68,70 @@ pub enum LogicalPlan {
+     Distinct { input: Box<LogicalPlan> },
+ }
+ 
++/// Visit every [`BoundExpr`] a plan holds, this node first, then its children.
++///
++/// Reading a plan's expressions without rebuilding it is what lets a rule ask
++/// whether an expression is safe to move before it moves anything.
++pub fn plan_expressions(plan: &LogicalPlan, f: &mut dyn FnMut(&BoundExpr)) {
++    node_expressions(plan, f);
++    for child in plan.children() {
++        plan_expressions(child, f);
++    }
++}
++
++/// Visit the [`BoundExpr`]s this node holds itself, without recursing into its
++/// children. What a node evaluates is what it has to account for in `EXPLAIN`.
++pub fn node_expressions(plan: &LogicalPlan, f: &mut dyn FnMut(&BoundExpr)) {
++    match plan {
++        LogicalPlan::EmptyRow | LogicalPlan::Scan { .. } => {}
++        LogicalPlan::Filter { predicate, .. } => f(predicate),
++        LogicalPlan::Project { expressions, .. } => {
++            for e in expressions {
++                f(e);
++            }
++        }
++        LogicalPlan::Aggregate {
++            group_expr,
++            aggregates,
++            ..
++        } => {
++            for e in group_expr {
++                f(e);
++            }
++            for agg in aggregates {
++                if let Some(arg) = &agg.arg {
++                    f(arg);
++                }
++            }
++        }
++        LogicalPlan::Sort { keys, .. } => {
++            for k in keys {
++                f(&k.expr);
++            }
++        }
++        LogicalPlan::Limit { .. } | LogicalPlan::Distinct { .. } => {}
++        LogicalPlan::Join { on, .. } => f(on),
++    }
++}
++
++/// Render the subquery plans an expression carries, outermost first, each under
++/// its own `Subquery` line at `depth`.
++fn render_subqueries(expr: &BoundExpr, depth: usize, out: &mut String) {
++    match expr {
++        BoundExpr::ScalarSubquery { plan, .. }
++        | BoundExpr::Exists { plan }
++        | BoundExpr::InSubquery { plan, .. } => {
++            for _ in 0..depth {
++                out.push_str("  ");
++            }
++            out.push_str("Subquery\n");
++            plan.explain_into(out, depth + 1);
++        }
++        _ => {}
++    }
++    expr.for_each_child(&mut |child| render_subqueries(child, depth, out));
++}
++
+ fn empty_schema() -> &'static Schema {
+     static EMPTY: OnceLock<Schema> = OnceLock::new();
+     EMPTY.get_or_init(Schema::empty)
+@@ -166,6 +230,11 @@ fn explain_into(&self, out: &mut String, depth: usize) {
+         }
+         out.push_str(&self.detail());
+         out.push('\n');
++        // A subquery is a plan this operator runs, so it belongs under the
++        // operator that runs it, ahead of the inputs that operator reads.
++        let mut nested = String::new();
++        node_expressions(self, &mut |expr| render_subqueries(expr, depth + 1, &mut nested));
++        out.push_str(&nested);
+         for child in self.children() {
+             child.explain_into(out, depth + 1);
+         }

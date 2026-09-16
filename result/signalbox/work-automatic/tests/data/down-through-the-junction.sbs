@@ -1,0 +1,14 @@
+# A down train runs from the west boundary through to the branch.
+
+scenario "down train to the branch" {
+    step 2
+    until 400
+}
+
+at 0   train 1A05 on D1 at 60 length 80 speed 20
+at 4   set "K1(M)"
+at 8   set "K3(MB)"
+
+expect train 1A05 on D7
+expect section TA clear
+expect signal K1 shows R

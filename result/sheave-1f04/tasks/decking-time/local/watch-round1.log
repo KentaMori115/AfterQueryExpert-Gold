@@ -1,0 +1,52 @@
+watching XK2or0zB11qNuvT5D4OJ every 120s (Ctrl-C to stop)
+07:37:27 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          running
+    qualityCheck       -
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+07:41:29 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       running
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+07:45:32 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       passed / pass
+    easinessProbe      running
+    difficultyProbe    -
+    failureValidation  -
+07:59:40 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       passed / pass
+    easinessProbe      passed / pass
+    difficultyProbe    running
+    failureValidation  -
+08:17:56 status=Validation Failed
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       passed / pass
+    easinessProbe      passed / pass
+    difficultyProbe    failed / out_of_band_hard
+    failureValidation  -
+== TERMINAL: Validation Failed ==
+   * failedStage=difficulty_probe: The task was solved in 0 of 8 automated attempts, too rarely to verify it sits inside the accepted difficulty range. This usually means the instruction under-specifies the required behavior or the change is too large for one task. Tighten the instruction or reduce the scope and resubmit.
+   * ciChecks finding [warning] instruction.md is 296 words — aim under 250. Long specs tend to enumerate internals the solver should discover; state the required behavior and stop. (instruction.md)
+   * ciChecks finding [warning] 3 of your new test titles appear nearly verbatim as sentences in instruction.md ("is its tubs at so many seconds each", "is the pitch at creep speed and the keps, for a move", "makes one move for every deck after the first"). Write the instruction as a behavioral spec in developer prose — an instruction that restates the test list reads as derived from the tests instead of specifying the task. (instruction.md)
+   * qualityCheck:environment_cleanliness [fail] The runner explicitly documents that the published environment image deletes the tracked package.json and therefore one pre-existing structure test necessarily fails on the base checkout. A baseline with a missing project manifest and an unavoidable existing-suite failure is not a fully sound, green environment.
+   * difficultyProbe: out_of_band_hard (0 of 8 solved)

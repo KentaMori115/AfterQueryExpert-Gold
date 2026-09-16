@@ -1,0 +1,344 @@
+diff --git a/packages/biome-model/src/compile.ts b/packages/biome-model/src/compile.ts
+index 0ef9318..e27104c 100644
+--- a/packages/biome-model/src/compile.ts
++++ b/packages/biome-model/src/compile.ts
+@@ -132,6 +132,9 @@ export function compileCapsule(capsule: Capsule): CompileResult {
+         );
+       }
+     }
++    if (spec.maxIntakePerTick !== undefined && spec.predation.length === 0) {
++      diagnostics.push(diagnostic("BW-PRED-001", "warning", "cap without prey", spec.location));
++    }
+     for (const rule of spec.predation) {
+       if (!species[rule.prey]) {
+         diagnostics.push(
+diff --git a/packages/biome-model/src/decode.ts b/packages/biome-model/src/decode.ts
+index ccf9806..48d5328 100644
+--- a/packages/biome-model/src/decode.ts
++++ b/packages/biome-model/src/decode.ts
+@@ -254,8 +254,23 @@ export function decodeSpecies(
+     if (!prey || !preyStage || per === undefined) {
+       return [];
+     }
+-    return [{ prey, preyStage, perPredatorPerTick: per }];
++    const sat = row === undefined || row["saturation"] === undefined
++      ? undefined
++      : parseQuantity(row["saturation"], scale, "predation.saturation", path, diagnostics);
++    if (sat !== undefined && sat < 0n) {
++      diagnostics.push(diagnostic("BW-ID-002", "error", "negative saturation", sourceLocation(path)));
++      return [];
++    }
++    return [{ prey, preyStage, perPredatorPerTick: per, ...(sat === undefined ? {} : { saturation: sat }) }];
+   });
++  const capRaw = record["maxIntakePerTick"];
++  const cap = capRaw === undefined
++    ? undefined
++    : parseQuantity(capRaw, scale, "maxIntakePerTick", path, diagnostics);
++  if (cap !== undefined && cap < 0n) {
++    diagnostics.push(diagnostic("BW-ID-002", "error", "negative cap", sourceLocation(path)));
++    return undefined;
++  }
+   return {
+     kind: "species",
+     id,
+@@ -267,6 +282,7 @@ export function decodeSpecies(
+     mortality,
+     transitions,
+     predation,
++    ...(cap === undefined ? {} : { maxIntakePerTick: cap }),
+     location: sourceLocation(path),
+   };
+ }
+diff --git a/packages/biome-model/src/records.ts b/packages/biome-model/src/records.ts
+index 7a3bb33..75f5ad1 100644
+--- a/packages/biome-model/src/records.ts
++++ b/packages/biome-model/src/records.ts
+@@ -40,6 +40,7 @@ export type PredationRule = {
+   readonly prey: string;
+   readonly preyStage: string;
+   readonly perPredatorPerTick: Fixed;
++  readonly saturation?: Fixed;
+ };
+ 
+ export type SpeciesRecord = {
+@@ -53,6 +54,7 @@ export type SpeciesRecord = {
+   readonly mortality: Readonly<Record<string, Fixed>>;
+   readonly transitions: readonly StageTransition[];
+   readonly predation: readonly PredationRule[];
++  readonly maxIntakePerTick?: Fixed;
+   readonly location: SourceLocation;
+ };
+ 
+diff --git a/packages/predation-engine/src/consume.ts b/packages/predation-engine/src/consume.ts
+index 0c29574..83b20b7 100644
+--- a/packages/predation-engine/src/consume.ts
++++ b/packages/predation-engine/src/consume.ts
+@@ -1,6 +1,26 @@
+-import type { CompiledBiome } from "@biomeweaver/biome-model";
+-import { clampNonNegative, min, mul, type Fixed } from "@biomeweaver/fixed-point";
+-import type { CohortState } from "@biomeweaver/population-engine";
++import { cohortKey, type CompiledBiome } from "@biomeweaver/biome-model";
++import {
++  assignRemainders,
++  clampNonNegative,
++  mul,
++  roundHalfEven,
++  type Fixed,
++} from "@biomeweaver/fixed-point";
++import { proportionalShares } from "@biomeweaver/fixed-point";
++import { applyCondition, type CohortState } from "@biomeweaver/population-engine";
++
++type Row = {
++  id: string;
++  hunter: string;
++  hunterKey: string;
++  victimKey: string;
++  victim: string;
++  victimStage: string;
++  where: string;
++  label: string;
++  want: Fixed;
++  got: Fixed;
++};
+ 
+ export type PredationResult = {
+   readonly cohorts: readonly CohortState[];
+@@ -12,63 +32,197 @@ export type PredationResult = {
+     readonly quantity: Fixed;
+     readonly rule: string;
+   }[];
++  readonly pressure: readonly {
++    readonly prey: string;
++    readonly stage: string;
++    readonly region: string;
++    readonly asked: Fixed;
++    readonly taken: Fixed;
++  }[];
+ };
+ 
++function split(
++  keys: readonly string[],
++  want: Map<string, Fixed>,
++  pool: Fixed,
++  ranking: readonly string[],
++): Map<string, Fixed> {
++  const out = new Map<string, Fixed>();
++  let total = 0n;
++  for (const key of keys) {
++    total += want.get(key) ?? 0n;
++  }
++  if (total <= pool) {
++    for (const key of keys) {
++      out.set(key, want.get(key) ?? 0n);
++    }
++    return out;
++  }
++  const shares = proportionalShares(
++    keys.map((key) => ({ key, amount: want.get(key) ?? 0n })),
++    pool,
++  );
++  for (const share of assignRemainders(shares.assigned, shares.remainder, ranking)) {
++    out.set(share.key, share.amount);
++  }
++  return out;
++}
++
+ export function applyPredation(
+   model: CompiledBiome,
+   cohorts: readonly CohortState[],
+ ): PredationResult {
+-  const next = cohorts.map((cohort) => ({ ...cohort }));
+-  const removals: Array<{
+-    predator: string;
+-    prey: string;
+-    stage: string;
+-    region: string;
+-    quantity: Fixed;
+-    rule: string;
+-  }> = [];
+-  const predators = [...next].sort(
+-    (left, right) =>
+-      left.species.localeCompare(right.species) ||
+-      left.stage.localeCompare(right.stage) ||
+-      left.region.localeCompare(right.region),
+-  );
+-  for (const predator of predators) {
+-    const spec = model.species[predator.species];
++  const scale = model.precision.scale;
++  const rows: Row[] = [];
++  const pool = new Map<string, Fixed>();
++  const purse = new Map<string, Fixed>();
++
++  for (const hunter of cohorts) {
++    const spec = model.species[hunter.species];
+     if (!spec) {
+       continue;
+     }
++    let hunts = false;
+     for (const rule of spec.predation) {
+-      const preyIndex = next.findIndex(
+-        (cohort) =>
+-          cohort.species === rule.prey &&
+-          cohort.stage === rule.preyStage &&
+-          cohort.region === predator.region,
++      const victim = cohorts.find(
++        (row) =>
++          row.species === rule.prey &&
++          row.stage === rule.preyStage &&
++          row.region === hunter.region,
+       );
+-      if (preyIndex < 0) {
++      if (!victim) {
+         continue;
+       }
+-      const prey = next[preyIndex];
+-      if (!prey) {
++      let want: Fixed;
++      if (rule.saturation === undefined) {
++        want = mul(hunter.count, rule.perPredatorPerTick, scale, model.precision.rounding);
++      } else if (victim.count <= 0n || victim.count + rule.saturation <= 0n) {
++        want = 0n;
++      } else {
++        want = roundHalfEven(
++          hunter.count * rule.perPredatorPerTick * victim.count,
++          scale * (victim.count + rule.saturation),
++        );
++      }
++      if (want <= 0n) {
+         continue;
+       }
+-      const desired = mul(
+-        predator.count,
+-        rule.perPredatorPerTick,
+-        model.precision.scale,
+-        "half-even",
+-      );
+-      const taken = min(desired, prey.count);
+-      next[preyIndex] = { ...prey, count: clampNonNegative(prey.count - taken) };
+-      removals.push({
+-        predator: predator.species,
+-        prey: rule.prey,
+-        stage: rule.preyStage,
+-        region: predator.region,
+-        quantity: taken,
+-        rule: `${predator.species}.predation.${rule.prey}`,
++      hunts = true;
++      const id = `${hunter.species}:${hunter.stage}:${hunter.region}:${rule.prey}:${rule.preyStage}`;
++      rows.push({
++        id,
++        hunter: hunter.species,
++        hunterKey: cohortKey(hunter.species, hunter.stage, hunter.region),
++        victimKey: cohortKey(victim.species, victim.stage, victim.region),
++        victim: rule.prey,
++        victimStage: rule.preyStage,
++        where: hunter.region,
++        label: `${hunter.species}.predation.${rule.prey}`,
++        want,
++        got: 0n,
+       });
++      pool.set(cohortKey(victim.species, victim.stage, victim.region), clampNonNegative(victim.count));
++    }
++    if (hunts && spec.maxIntakePerTick !== undefined) {
++      const limit = mul(hunter.count, spec.maxIntakePerTick, scale, model.precision.rounding);
++      purse.set(cohortKey(hunter.species, hunter.stage, hunter.region), clampNonNegative(limit));
+     }
+   }
+-  return { cohorts: next, removals };
++
++  rows.sort((one, other) => one.id.localeCompare(other.id));
++  const ranking = rows.map((row) => row.id);
++
++  for (let round = 0; round < rows.length + 2; round += 1) {
++    const live = rows.filter(
++      (row) =>
++        row.want > row.got &&
++        (pool.get(row.victimKey) ?? 0n) > 0n &&
++        (purse.has(row.hunterKey) ? (purse.get(row.hunterKey) ?? 0n) > 0n : true),
++    );
++    if (live.length === 0) {
++      break;
++    }
++    const want = new Map<string, Fixed>(live.map((row) => [row.id, row.want - row.got]));
++    const offer = new Map<string, Fixed>();
++    for (const victimKey of [...new Set(live.map((row) => row.victimKey))].sort()) {
++      const keys = live.filter((row) => row.victimKey === victimKey).map((row) => row.id);
++      for (const [key, amount] of split(keys, want, pool.get(victimKey) ?? 0n, ranking)) {
++        offer.set(key, amount);
++      }
++    }
++    for (const hunterKey of [...new Set(live.map((row) => row.hunterKey))].sort()) {
++      if (!purse.has(hunterKey)) {
++        continue;
++      }
++      const keys = live.filter((row) => row.hunterKey === hunterKey).map((row) => row.id);
++      for (const [key, amount] of split(keys, offer, purse.get(hunterKey) ?? 0n, ranking)) {
++        offer.set(key, amount);
++      }
++    }
++    let moved = 0n;
++    for (const row of live) {
++      const amount = offer.get(row.id) ?? 0n;
++      if (amount <= 0n) {
++        continue;
++      }
++      row.got += amount;
++      pool.set(row.victimKey, (pool.get(row.victimKey) ?? 0n) - amount);
++      if (purse.has(row.hunterKey)) {
++        purse.set(row.hunterKey, (purse.get(row.hunterKey) ?? 0n) - amount);
++      }
++      moved += amount;
++    }
++    if (moved === 0n) {
++      break;
++    }
++  }
++
++  const lost = new Map<string, Fixed>();
++  const wantedBy = new Map<string, Fixed>();
++  const hunted = new Map<string, Fixed>();
++  const fed = new Map<string, Fixed>();
++  for (const row of rows) {
++    lost.set(row.victimKey, (lost.get(row.victimKey) ?? 0n) + row.got);
++    wantedBy.set(row.victimKey, (wantedBy.get(row.victimKey) ?? 0n) + row.want);
++    hunted.set(row.hunterKey, (hunted.get(row.hunterKey) ?? 0n) + row.want);
++    fed.set(row.hunterKey, (fed.get(row.hunterKey) ?? 0n) + row.got);
++  }
++
++  const removals = rows
++    .filter((row) => row.got > 0n)
++    .map((row) => ({
++      predator: row.hunter,
++      prey: row.victim,
++      stage: row.victimStage,
++      region: row.where,
++      quantity: row.got,
++      rule: row.label,
++    }));
++
++  const pressure = [...wantedBy.keys()]
++    .sort()
++    .map((victimKey) => {
++      const row = rows.find((entry) => entry.victimKey === victimKey);
++      return {
++        prey: row?.victim ?? "",
++        stage: row?.victimStage ?? "",
++        region: row?.where ?? "",
++        asked: wantedBy.get(victimKey) ?? 0n,
++        taken: lost.get(victimKey) ?? 0n,
++      };
++    });
++
++  const next = cohorts.map((cohort) => {
++    const key = cohortKey(cohort.species, cohort.stage, cohort.region);
++    const asked = hunted.get(key) ?? 0n;
++    const taken = fed.get(key) ?? 0n;
++    const hungry = asked > 0n && taken < asked;
++    const settled = hungry ? applyCondition(cohort, asked, taken, scale) : cohort;
++    const loss = lost.get(key) ?? 0n;
++    return loss === 0n
++      ? { ...settled }
++      : { ...settled, count: clampNonNegative(settled.count - loss) };
++  });
++
++  return { cohorts: next, removals, pressure };
+ }

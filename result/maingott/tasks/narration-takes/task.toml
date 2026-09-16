@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/narration-takes"
+
+[metadata]
+task_id = "narration-takes"
+display_title = "Speak narration scene by scene with shared-speed fitting"
+display_description = "Add VOICE_TAKES=scene so generate-voice speaks each storyboard scene as its own take, checks each against its scene from measured audio, re-speaks all takes at one shared speed on overrun, and lays them onto the storyboard timeline into a full-length track."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/FW49g1Usjm0kvXDz0iXr"
+base_commit_hash = "71f0916fb7e22977aa3c61fc8720e4bd85cc8d7a"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-maingott-reel-generator-fw49g1:v4"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

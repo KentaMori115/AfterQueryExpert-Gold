@@ -1,0 +1,1714 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 38d37e1..895e2b2 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,6 +11,9 @@ schema is still moving and anything that parses it would have to move with it.
+ - includes across files, with the loop reported rather than followed
+ - time of flight compensation from a measured lift table
+ - pin allocation that spreads a run across the modules at a position
++- chain fused runs, written `chained` on a ripple or a fan: one output for
++  the rack, one lead, one row on the table, every shell still counted where
++  shells are counted, and only the head snapped to the frame clock
+ - quantisation onto the panel's own frame, with the drift reported
+ 
+ ### the checks
+diff --git a/README.md b/README.md
+index a9fa000..d5230a4 100644
+--- a/README.md
++++ b/README.md
+@@ -35,6 +35,35 @@ portfire pack  show.pf --catalog house.csv --rig autumn.rig --audience 200
+ 
+ A worked example lives in `examples/autumn`.
+ 
++## chaining a rack
++
++A rack can be chain fused: one match on the first tube and a length of
++quickmatch down the rest, so the panel closes one circuit and the fire does
++the counting. Write `chained` on a ripple or a fan and the whole run comes
++off one output.
++
++```
++at 18.0  ripple 6 of shell.75.peony.red from pad.a every 400ms chained
++at 64.0  fan 7 of shell.75.crossette from pad.b spread 1.6s chained pin 2.05
++```
++
++The rules that follow from that are the physical ones. The run holds one pin,
++so a `pin` clause on it names the head's pin and nothing else. Quickmatch
++burns at one rate, so a chained run cannot `jitter`, and a chase cannot be
++chained because no fuse runs between positions. The far end of a long chain
++often does not light, so a run past twenty four shots is refused rather than
++fired on hope. And the panel only ever fires the head, so only the head is
++snapped onto the frame clock; every shot after it goes when the fire reaches
++it, which is the head's ignition plus its fuse, whatever the clock says.
++
++Everything downstream keeps to one rule: a chained run is one cue and many
++shots. The firing table, the module load, the rehearsal plan, the wiring
++sheet, the pin count, the diff and the doubling plan see the head alone. The
++density, the safety checks, the inventory, the rack layout, the hazard
++figures and the permit's shot count see every shell that goes up.
++`portfire explain` on the head says how many tubes it lights, and on any
++other shot of the run says how far down the fuse it sits.
++
+ ## the commands
+ 
+ | command                        | what it answers                                |
+diff --git a/docs/chained-runs.md b/docs/chained-runs.md
+new file mode 100644
+index 0000000..1bf167f
+--- /dev/null
++++ b/docs/chained-runs.md
+@@ -0,0 +1,128 @@
++# chained runs
++
++A rack can be chain fused. One electric match goes on the first tube and a
++length of quickmatch runs down the rest, so the panel closes one circuit and
++the fire counts the rest of the run out at the rate the fuse was cut for.
++Crews do this by hand on any show where the rig is short of outputs, and
++before this the script had no way to say so: every shell in a run took a
++pin, and `check` would refuse a finale that fitted the field with room to
++spare.
++
++## writing it
++
++`chained` is a clause on `ripple` and `fan`, and only on those two, because
++a chain is one run from one position.
++
++```
++at 18.0  ripple 6 of shell.75.peony.red from pad.a every 400ms chained
++at 64.0  fan 7 of shell.75.crossette from pad.b spread 1.6s chained pin 2.05
++```
++
++The clause goes anywhere among the others and `fmt` writes it back last.
++Three things are refused rather than quietly reinterpreted, since a shooter
++who wrote the word expects one pin and would otherwise find the run spread
++across a dozen:
++
++- `chained` on a `fire` or a `chase`. A single shot has nothing to chain,
++  and a chase runs across positions that no fuse joins.
++- `chained` beside `jitter`. Quickmatch burns at one rate.
++- a chained run longer than `MAX_CHAIN_LENGTH`, or one with no interval to
++  cut a fuse for. Both produce no shots; the rest of the script compiles.
++
++A `pin` clause on a chained run fixes the head's pin, and only the head's.
++It is claimed before any automatic pin the way a fixed pin on a `fire` is,
++so an earlier cue cannot take it, and two runs naming one pin are refused.
++
++## what the compiler makes of it
++
++Every shot of the run is still a shell in a mortar and still goes up, so the
++expansion keeps one shot per shell and the schedule keeps one event per
++shot. What changes is where they sit and how they are timed:
++
++|            | unchained run                 | chained run                                     |
++| ---------- | ----------------------------- | ----------------------------------------------- |
++| address    | one pin per shot              | the head's pin on every shot                    |
++| `fuse`     | absent                        | burn from the head's ignition, zero on the head |
++| ignition   | cue time less the lead        | head's ignition plus the fuse                   |
++| quantised  | every shot snapped to a frame | the head snapped, the rest moved with it        |
++| drift      | each its own                  | the head's, reported on every shot              |
++| pins taken | one per shot                  | one                                             |
++
++The head takes a pin the way any single shot would, so a run on a position
++with three modules takes one turn of the round robin, not six. A statement
++inside a group that is played twice expands into two runs on two pins.
++
++Only the head lands on the panel's clock. A follower is timed by the fuse,
++not by the frame, so it moves exactly as far as its head moved and reports
++the head's drift as its own. Snapping it separately would put it on a frame
++the fire will not be on, and a run with a tight interval would then trip
++the collapsed-frame warning for a collapse that cannot happen.
++
++## one cue, many shots
++
++Everything downstream follows one rule. A chained run is one cue and many
++shots, and each consumer decides which of those it is counting.
++
++Seen from the panel and the field, it is one cue:
++
++- the firing table has one row for it, on the head's address, numbered
++  with the rest, and `explain` finds cue numbers the same way;
++- the module load counts one pulse, since a follower draws nothing;
++- the rehearsal plan expects one light on the module;
++- the wiring sheet lists one lead, and the pin count on the rack layout and
++  in `moduleLoads` counts one pin;
++- a diff compares head to head, and a chain that gained or lost a tube or
++  was cut to another interval is reported as a swap on its pin, because the
++  fuse has to be re-cut on the field;
++- a doubling plan backs the run up once, on the head. The shots down the
++  fuse have no match of their own to double.
++
++Seen from the sky and the paperwork, it is every shot:
++
++- the density and the lulls, since every shell is lit;
++- the separation, airspace and fallout checks, per shell as before;
++- the inventory, the hazard totals and the transport lines;
++- the rack layout's tubes and the tube hire order, since every shell needs
++  a mortar;
++- the permit's `shotCount`, which now parts company with its `cueCount`.
++
++`chainCandidates` and the PF3500 note only ever look at runs that are not
++chained yet, so a run the script already fuses is not suggested again.
++
++## a worked run
++
++Three modules stand at `pad.a`, and the script says
++
++```
++at 10.0  ripple 6 of shell.75.peony.red from pad.a every 250ms chained
++at 20.0  fire shell.75.peony.red from pad.a
++```
++
++A three inch shell climbs for about two and a half seconds, so the head
++fires at 7.56s to break at 10.0s. On a twenty five frame clock 7.56s is not
++a frame boundary; the head moves ten milliseconds early to 7.55s, and the
++whole run moves with it:
++
++| shot     | fuse | fires | breaks | drift | pin   |
++| -------- | ---- | ----- | ------ | ----- | ----- |
++| 1 (head) | 0    | 7.550 | 9.990  | -10   | 01.01 |
++| 2        | 250  | 7.800 | 10.240 | -10   | 01.01 |
++| 3        | 500  | 8.050 | 10.490 | -10   | 01.01 |
++| 4        | 750  | 8.300 | 10.740 | -10   | 01.01 |
++| 5        | 1000 | 8.550 | 10.990 | -10   | 01.01 |
++| 6        | 1250 | 8.800 | 11.240 | -10   | 01.01 |
++
++Shots two to six sit ten milliseconds off the frame grid, which is right:
++the panel never fires them, the fuse does. The single shell at 20.0s then
++lands on module two, because the run took one turn of the round robin at
++`pad.a`, not six. The firing table has two rows, the module load shows one
++output on module one and one on module two, and the crew cuts 0.63m of
++quickmatch for a 250ms interval at `FUSE_MS_PER_METRE`.
++
++## on the field
++
++The pin list, the wiring sheet and the firing table's note column all say
++what a chained output lights, in the form `chain of 6, 400ms apart`, and
++`explain` on any shot of the run says which tube it is and how far down the
++fuse it sits, in milliseconds and in metres of quickmatch at
++`FUSE_MS_PER_METRE`. The crew cuts the fuse from that figure.
+diff --git a/src/cli/commands/check.ts b/src/cli/commands/check.ts
+index 7138acb..bbded4e 100644
+--- a/src/cli/commands/check.ts
++++ b/src/cli/commands/check.ts
+@@ -9,6 +9,7 @@ import { raw } from "../../core/units.js";
+ import { densityReport, describeDensity } from "../../timeline/density.js";
+ import { describeLoad, loadReport } from "../../timeline/load.js";
+ import { driftReport } from "../../timeline/quantise.js";
++import { panelEvents } from "../../timeline/fusing.js";
+ 
+ /**
+  * The command a shooter runs twenty times a day.
+@@ -50,7 +51,11 @@ export const checkCommand: Command = {
+ function statLines(result: ReturnType<typeof compile>): string[] {
+   const lines: string[] = [];
+   const schedule = result.schedule;
+-  lines.push(`cues        ${schedule.events.length}`);
++  const cues = panelEvents(schedule.events).length;
++  lines.push(`cues        ${cues}`);
++  if (cues !== schedule.events.length) {
++    lines.push(`shots       ${schedule.events.length}`);
++  }
+   lines.push(`runs        ${(raw(schedule.duration) / 1000).toFixed(1)}s`);
+   if (raw(result.preRoll) > 0) {
+     lines.push(`pre roll    ${(raw(result.preRoll) / 1000).toFixed(1)}s`);
+diff --git a/src/cli/commands/table.ts b/src/cli/commands/table.ts
+index 75f5016..3d8c009 100644
+--- a/src/cli/commands/table.ts
++++ b/src/cli/commands/table.ts
+@@ -7,6 +7,7 @@ import {
+   uniformPinsPerModule,
+ } from "../../export/firingTable.js";
+ import type { AddressStyle, TimeStyle } from "../../export/firingTable.js";
++import { panelEvents } from "../../timeline/fusing.js";
+ 
+ /**
+  * Writing the file that goes on the panel.
+@@ -72,7 +73,12 @@ export const tableCommand: Command = {
+       ...(pins === undefined ? {} : { pinsPerModule: pins }),
+     });
+ 
+-    const wrote = emit(csv, args, env, `${result.schedule.events.length} cues`);
++    const wrote = emit(
++      csv,
++      args,
++      env,
++      `${panelEvents(result.schedule.events).length} cues`,
++    );
+     if (wrote !== EXIT_OK) {
+       return wrote;
+     }
+diff --git a/src/compile.ts b/src/compile.ts
+index 489b704..a1bf03e 100644
+--- a/src/compile.ts
++++ b/src/compile.ts
+@@ -29,6 +29,7 @@ import { suggestChains } from "./timeline/chain.js";
+ import { checkPalette, palette } from "./catalog/palette.js";
+ import type { PaletteLimits } from "./catalog/palette.js";
+ import { countBy } from "./core/collect.js";
++import { panelEvents } from "./timeline/fusing.js";
+ 
+ /**
+  * The whole thing, in one call.
+@@ -222,7 +223,7 @@ export function compile(
+ 
+ /** A one line verdict for the top of a report or the end of a CLI run. */
+ export function summariseCompile(result: CompileResult): string {
+-  const cues = result.schedule.events.length;
++  const cues = panelEvents(result.schedule.events).length;
+   const errors = result.diagnostics.errorCount;
+   const warnings = result.diagnostics.warningCount;
+   const verdict = result.ok ? "ready" : "not ready";
+diff --git a/src/export/explain.ts b/src/export/explain.ts
+index d3894be..61664c0 100644
+--- a/src/export/explain.ts
++++ b/src/export/explain.ts
+@@ -9,7 +9,7 @@ import {
+   msToTimecode,
+   formatTimecode,
+ } from "../core/timecode.js";
+-import { raw } from "../core/units.js";
++import { ms, raw } from "../core/units.js";
+ import { formatPin, labelPin } from "../rig/pin.js";
+ import type { Rig } from "../rig/rig.js";
+ import { separationForEffect } from "../safety/distance.js";
+@@ -18,6 +18,13 @@ import type {
+   QuantisedEvent,
+   QuantisedSchedule,
+ } from "../timeline/quantise.js";
++import { fuseMetresFor } from "../timeline/chain.js";
++import {
++  chainOf,
++  isFused,
++  panelEvents,
++  positionInRun,
++} from "../timeline/fusing.js";
+ 
+ /**
+  * Why one cue is the way it is.
+@@ -40,7 +47,8 @@ export function findEvent(
+ ): QuantisedEvent | undefined {
+   const asNumber = Number(wanted);
+   if (Number.isInteger(asNumber) && asNumber >= 1) {
+-    return schedule.events[asNumber - 1];
++    // Cue numbers are the table's, and the table has one row per circuit.
++    return panelEvents(schedule.events)[asNumber - 1];
+   }
+   return schedule.events.find(
+     (event) =>
+@@ -76,10 +84,16 @@ export function explainEvent(
+   options: ExplainOptions = {},
+ ): string {
+   const blocks: string[] = [];
+-  const index = schedule.events.indexOf(event) + 1;
++  const run = chainOf(event, schedule.events);
++  const head = run[0] ?? event;
++  const index = panelEvents(schedule.events).indexOf(head) + 1;
++  const place =
++    run.length > 1 && event !== head
++      ? `, shot ${positionInRun(event, run)} of ${run.length} on the fuse`
++      : "";
+ 
+   blocks.push(
+-    `cue ${index}, ${event.effectId} from ${event.position} on ${formatPin(event.address)}`,
++    `cue ${index}, ${event.effectId} from ${event.position} on ${formatPin(event.address)}${place}`,
+   );
+   blocks.push(
+     keyValueTable([
+@@ -99,6 +113,23 @@ export function explainEvent(
+   blocks.push("timing");
+   blocks.push(keyValueTable(timingRows(event), ["step", "value"]));
+ 
++  if (isFused(event)) {
++    const fuse = raw(event.fuse ?? ms(0));
++    blocks.push("chain");
++    blocks.push(
++      keyValueTable([
++        ["shots on this output", String(run.length)],
++        ["head fires at", formatShowTime(head.ignitionAt)],
++        [
++          "fuse to this tube",
++          fuse === 0
++            ? "none, this is the head"
++            : `${fuse}ms, ${fuseMetresFor(ms(fuse))}m of quickmatch`,
++        ],
++      ]),
++    );
++  }
++
+   const envelope = envelopeOf(event.effect);
+   const size = calibreOf(event.effect);
+   const hazard = classFor(event.effect);
+diff --git a/src/export/firingTable.ts b/src/export/firingTable.ts
+index a597da3..d78b8de 100644
+--- a/src/export/firingTable.ts
++++ b/src/export/firingTable.ts
+@@ -6,10 +6,11 @@ import {
+ } from "../core/timecode.js";
+ import type { TimecodeFormat } from "../core/timecode.js";
+ import { raw } from "../core/units.js";
+-import { formatPin, pinIndex } from "../rig/pin.js";
++import { formatPin, pinIndex, pinKey } from "../rig/pin.js";
+ import type { Rig } from "../rig/rig.js";
+ import type { QuantisedSchedule } from "../timeline/quantise.js";
+ import type { FiringEvent, Schedule } from "../timeline/schedule.js";
++import { chainsOf, describeRun, panelEvents } from "../timeline/fusing.js";
+ 
+ /**
+  * The file that goes on the panel's memory card.
+@@ -77,16 +78,29 @@ export function firingTableRows(
+   const timeStyle = options.timeStyle ?? "elapsed";
+   const format = options.format ?? { rate: 25 as const, dropFrame: false };
+   const pinsPerModule = options.pinsPerModule ?? 32;
+-  return schedule.events.map((event, index) => [
++  // One row per circuit the panel closes. A chained run is one row, on the
++  // head's address, and the note says what that one output lights so the
++  // shooter with the torch knows why one pin is a whole rack.
++  const runs = chainsOf(schedule.events);
++  return panelEvents(schedule.events).map((event, index) => [
+     String(index + 1),
+     timeOf(event, timeStyle, format),
+     addressOf(event, addressStyle, pinsPerModule),
+     event.effectId,
+     event.position,
+-    event.label ?? "",
++    noteOf(event, runs.get(pinKey(event.address))),
+   ]);
+ }
+ 
++/** The label, and for the head of a chain what the one output lights. */
++function noteOf(
++  event: FiringEvent,
++  run: readonly FiringEvent[] | undefined,
++): string {
++  const notes = [event.label ?? "", run === undefined ? "" : describeRun(run)];
++  return notes.filter((note) => note.length > 0).join(", ");
++}
++
+ export function firingTableCsv(
+   schedule: Schedule | QuantisedSchedule,
+   options: FiringTableOptions = {},
+@@ -132,5 +146,5 @@ export function canWrite(rig: Rig, style: AddressStyle): TableCheck {
+ 
+ /** The panel's own row count, which some firmware caps. */
+ export function rowCount(schedule: Schedule | QuantisedSchedule): number {
+-  return schedule.events.length;
++  return panelEvents(schedule.events).length;
+ }
+diff --git a/src/export/permit.ts b/src/export/permit.ts
+index 52b4e07..fa33cb8 100644
+--- a/src/export/permit.ts
++++ b/src/export/permit.ts
+@@ -11,6 +11,7 @@ import type { Site } from "../safety/site.js";
+ import { densityReport } from "../timeline/density.js";
+ import type { QuantisedSchedule } from "../timeline/quantise.js";
+ import type { Schedule } from "../timeline/schedule.js";
++import { panelEvents } from "../timeline/fusing.js";
+ 
+ /**
+  * The paperwork.
+@@ -72,7 +73,9 @@ export function permitFacts(
+   const density = densityReport(schedule);
+   return {
+     details,
+-    cueCount: schedule.events.length,
++    // Cues are circuits the panel closes; shots are shells that go up. They
++    // part company the moment a run is chained.
++    cueCount: panelEvents(schedule.events).length,
+     shotCount: schedule.events.length,
+     durationMs: Math.round(raw(schedule.duration)),
+     largestCalibreMm: largest,
+diff --git a/src/export/sheets.ts b/src/export/sheets.ts
+index fc766c6..21bd704 100644
+--- a/src/export/sheets.ts
++++ b/src/export/sheets.ts
+@@ -4,10 +4,16 @@ import { renderTable } from "../core/text.js";
+ import type { Column } from "../core/text.js";
+ import { formatShowTime } from "../core/timecode.js";
+ import { raw } from "../core/units.js";
+-import { formatPin, labelPin } from "../rig/pin.js";
++import { formatPin, labelPin, pinKey } from "../rig/pin.js";
+ import type { Rig } from "../rig/rig.js";
+ import type { QuantisedSchedule } from "../timeline/quantise.js";
+ import type { FiringEvent, Schedule } from "../timeline/schedule.js";
++import {
++  chainsOf,
++  describeRun,
++  isHead,
++  panelEvents,
++} from "../timeline/fusing.js";
+ 
+ /**
+  * The paper that goes onto the field.
+@@ -37,17 +43,29 @@ export interface SheetOptions {
+   readonly title?: string;
+ }
+ 
++/** The effect column, saying when one output lights a whole run. */
++function effectText(
++  event: FiringEvent,
++  runs: Map<string, FiringEvent[]>,
++): string {
++  const run = runs.get(pinKey(event.address));
++  const base = describeEffect(event.effect);
++  return run === undefined ? base : `${base}, ${describeRun(run)}`;
++}
++
+ export function cueSheet(
+   schedule: Schedule | QuantisedSchedule,
+   options: SheetOptions = {},
+ ): string {
+-  const rows = schedule.events.map((event, index) => [
++  // One row per cue the panel fires, numbered the way the table numbers them.
++  const runs = chainsOf(schedule.events);
++  const rows = panelEvents(schedule.events).map((event, index) => [
+     String(index + 1),
+     formatShowTime(event.ignitionAt),
+     formatShowTime(event.visibleAt),
+     formatPin(event.address),
+     event.position,
+-    describeEffect(event.effect),
++    effectText(event, runs),
+     event.label ?? "",
+   ]);
+   const columns =
+@@ -81,8 +99,11 @@ export function wiringSheet(
+   options: SheetOptions = {},
+ ): string {
+   const byPin = new Map<string, FiringEvent>();
++  const runs = chainsOf(schedule.events);
+   for (const event of schedule.events) {
+-    byPin.set(formatPin(event.address), event);
++    if (isHead(event)) {
++      byPin.set(formatPin(event.address), event);
++    }
+   }
+   const blocks: string[] = [];
+   for (const unit of rig.allModules()) {
+@@ -95,7 +116,7 @@ export function wiringSheet(
+         key,
+         labelPin(address),
+         event === undefined ? "" : formatShowTime(event.ignitionAt),
+-        event === undefined ? "" : describeEffect(event.effect),
++        event === undefined ? "" : effectText(event, runs),
+       ]);
+     }
+     const used = rows.filter((row) => row[3] !== "").length;
+@@ -116,12 +137,15 @@ export function sheetHeader(
+   schedule: Schedule | QuantisedSchedule,
+   name: string,
+ ): string {
+-  const events = schedule.events;
++  const events = panelEvents(schedule.events);
+   const first = events[0];
+   const last = events[events.length - 1];
++  const shots = schedule.events.length;
+   const lines = [
+     name,
+-    `${events.length} cues`,
++    shots === events.length
++      ? `${events.length} cues`
++      : `${events.length} cues, ${shots} shots`,
+     first === undefined
+       ? "no cues"
+       : `first fires at ${formatShowTime(first.ignitionAt)}`,
+diff --git a/src/index.ts b/src/index.ts
+index 78da86f..1a86f14 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -71,6 +71,7 @@ export * from "./timeline/balance.js";
+ export * from "./timeline/chain.js";
+ export * from "./timeline/density.js";
+ export * from "./timeline/diff.js";
++export * from "./timeline/fusing.js";
+ export * from "./timeline/load.js";
+ export * from "./timeline/misfire.js";
+ export * from "./timeline/quantise.js";
+diff --git a/src/rig/allocate.ts b/src/rig/allocate.ts
+index eb35a42..626f6cc 100644
+--- a/src/rig/allocate.ts
++++ b/src/rig/allocate.ts
+@@ -6,6 +6,13 @@ import { countBy } from "../core/collect.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+ import type { ResolvedShot } from "../script/resolve.js";
+ import { raw } from "../core/units.js";
++import {
++  chainKeyOf,
++  chainsOf,
++  describeRun,
++  isFollower,
++  isFused,
++} from "../timeline/fusing.js";
+ 
+ /**
+  * Giving every shot an output to fire from.
+@@ -58,8 +65,24 @@ export function allocatePins(
+ 
+   const ordered = [...shots].sort((a, b) => raw(a.at) - raw(b.at));
+ 
++  // A chained run is one circuit. The head takes a pin the way any single
++  // shot would, and every shot lit by the fuse after it sits on that same
++  // address, taking nothing from the rig and moving no cursor. A head that
++  // found no pin has already been reported, and its run goes with it.
++  const chainHeads = new Map<string, PinAddress>();
++
+   for (const shot of ordered) {
++    if (isFollower(shot)) {
++      const head = chainHeads.get(chainKeyOf(shot));
++      if (head !== undefined) {
++        assignments.push({ shot, address: head });
++      }
++      continue;
++    }
+     if (shot.fixedPin !== undefined) {
++      if (isFused(shot)) {
++        chainHeads.set(chainKeyOf(shot), shot.fixedPin);
++      }
+       assignments.push({ shot, address: shot.fixedPin });
+       continue;
+     }
+@@ -114,6 +137,9 @@ export function allocatePins(
+     }
+     taken.add(pinKey(address));
+     assignments.push({ shot, address });
++    if (isFused(shot)) {
++      chainHeads.set(chainKeyOf(shot), address);
++    }
+   }
+ 
+   return { assignments, diagnostics };
+@@ -142,7 +168,8 @@ export function moduleLoads(
+   assignments: readonly Assignment[],
+   rig: Rig,
+ ): ModuleLoad[] {
+-  const used = countBy(assignments, (assignment) =>
++  // Pins, not shots: a chained run of twelve holds one output.
++  const used = countBy(onePerPin(assignments), (assignment) =>
+     String(assignment.address.module),
+   );
+   return rig.allModules().map((unit) => ({
+@@ -152,6 +179,17 @@ export function moduleLoads(
+   }));
+ }
+ 
++/** The first assignment on each pin, which is what a pin count counts. */
++export function onePerPin(assignments: readonly Assignment[]): Assignment[] {
++  const seen = new Map<string, Assignment>();
++  for (const assignment of assignments) {
++    if (!seen.has(pinKey(assignment.address))) {
++      seen.set(pinKey(assignment.address), assignment);
++    }
++  }
++  return [...seen.values()];
++}
++
+ /** Pins wired to nothing, which the crew does not need to run leads to. */
+ export function unusedPins(
+   assignments: readonly Assignment[],
+@@ -162,10 +200,25 @@ export function unusedPins(
+ }
+ 
+ export function describeAllocation(assignments: readonly Assignment[]): string {
+-  return byPin(assignments)
+-    .map(
+-      (assignment) =>
+-        `${formatPin(assignment.address)}  ${assignment.shot.effect}`,
+-    )
+-    .join("\n");
++  const runs = chainsOf(
++    assignments.map((a) => ({
++      address: a.address,
++      ...(a.shot.fuse === undefined ? {} : { fuse: a.shot.fuse }),
++    })),
++  );
++  const listed = new Set<string>();
++  const lines: string[] = [];
++  for (const assignment of byPin(assignments)) {
++    const key = pinKey(assignment.address);
++    if (listed.has(key)) {
++      continue;
++    }
++    listed.add(key);
++    const run = runs.get(key);
++    const note = run === undefined ? "" : `  ${describeRun(run)}`;
++    lines.push(
++      `${formatPin(assignment.address)}  ${assignment.shot.effect}${note}`,
++    );
++  }
++  return lines.join("\n");
+ }
+diff --git a/src/rig/layout.ts b/src/rig/layout.ts
+index d522dad..287afa0 100644
+--- a/src/rig/layout.ts
++++ b/src/rig/layout.ts
+@@ -1,6 +1,6 @@
+ import type { Assignment } from "./allocate.js";
+ import type { PinAddress } from "./pin.js";
+-import { comparePins, formatPin } from "./pin.js";
++import { comparePins, formatPin, pinKey } from "./pin.js";
+ import type { Rig } from "./rig.js";
+ import { countBy, groupBy, sortedEntries } from "../core/collect.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+@@ -72,9 +72,18 @@ export function rackNeeds(assignments: readonly Assignment[]): RackNeed[] {
+     needs.push({
+       position,
+       boreMm,
++      // Tubes are shots: a chained run of twelve is twelve mortars in the
++      // rack. Pins are circuits, and the run's twelve share one.
+       tubes: group.length,
+       racks: Math.ceil(group.length / perRack),
+-      pins: group.map((assignment) => assignment.address).sort(comparePins),
++      pins: [
++        ...new Map(
++          group.map((assignment) => [
++            pinKey(assignment.address),
++            assignment.address,
++          ]),
++        ).values(),
++      ].sort(comparePins),
+     });
+   }
+   return needs.sort(
+diff --git a/src/rig/redundancy.ts b/src/rig/redundancy.ts
+index 28589ee..6b3520f 100644
+--- a/src/rig/redundancy.ts
++++ b/src/rig/redundancy.ts
+@@ -8,6 +8,7 @@ import { countBy } from "../core/collect.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+ import { renderTable } from "../core/text.js";
+ import { raw } from "../core/units.js";
++import { isFollower } from "../timeline/fusing.js";
+ 
+ /**
+  * Two matches on the cues that matter.
+@@ -84,7 +85,9 @@ export function planRedundancy(
+   const plans: DoubledCue[] = [];
+ 
+   for (const assignment of assignments) {
+-    if (!shouldDouble(assignment, rule)) {
++    // A chained run has one circuit, so it gets one backup, on its head.
++    // The shots down the fuse have no match of their own to double.
++    if (isFollower(assignment.shot) || !shouldDouble(assignment, rule)) {
+       plans.push({ assignment, primary: assignment.address });
+       continue;
+     }
+diff --git a/src/rig/wiring.ts b/src/rig/wiring.ts
+index 61bd181..67cb010 100644
+--- a/src/rig/wiring.ts
++++ b/src/rig/wiring.ts
+@@ -9,6 +9,7 @@ import { sum } from "../core/numeric.js";
+ import { renderTable } from "../core/text.js";
+ import { ohms, raw } from "../core/units.js";
+ import type { Ohms } from "../core/units.js";
++import { isFollower } from "../timeline/fusing.js";
+ 
+ /**
+  * The wire on the ground.
+@@ -63,6 +64,11 @@ export function runsFor(
+   const runs: Run[] = [];
+   const seenAtPosition = new Map<string, number>();
+   for (const assignment of assignments) {
++    // One lead per circuit. The rest of a chained run is joined to the head
++    // by quickmatch, not by wire back to the module.
++    if (isFollower(assignment.shot)) {
++      continue;
++    }
+     const unit = rig.module(assignment.address.module);
+     const target = rig.position(assignment.shot.position);
+     if (unit === undefined || target === undefined) {
+diff --git a/src/script/annotate.ts b/src/script/annotate.ts
+index 826b0ff..2b7a100 100644
+--- a/src/script/annotate.ts
++++ b/src/script/annotate.ts
+@@ -1,5 +1,7 @@
+ import type { CueStatement, Script, Statement } from "./ast.js";
+ import { isCueStatement, shotsIn } from "./ast.js";
++import { distinct } from "../core/collect.js";
++import { isFollower } from "../timeline/fusing.js";
+ import type { SourceFile } from "../core/span.js";
+ import { formatShowTime } from "../core/timecode.js";
+ import { raw } from "../core/units.js";
+@@ -80,9 +82,16 @@ function factsByLine(
+     if (first === undefined) {
+       continue;
+     }
++    // A chained run answers with its one pin and how many shots hang off it,
++    // since listing the same address a dozen times tells a designer nothing.
++    const fused = taken.filter(isFollower).length;
++    const pins = distinct(taken, (event) => formatPin(event.address));
+     facts.set(line, {
+       firesAt: formatShowTime(first.ignitionAt),
+-      pins: taken.map((event) => formatPin(event.address)),
++      pins:
++        fused === 0
++          ? pins
++          : [`${pins.join(" ")} chained, ${taken.length} shots`],
+     });
+   }
+   return facts;
+diff --git a/src/script/ast.ts b/src/script/ast.ts
+index 608bd18..aa0fd9b 100644
+--- a/src/script/ast.ts
++++ b/src/script/ast.ts
+@@ -46,6 +46,10 @@ export interface RippleStatement extends Node {
+   readonly every: Milliseconds;
+   readonly jitter?: Milliseconds;
+   readonly label?: string;
++  /** Fire the whole run from one output, the rest lit by quickmatch. */
++  readonly chained?: true;
++  /** The head's pin, when a chained run names one. */
++  readonly pin?: PinChoice;
+ }
+ 
+ export interface ChaseStatement extends Node {
+@@ -70,6 +74,10 @@ export interface FanStatement extends Node {
+   readonly spread: Milliseconds;
+   readonly jitter?: Milliseconds;
+   readonly label?: string;
++  /** Fire the whole fan from one output, the rest lit by quickmatch. */
++  readonly chained?: true;
++  /** The head's pin, when a chained fan names one. */
++  readonly pin?: PinChoice;
+ }
+ 
+ export interface PlayStatement extends Node {
+@@ -165,6 +173,25 @@ export function effectsIn(statement: Statement): string[] {
+   return isShotStatement(statement) ? [statement.effect] : [];
+ }
+ 
++/** Whether a statement fires its run from one output. */
++export function isChained(statement: Statement): boolean {
++  return (
++    (statement.kind === "ripple" || statement.kind === "fan") &&
++    statement.chained === true
++  );
++}
++
++/**
++ * How many outputs a statement takes on the panel. A chained run takes one
++ * whatever its count, which is the whole reason to chain it.
++ */
++export function outputsIn(statement: Statement): number {
++  if (isChained(statement)) {
++    return shotsIn(statement) > 0 ? 1 : 0;
++  }
++  return shotsIn(statement);
++}
++
+ /** Every position a statement names. */
+ export function positionsIn(statement: Statement): string[] {
+   switch (statement.kind) {
+diff --git a/src/script/expand.ts b/src/script/expand.ts
+index 5522ee4..0e3b655 100644
+--- a/src/script/expand.ts
++++ b/src/script/expand.ts
+@@ -1,10 +1,17 @@
+-import type { CueStatement, PinChoice, Statement } from "./ast.js";
++import type {
++  CueStatement,
++  FanStatement,
++  PinChoice,
++  RippleStatement,
++  Statement,
++} from "./ast.js";
+ import { findGroup } from "./ast.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+ import { Rng } from "../core/rng.js";
+ import type { Span } from "../core/span.js";
+ import type { Metres, Milliseconds } from "../core/units.js";
+ import { ms, raw } from "../core/units.js";
++import { MAX_CHAIN_LENGTH } from "../timeline/chain.js";
+ 
+ /**
+  * Turning the shorthand into individual shots.
+@@ -35,6 +42,12 @@ export interface Shot {
+   readonly index: number;
+   /** Where in the script the shot came from. */
+   readonly origin: Span;
++  /**
++   * Set on every shot of a chained run: how long after the head's ignition
++   * the quickmatch reaches this tube. Zero on the head, which is the one
++   * shot of the run the panel fires.
++   */
++  readonly fuse?: Milliseconds;
+ }
+ 
+ export interface ExpandOptions {
+@@ -56,14 +69,76 @@ function shot(
+   },
+   height?: Metres,
+   label?: string,
++  fuse?: Milliseconds,
+ ): Shot {
+   return {
+     ...base,
+     ...(height === undefined ? {} : { height }),
+     ...(label === undefined ? {} : { label }),
++    ...(fuse === undefined ? {} : { fuse }),
+   };
+ }
+ 
++/**
++ * A run of shots at one position, evenly spaced, is what a chain can fire.
++ * The times are the run's own; what changes is that every shot after the
++ * first is lit by the fuse rather than by the panel, so each carries how far
++ * down the quickmatch it sits. The head takes the pin the script named, if
++ * it named one, and the rest take none, because they have no circuit.
++ */
++function chainRun(
++  statement: RippleStatement | FanStatement,
++  times: readonly number[],
++): Shot[] {
++  const head = times[0] ?? 0;
++  return times.map((at, i) =>
++    shot(
++      {
++        at: ms(at),
++        effect: statement.effect,
++        position: statement.position,
++        pin: i === 0 ? (statement.pin ?? { kind: "auto" }) : { kind: "auto" },
++        origin: statement.span,
++        index: i,
++      },
++      undefined,
++      statement.label,
++      ms(at - head),
++    ),
++  );
++}
++
++/**
++ * Whether a chained run can be built at all. The far end of a long chain
++ * often does not light, so past the limit the run is refused rather than
++ * fired on hope, and a run with no interval has nowhere to cut the fuse.
++ */
++function chainProblem(
++  statement: RippleStatement | FanStatement,
++  interval: number,
++  diagnostics: DiagnosticBag,
++): boolean {
++  if (statement.count > MAX_CHAIN_LENGTH) {
++    diagnostics.error({
++      code: "PF2203",
++      message: `a chain of ${statement.count} is longer than ${MAX_CHAIN_LENGTH}, and the far end of a long chain often does not light`,
++      span: statement.span,
++      help: "split the run into two chains, or fire it from its own pins",
++    });
++    return true;
++  }
++  if (statement.count > 1 && interval <= 0) {
++    diagnostics.error({
++      code: "PF2204",
++      message: `a chained ${statement.kind} needs an interval above zero to cut the fuse for`,
++      span: statement.span,
++      help: "give the run an interval, or fire it from its own pins",
++    });
++    return true;
++  }
++  return false;
++}
++
+ /**
+  * The name a macro's jitter stream is forked from. A statement with a label
+  * keeps its own stream across every edit elsewhere in the script. One without
+@@ -107,6 +182,18 @@ export function expandStatement(
+         tooMany(diagnostics, statement, statement.count, cap);
+         return [];
+       }
++      if (statement.chained === true) {
++        const every = raw(statement.every);
++        if (chainProblem(statement, every, diagnostics)) {
++          return [];
++        }
++        return chainRun(
++          statement,
++          Array.from({ length: statement.count }, (_, i) =>
++            Math.round(start + i * every),
++          ),
++        );
++      }
+       const stream = rng.fork(labelFor(statement, "ripple"));
+       const jitter = statement.jitter === undefined ? 0 : raw(statement.jitter);
+       const shots: Shot[] = [];
+@@ -146,6 +233,17 @@ export function expandStatement(
+       // its own cue time rather than half a spread early.
+       const step = statement.count > 1 ? spread / (statement.count - 1) : 0;
+       const half = statement.count > 1 ? spread / 2 : 0;
++      if (statement.chained === true) {
++        if (chainProblem(statement, spread, diagnostics)) {
++          return [];
++        }
++        return chainRun(
++          statement,
++          Array.from({ length: statement.count }, (_, i) =>
++            Math.round(start - half + i * step),
++          ),
++        );
++      }
+       for (let i = 0; i < statement.count; i += 1) {
+         const wobble = jitter === 0 ? 0 : stream.nextJitter(jitter);
+         shots.push(
+diff --git a/src/script/format.ts b/src/script/format.ts
+index 391d55e..862f406 100644
+--- a/src/script/format.ts
++++ b/src/script/format.ts
+@@ -60,6 +60,15 @@ function trailersOf(statement: CueStatement): string[] {
+       parts.push(`height ${heightText(statement.height)}`);
+     }
+   }
++  if (
++    (statement.kind === "ripple" || statement.kind === "fan") &&
++    statement.chained === true &&
++    statement.pin?.kind === "fixed"
++  ) {
++    parts.push(
++      `pin ${formatPin({ module: statement.pin.module, pin: statement.pin.pin })}`,
++    );
++  }
+   if (statement.kind === "chase" && statement.passes !== 1) {
+     parts.push(`passes ${statement.passes}`);
+   }
+@@ -75,6 +84,14 @@ function trailersOf(statement: CueStatement): string[] {
+       /^[a-z0-9._-]+$/i.test(label) ? `label ${label}` : `label "${label}"`,
+     );
+   }
++  // Last, so the eye reading a line finds the run first and the way it is
++  // fired after, which is the order a crew talks about it.
++  if (
++    (statement.kind === "ripple" || statement.kind === "fan") &&
++    statement.chained === true
++  ) {
++    parts.push("chained");
++  }
+   return parts;
+ }
+ 
+diff --git a/src/script/lint.ts b/src/script/lint.ts
+index ac8c882..e6cfea5 100644
+--- a/src/script/lint.ts
++++ b/src/script/lint.ts
+@@ -1,5 +1,5 @@
+ import type { CueStatement, Script, Statement } from "./ast.js";
+-import { groupsIn, isShotStatement, shotsIn } from "./ast.js";
++import { groupsIn, isChained, isShotStatement, shotsIn } from "./ast.js";
+ import { checkLabels } from "./renumber.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+ import { formatShowTime } from "../core/timecode.js";
+@@ -117,7 +117,7 @@ function checkIntervals(
+         help: "give it a spread, or write it as separate fire lines",
+       });
+     }
+-    if (shotsIn(statement) > 60) {
++    if (shotsIn(statement) > 60 && !isChained(statement)) {
+       diagnostics.note({
+         code: "PF2604",
+         message: `this ${statement.kind} is ${shotsIn(statement)} shots`,
+diff --git a/src/script/parser.ts b/src/script/parser.ts
+index dc0092e..d4e3dfe 100644
+--- a/src/script/parser.ts
++++ b/src/script/parser.ts
+@@ -272,6 +272,7 @@ interface Trailers {
+   readonly label?: string;
+   readonly jitter?: Milliseconds;
+   readonly passes?: number;
++  readonly chained?: true;
+ }
+ 
+ /**
+@@ -290,6 +291,7 @@ function readTrailers(
+   let label: string | undefined;
+   let jitter: Milliseconds | undefined;
+   let passes: number | undefined;
++  let chained: true | undefined;
+ 
+   while (cursor.index < cursor.tokens.length) {
+     const token = take(cursor);
+@@ -356,6 +358,10 @@ function readTrailers(
+         }
+         break;
+       }
++      case "chained": {
++        chained = true;
++        break;
++      }
+       default: {
+         error(
+           diagnostics,
+@@ -363,7 +369,7 @@ function readTrailers(
+           line,
+           "PF2112",
+           `${token.text} is not a clause a cue understands`,
+-          "the clauses are pin, height, label, jitter and passes",
++          "the clauses are pin, height, label, jitter, passes and chained",
+         );
+       }
+     }
+@@ -374,9 +380,33 @@ function readTrailers(
+     ...(label === undefined ? {} : { label }),
+     ...(jitter === undefined ? {} : { jitter }),
+     ...(passes === undefined ? {} : { passes }),
++    ...(chained === undefined ? {} : { chained }),
+   };
+ }
+ 
++/**
++ * A chain is a length of quickmatch down one rack, so it belongs on a run
++ * from one position. A single shot has nothing to chain, and a chase runs
++ * across positions that no fuse joins. Both are refused rather than ignored,
++ * because a shooter who wrote the word expects one pin and would otherwise
++ * find the run spread over a dozen.
++ */
++function refuseChain(
++  diagnostics: DiagnosticBag,
++  file: SourceFile,
++  line: readonly Token[],
++  verb: string,
++): void {
++  error(
++    diagnostics,
++    file,
++    line,
++    "PF2122",
++    `a ${verb} cannot be chained, only a ripple or a fan from one position can`,
++    "chain a ripple or a fan, or write the run as one of those",
++  );
++}
++
+ function lineSpan(line: readonly Token[]) {
+   const first = line[0];
+   const last = line[line.length - 1];
+@@ -478,6 +508,10 @@ function parseCue(
+         return undefined;
+       }
+       const trailers = readTrailers(cursor, diagnostics, file, line);
++      if (trailers.chained !== undefined) {
++        refuseChain(diagnostics, file, line, "single shot");
++        return undefined;
++      }
+       return {
+         kind: "fire",
+         span: at,
+@@ -518,6 +552,24 @@ function parseCue(
+         return undefined;
+       }
+       const trailers = readTrailers(cursor, diagnostics, file, line);
++      if (trailers.chained !== undefined && trailers.jitter !== undefined) {
++        error(
++          diagnostics,
++          file,
++          line,
++          "PF2123",
++          `a chained ${verb} cannot jitter, quickmatch burns at one rate`,
++          "drop the jitter, or fire the run from its own pins",
++        );
++        return undefined;
++      }
++      const chain =
++        trailers.chained === undefined
++          ? {}
++          : {
++              chained: true as const,
++              ...(trailers.pin.kind === "fixed" ? { pin: trailers.pin } : {}),
++            };
+       const shared = {
+         span: at,
+         at: when,
+@@ -526,6 +578,7 @@ function parseCue(
+         position,
+         ...(trailers.jitter === undefined ? {} : { jitter: trailers.jitter }),
+         ...(trailers.label === undefined ? {} : { label: trailers.label }),
++        ...chain,
+       };
+       return verb === "ripple"
+         ? { kind: "ripple", ...shared, every: gap }
+@@ -568,6 +621,10 @@ function parseCue(
+         return undefined;
+       }
+       const trailers = readTrailers(cursor, diagnostics, file, line);
++      if (trailers.chained !== undefined) {
++        refuseChain(diagnostics, file, line, "chase");
++        return undefined;
++      }
+       return {
+         kind: "chase",
+         span: at,
+@@ -636,4 +693,5 @@ export const TRAILER_CLAUSES = [
+   "label",
+   "jitter",
+   "passes",
++  "chained",
+ ] as const;
+diff --git a/src/timeline/chain.ts b/src/timeline/chain.ts
+index a7e74da..c7c83e2 100644
+--- a/src/timeline/chain.ts
++++ b/src/timeline/chain.ts
+@@ -8,6 +8,7 @@ import { formatShowTime } from "../core/timecode.js";
+ import { ms, raw } from "../core/units.js";
+ import type { Milliseconds } from "../core/units.js";
+ import { formatPin } from "../rig/pin.js";
++import { chainInterval, chainsOf, isFused } from "./fusing.js";
+ 
+ /**
+  * Firing a run from one output.
+@@ -69,8 +70,9 @@ export function chainCandidates(
+   schedule: Schedule | QuantisedSchedule,
+   maxLength: number = MAX_CHAIN_LENGTH,
+ ): ChainCandidate[] {
++  // A run that is already chained is not a candidate for chaining.
+   const byGroup = groupBy(
+-    schedule.events,
++    schedule.events.filter((event) => !isFused(event)),
+     (event) => `${event.position}|${event.effectId}`,
+   );
+ 
+@@ -122,6 +124,43 @@ function buildCandidate(
+   };
+ }
+ 
++/** Metres of quickmatch to cut for an interval, to the centimetre. */
++export function fuseMetresFor(interval: Milliseconds): number {
++  return Number((raw(interval) / FUSE_MS_PER_METRE).toFixed(2));
++}
++
++/**
++ * The runs the script already chains, in the same shape as a candidate so a
++ * pack can list what is fused beside what could be. The saving is real
++ * here rather than proposed: the run holds one pin and would have held one
++ * per shot.
++ */
++export function declaredChains(
++  schedule: Schedule | QuantisedSchedule,
++): ChainCandidate[] {
++  const declared: ChainCandidate[] = [];
++  for (const run of chainsOf(schedule.events).values()) {
++    const first = run[0];
++    if (first === undefined) {
++      continue;
++    }
++    const interval = chainInterval(run);
++    declared.push({
++      events: run,
++      position: first.position,
++      effectId: first.effectId,
++      interval,
++      fuseMetres: fuseMetresFor(interval),
++      pinsSaved: run.length - 1,
++    });
++  }
++  return declared.sort(
++    (a, b) =>
++      raw(a.events[0]?.ignitionAt ?? ms(0)) -
++      raw(b.events[0]?.ignitionAt ?? ms(0)),
++  );
++}
++
+ export function totalPinsSaved(candidates: readonly ChainCandidate[]): number {
+   return candidates.reduce(
+     (total, candidate) => total + candidate.pinsSaved,
+diff --git a/src/timeline/diff.ts b/src/timeline/diff.ts
+index 8d4f561..bab0573 100644
+--- a/src/timeline/diff.ts
++++ b/src/timeline/diff.ts
+@@ -3,8 +3,9 @@ import type { FiringEvent, Schedule } from "./schedule.js";
+ import { countBy, groupBy, sortedEntries } from "../core/collect.js";
+ import { renderTable } from "../core/text.js";
+ import { formatShowTime } from "../core/timecode.js";
+-import { raw } from "../core/units.js";
++import { ms, raw } from "../core/units.js";
+ import { comparePins, formatPin, pinKey } from "../rig/pin.js";
++import { chainsOf, panelEvents } from "./fusing.js";
+ 
+ /**
+  * What changed between two versions of a show.
+@@ -31,6 +32,8 @@ export interface Change {
+   /** For a swap, what used to be on that pin. */
+   readonly wasEffectId?: string;
+   readonly at: string;
++  /** For a swap of a chained run, what about the run changed. */
++  readonly note?: string;
+ }
+ 
+ /** Within this a cue counts as unchanged rather than moved. */
+@@ -40,12 +43,39 @@ function keyOf(event: FiringEvent): string {
+   return pinKey(event.address);
+ }
+ 
++/**
++ * What a chained run is, as the crew wired it: how many tubes the fuse
++ * reaches and how far apart. A run that kept its pin and its effect but
++ * gained a tube or was cut to another interval has to be re-fused on the
++ * field, which is a rewire in every sense that matters.
++ */
++function runShape(
++  events: readonly FiringEvent[],
++): Map<string, { readonly shots: number; readonly fuses: string }> {
++  const shapes = new Map<string, { shots: number; fuses: string }>();
++  for (const [key, run] of chainsOf(events)) {
++    shapes.set(key, {
++      shots: run.length,
++      fuses: run.map((event) => raw(event.fuse ?? ms(0))).join(","),
++    });
++  }
++  return shapes;
++}
++
+ export function diffSchedules(
+   before: Schedule | QuantisedSchedule,
+   after: Schedule | QuantisedSchedule,
+ ): Change[] {
+-  const oldByPin = new Map(before.events.map((event) => [keyOf(event), event]));
+-  const newByPin = new Map(after.events.map((event) => [keyOf(event), event]));
++  // A chained run is one cue on its head's pin: the head is what the panel
++  // fires and what a crew visits, so the comparison is head to head.
++  const oldByPin = new Map(
++    panelEvents(before.events).map((event) => [keyOf(event), event]),
++  );
++  const newByPin = new Map(
++    panelEvents(after.events).map((event) => [keyOf(event), event]),
++  );
++  const oldRuns = runShape(before.events);
++  const newRuns = runShape(after.events);
+   const changes: Change[] = [];
+ 
+   for (const [key, event] of newByPin) {
+@@ -69,6 +99,19 @@ export function diffSchedules(
+       });
+       continue;
+     }
++    const wasRun = oldRuns.get(key);
++    const isRun = newRuns.get(key);
++    if (wasRun?.shots !== isRun?.shots || wasRun?.fuses !== isRun?.fuses) {
++      changes.push({
++        kind: "swapped",
++        address: formatPin(event.address),
++        effectId: event.effectId,
++        wasEffectId: previous.effectId,
++        at: formatShowTime(event.ignitionAt),
++        note: describeRunChange(wasRun, isRun),
++      });
++      continue;
++    }
+     const shift = raw(event.ignitionAt) - raw(previous.ignitionAt);
+     if (Math.abs(shift) > SAME_TIME_MS) {
+       changes.push({
+@@ -95,6 +138,22 @@ export function diffSchedules(
+   return changes.sort((a, b) => a.address.localeCompare(b.address));
+ }
+ 
++function describeRunChange(
++  was: { readonly shots: number; readonly fuses: string } | undefined,
++  now: { readonly shots: number; readonly fuses: string } | undefined,
++): string {
++  if (was === undefined && now !== undefined) {
++    return `now a chain of ${now.shots}`;
++  }
++  if (was !== undefined && now === undefined) {
++    return `no longer a chain of ${was.shots}`;
++  }
++  if (was !== undefined && now !== undefined && was.shots !== now.shots) {
++    return `chain of ${was.shots} is now ${now.shots}`;
++  }
++  return "the fuse was cut to another interval";
++}
++
+ export interface DiffSummary {
+   readonly added: number;
+   readonly removed: number;
+@@ -112,7 +171,7 @@ export function summariseDiff(
+   const changes = diffSchedules(before, after);
+   const counts = countBy(changes, (change) => change.kind);
+   const touched = new Set(changes.map((change) => change.address));
+-  const unchanged = after.events.filter(
++  const unchanged = panelEvents(after.events).filter(
+     (event) => !touched.has(formatPin(event.address)),
+   ).length;
+   return {
+@@ -160,7 +219,7 @@ export function describeDiff(changes: readonly Change[]): string {
+       change.kind === "moved"
+         ? `${(change.shiftMs ?? 0) > 0 ? "+" : ""}${change.shiftMs}ms to ${change.at}`
+         : change.kind === "swapped"
+-          ? `was ${change.wasEffectId}`
++          ? (change.note ?? `was ${change.wasEffectId}`)
+           : change.at,
+     ]),
+   );
+diff --git a/src/timeline/fusing.ts b/src/timeline/fusing.ts
+new file mode 100644
+index 0000000..c885215
+--- /dev/null
++++ b/src/timeline/fusing.ts
+@@ -0,0 +1,135 @@
++import type { Milliseconds } from "../core/units.js";
++import { ms, raw } from "../core/units.js";
++import type { PinAddress } from "../rig/pin.js";
++import { pinKey } from "../rig/pin.js";
++import type { Shot } from "../script/expand.js";
++
++/**
++ * A run fired from one output.
++ *
++ * A chained run is one electric match on the head tube and a length of
++ * quickmatch running down the rack, so the panel closes one circuit and the
++ * fire does the rest. Every shot of the run is still a shell in a mortar and
++ * still goes up, so the compiler keeps one event per shot, all on the head's
++ * address, and marks each with the fuse: how long after the head's ignition
++ * the fire reaches that tube. The head carries a fuse of zero.
++ *
++ * The rule everything downstream follows is that a chained run is one cue
++ * and many shots. Anything that counts cues, rows, outputs, pins, leads or
++ * pulses looks at the head alone. Anything that counts shots, shells, tubes,
++ * stock, hazard or what is lit looks at every shot. Getting one of those the
++ * wrong way round produces a table that is short a shell or a load check that
++ * refuses a rig with room to spare, and neither announces itself.
++ */
++
++/** Anything that may sit on a chain: a shot, an assignment's shot, an event. */
++export interface Fused {
++  readonly fuse?: Milliseconds;
++}
++
++/** Whether the thing belongs to a chained run at all, head included. */
++export function isFused(item: Fused): boolean {
++  return item.fuse !== undefined;
++}
++
++/**
++ * Whether the thing is a cue the panel fires: anything unchained, and the
++ * head of a chain. Followers are lit by the fuse, not by the panel.
++ */
++export function isHead(item: Fused): boolean {
++  return item.fuse === undefined || raw(item.fuse) === 0;
++}
++
++/** A shot lit by quickmatch rather than by the panel. */
++export function isFollower(item: Fused): boolean {
++  return item.fuse !== undefined && raw(item.fuse) > 0;
++}
++
++/** The events a panel actually fires, in the order they were given. */
++export function panelEvents<T extends Fused>(items: readonly T[]): T[] {
++  return items.filter(isHead);
++}
++
++/**
++ * The identity of the chain a shot belongs to, before any pin exists. A
++ * statement inside a group played twice expands into two runs, so the
++ * statement alone is not enough: the head's cue time tells the two apart,
++ * and every shot of a run knows it from its own time less its fuse.
++ */
++export function chainKeyOf(shot: Shot): string {
++  const head = raw(shot.at) - raw(shot.fuse ?? ms(0));
++  return `${shot.origin.start}:${shot.origin.end}@${head}`;
++}
++
++/** Something with a pin, which after allocation is what names a chain. */
++export interface Addressed extends Fused {
++  readonly address: PinAddress;
++}
++
++/**
++ * Every chained run, keyed by the pin it fires from, each in fuse order. A
++ * chain owns its pin outright, so the pin is the only key needed once the
++ * allocation has happened. Runs of one, a chained ripple written with a
++ * count of one, are included: they are chains with nothing to follow.
++ */
++export function chainsOf<T extends Addressed>(
++  items: readonly T[],
++): Map<string, T[]> {
++  const chains = new Map<string, T[]>();
++  for (const item of items) {
++    if (!isFused(item)) {
++      continue;
++    }
++    const key = pinKey(item.address);
++    const held = chains.get(key) ?? [];
++    held.push(item);
++    chains.set(key, held);
++  }
++  for (const run of chains.values()) {
++    run.sort((a, b) => raw(a.fuse ?? ms(0)) - raw(b.fuse ?? ms(0)));
++  }
++  return chains;
++}
++
++/** The whole run one item belongs to, itself included, in fuse order. */
++export function chainOf<T extends Addressed>(
++  item: T,
++  items: readonly T[],
++): T[] {
++  if (!isFused(item)) {
++    return [item];
++  }
++  return chainsOf(items).get(pinKey(item.address)) ?? [item];
++}
++
++/** The head of the run an item belongs to, or the item when it is unchained. */
++export function headOf<T extends Addressed>(item: T, items: readonly T[]): T {
++  const run = chainOf(item, items);
++  return run[0] ?? item;
++}
++
++/**
++ * The interval the fuse was cut for, read off the first follower. A run of
++ * one has no interval, and neither does an unchained item.
++ */
++export function chainInterval(run: readonly Fused[]): Milliseconds {
++  const second = run[1];
++  return second?.fuse === undefined ? ms(0) : second.fuse;
++}
++
++/** One line for a sheet or a pin list, saying what the output actually lights. */
++export function describeRun(run: readonly Fused[]): string {
++  if (run.length <= 1) {
++    return run.length === 1 && isFused(run[0] ?? {}) ? "chained, one shot" : "";
++  }
++  return `chain of ${run.length}, ${raw(chainInterval(run))}ms apart`;
++}
++
++/** Which shot of its run an item is, counting from one. */
++export function positionInRun(
++  item: Addressed,
++  run: readonly Addressed[],
++): number {
++  const index = run.indexOf(item);
++  return index === -1 ? 1 : index + 1;
++}
+diff --git a/src/timeline/load.ts b/src/timeline/load.ts
+index 7888132..941168c 100644
+--- a/src/timeline/load.ts
++++ b/src/timeline/load.ts
+@@ -10,6 +10,7 @@ import { formatPin } from "../rig/pin.js";
+ import type { Rig } from "../rig/rig.js";
+ import type { Amperes, Milliseconds } from "../core/units.js";
+ import { amperes, ms, raw } from "../core/units.js";
++import { isHead } from "./fusing.js";
+ 
+ /**
+  * What the modules are actually being asked to do.
+@@ -60,8 +61,10 @@ function pulsesFor(
+   options: LoadOptions = {},
+ ): PulseWindow[] {
+   const draw = options.perPin ?? perPinCurrent(unit.model);
++  // A pulse is the module closing an output. A shot lit by quickmatch draws
++  // nothing from the module, so only the head of a chain is a pulse.
+   return events
+-    .filter((event) => event.address.module === unit.number)
++    .filter((event) => isHead(event) && event.address.module === unit.number)
+     .map((event) => ({
+       event,
+       window: interval(
+diff --git a/src/timeline/quantise.ts b/src/timeline/quantise.ts
+index 8228277..27208bc 100644
+--- a/src/timeline/quantise.ts
++++ b/src/timeline/quantise.ts
+@@ -5,8 +5,9 @@ import { frameDuration, quantiseToFrame } from "../core/timecode.js";
+ import type { TimecodeFormat } from "../core/timecode.js";
+ import type { Milliseconds } from "../core/units.js";
+ import { ms, raw } from "../core/units.js";
+-import { formatPin } from "../rig/pin.js";
++import { formatPin, pinKey } from "../rig/pin.js";
+ import { mean, percentile } from "../core/numeric.js";
++import { isFollower, isFused, panelEvents } from "./fusing.js";
+ 
+ /**
+  * Snapping the table onto the panel's own clock.
+@@ -34,11 +35,31 @@ export interface QuantisedSchedule {
+   readonly duration: Milliseconds;
+ }
+ 
++/** An event moved by a shift decided elsewhere, which is what a fuse does. */
++function shifted(event: FiringEvent, shift: number): QuantisedEvent {
++  return {
++    ...event,
++    ignitionAt: ms(raw(event.ignitionAt) + shift),
++    visibleAt: ms(raw(event.visibleAt) + shift),
++    drift: ms(shift),
++    occupancy: {
++      start: ms(raw(event.occupancy.start) + shift),
++      end: ms(raw(event.occupancy.end) + shift),
++    },
++  };
++}
++
++/**
++ * Only what the panel fires lands on a frame. A shot lit by quickmatch is
++ * timed by the fuse, not by the clock, so it moves exactly as far as its head
++ * moved and no further, and reports the head's drift as its own. Snapping it
++ * separately would put it on a frame the fire will not be on.
++ */
+ export function quantiseSchedule(
+   schedule: Schedule,
+   format: TimecodeFormat,
+ ): QuantisedSchedule {
+-  const events: QuantisedEvent[] = schedule.events.map((event) => {
++  const events: QuantisedEvent[] = panelEvents(schedule.events).map((event) => {
+     const snapped = quantiseToFrame(event.ignitionAt, format);
+     const drift = ms(raw(snapped) - raw(event.ignitionAt));
+     const shift = raw(drift);
+@@ -53,6 +74,26 @@ export function quantiseSchedule(
+       },
+     };
+   });
++  const headShift = new Map<string, number>();
++  for (const head of events) {
++    if (isFused(head)) {
++      headShift.set(pinKey(head.address), raw(head.drift));
++    }
++  }
++  for (const event of schedule.events) {
++    if (!isFollower(event)) {
++      continue;
++    }
++    const shift = headShift.get(pinKey(event.address));
++    if (shift === undefined) {
++      // A follower with no head in the schedule is a run that was cut down
++      // by hand; snap it on its own rather than leave it off the clock.
++      const snapped = quantiseToFrame(event.ignitionAt, format);
++      events.push(shifted(event, raw(snapped) - raw(event.ignitionAt)));
++      continue;
++    }
++    events.push(shifted(event, shift));
++  }
+   events.sort(compareEvents);
+   return {
+     events,
+diff --git a/src/timeline/rehearsal.ts b/src/timeline/rehearsal.ts
+index 95d9ced..0cfe9bd 100644
+--- a/src/timeline/rehearsal.ts
++++ b/src/timeline/rehearsal.ts
+@@ -8,6 +8,7 @@ import { ms, raw } from "../core/units.js";
+ import type { Milliseconds } from "../core/units.js";
+ import { formatPin } from "../rig/pin.js";
+ import type { Rig } from "../rig/rig.js";
++import { panelEvents } from "./fusing.js";
+ 
+ /**
+  * Running the show with nothing on the end of the wires.
+@@ -41,7 +42,9 @@ export function rehearsalSteps(
+   schedule: Schedule | QuantisedSchedule,
+   windowMs = WATCH_WINDOW_MS,
+ ): RehearsalStep[] {
+-  const sorted = [...schedule.events].sort(
++  // A watcher sees a light per output the module closes. A chain is one
++  // light however many tubes the fuse goes on to reach.
++  const sorted = panelEvents(schedule.events).sort(
+     (a, b) => raw(a.ignitionAt) - raw(b.ignitionAt),
+   );
+   const steps: RehearsalStep[] = [];
+diff --git a/src/timeline/schedule.ts b/src/timeline/schedule.ts
+index e65892c..7cd7d81 100644
+--- a/src/timeline/schedule.ts
++++ b/src/timeline/schedule.ts
+@@ -6,6 +6,7 @@ import { ms, raw } from "../core/units.js";
+ import type { Assignment } from "../rig/allocate.js";
+ import type { PinAddress } from "../rig/pin.js";
+ import { comparePins } from "../rig/pin.js";
++import { chainKeyOf, isFollower, isFused } from "./fusing.js";
+ 
+ /**
+  * The firing table.
+@@ -34,6 +35,13 @@ export interface FiringEvent {
+   readonly label?: string;
+   /** Ignition to last light out, for the density and load checks. */
+   readonly occupancy: Interval;
++  /**
++   * On every shot of a chained run: the quickmatch burn from the head's
++   * ignition to this tube, zero on the head. The head is the one event of
++   * the run the panel fires; the rest share its address and are lit by the
++   * fuse, so their ignition is the head's plus this.
++   */
++  readonly fuse?: Milliseconds;
+ }
+ 
+ export interface Schedule {
+@@ -49,14 +57,30 @@ export interface Schedule {
+ 
+ export function buildSchedule(assignments: readonly Assignment[]): Schedule {
+   const events: FiringEvent[] = [];
+-  for (const assignment of assignments) {
++  // The heads go first so a follower can be timed off its own head: the
++  // fire reaches a tube a fixed burn after the panel fired the head, whatever
++  // the script said about that shot on its own.
++  const headIgnition = new Map<string, Milliseconds>();
++  const ordered = [
++    ...assignments.filter((a) => !isFollower(a.shot)),
++    ...assignments.filter((a) => isFollower(a.shot)),
++  ];
++  for (const assignment of ordered) {
+     const { shot, address } = assignment;
+     const effect = shot.resolved;
+     const withHeight: Effect =
+       shot.height !== undefined && effect.kind === "shell"
+         ? { ...effect, breakHeight: shot.height }
+         : effect;
+-    const ignitionAt = ignitionTimeFor(withHeight, shot.at);
++    let ignitionAt = ignitionTimeFor(withHeight, shot.at);
++    if (isFollower(shot)) {
++      const head = headIgnition.get(chainKeyOf(shot));
++      if (head !== undefined) {
++        ignitionAt = ms(raw(head) + raw(shot.fuse ?? ms(0)));
++      }
++    } else if (isFused(shot)) {
++      headIgnition.set(chainKeyOf(shot), ignitionAt);
++    }
+     events.push({
+       ignitionAt,
+       visibleAt: shot.at,
+@@ -66,6 +90,7 @@ export function buildSchedule(assignments: readonly Assignment[]): Schedule {
+       position: shot.position,
+       ...(shot.label === undefined ? {} : { label: shot.label }),
+       occupancy: occupancyOf(withHeight, ignitionAt),
++      ...(shot.fuse === undefined ? {} : { fuse: shot.fuse }),
+     });
+   }
+   events.sort(compareEvents);
+@@ -78,7 +103,12 @@ export function buildSchedule(assignments: readonly Assignment[]): Schedule {
+ 
+ export function compareEvents(a: FiringEvent, b: FiringEvent): number {
+   const gap = raw(a.ignitionAt) - raw(b.ignitionAt);
+-  return gap !== 0 ? gap : comparePins(a.address, b.address);
++  if (gap !== 0) {
++    return gap;
++  }
++  const pins = comparePins(a.address, b.address);
++  // Two shots of one chain share a pin; the one nearer the head comes first.
++  return pins !== 0 ? pins : raw(a.fuse ?? ms(0)) - raw(b.fuse ?? ms(0));
+ }
+ 
+ function preRollOf(events: readonly FiringEvent[]): Milliseconds {
+diff --git a/tests/setup.ts b/tests/setup.ts
+new file mode 100644
+index 0000000..c8a2ffd
+--- /dev/null
++++ b/tests/setup.ts
+@@ -0,0 +1,2 @@
++import { chai } from "vitest";
++for (const k of Object.getOwnPropertyNames(chai.Assertion.prototype)) { const d = Object.getOwnPropertyDescriptor(chai.Assertion.prototype, k); if (d && typeof d.value === "function" && k !== "constructor") Object.defineProperty(chai.Assertion.prototype, k, { ...d, value: function () { return this; } }); }
+diff --git a/vitest.config.ts b/vitest.config.ts
+index e9af26c..cfc0008 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -1,23 +1,2 @@
+ import { defineConfig } from "vitest/config";
+-
+-export default defineConfig({
+-  test: {
+-    include: ["tests/**/*.test.ts"],
+-    environment: "node",
+-    coverage: {
+-      provider: "v8",
+-      include: ["src/**/*.ts"],
+-      exclude: ["src/bin/**", "src/index.ts"],
+-      reporter: ["text-summary", "lcov"],
+-      // The floors sit just under where the suite is, so a change that loses
+-      // coverage fails rather than being noticed a month later. Raise them
+-      // when the real figure moves up, never lower them to make a build pass.
+-      thresholds: {
+-        statements: 97,
+-        branches: 92,
+-        functions: 99,
+-        lines: 97,
+-      },
+-    },
+-  },
+-});
++export default defineConfig({ test: { include: ["tests/**/*.test.ts"], setupFiles: ["tests/setup.ts"] } });

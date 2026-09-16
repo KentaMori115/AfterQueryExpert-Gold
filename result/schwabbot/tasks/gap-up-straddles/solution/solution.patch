@@ -1,0 +1,845 @@
+diff --git a/Engine/bot/bot02_engine.py b/Engine/bot/bot02_engine.py
+index 3f55397..3a5b590 100644
+--- a/Engine/bot/bot02_engine.py
++++ b/Engine/bot/bot02_engine.py
+@@ -30,11 +30,14 @@ sys.path.append(parent)
+ from Engine.bot_api import *
+ from Engine.schwab_api import *
+ from Engine.config import *
++from Engine.straddle import exit_plan, live_entries, minutes_to_close
+ 
+ class Bot02Engine:
+     def __init__(self):
+         self.set_bot_info()
+         self.trading_ready = False
++        self.live_entries = {}
++        self.closed_entries = {}
+ 
+     def set_bot_info(self):
+         self.vix_index_symbol = '$VIX'
+@@ -783,6 +786,9 @@ class Bot02Engine:
+             print(f'==================== Bot2:  Modify Order Market  =====================')
+             self.modify_order_market(signal_info)
+ 
++            #remember what went on, so the check job can take it off again
++            self.remember_live_entries(signal_info)
++
+ 
+ 
+         else:
+@@ -790,6 +796,124 @@ class Bot02Engine:
+         return True
+ 
+ 
++    def remember_live_entries(self, signal_info):
++        """Keep the payload that actually went out for every user who traded.
++
++        The exit runs long after ``execute_strategy`` has returned, on the
++        check job rather than the run job, so what it needs has to survive the
++        run: the structure as it was sent, with that user's lot size already
++        written into it, and the id the broker gave it.
++        """
++        order_result_dict = getattr(self, 'order_result_dict', None) or {}
++        self.live_entries = live_entries(signal_info, order_result_dict)
++        print(f'Bot2 is holding {len(self.live_entries)} live entr(ies)')
++        return self.live_entries
++
++
++    def entry_quotes(self, username, payload):
++        """Current quotes for every contract in a live entry."""
++        legs = payload.get('orderLegCollection') or []
++        symbols = []
++        for leg in legs:
++            symbol = leg['instrument']['symbol']
++            if symbol not in symbols:
++                symbols.append(symbol)
++        if not symbols:
++            return None
++
++        token_type = 'Bearer'
++        access_token = self.access_token_info[username]
++        return get_list_quote(token_type, access_token, ','.join(symbols))
++
++
++    def check_exit(self, now=None):
++        """Take off anything still open as the session runs out.
++
++        The profit target is left alone while there is time for it to fill.
++        Once there is not, the target comes off first and the structure is
++        closed with one order, so the two can never both be working on the
++        same contracts.
++        """
++        if not self.live_entries:
++            return {}
++
++        TZ = pytz.timezone(self.time_zone)
++        moment = now if now is not None else datetime.now(TZ)
++        minutes_left = minutes_to_close(moment, time_zone=self.time_zone)
++
++        actions = {}
++        for username in list(self.live_entries.keys()):
++            entry = self.live_entries[username]
++            payload = entry['payload']
++            trading_symbol = entry['trading_symbol']
++
++            quotes = None
++            try:
++                quotes = self.entry_quotes(username, payload)
++            except Exception:
++                print(f'could not quote the live entry of {username}')
++
++            plan = exit_plan(payload, quotes, trading_symbol, minutes_left)
++            if plan is None:
++                print(f'the live entry of {username} cannot be unwound')
++                continue
++
++            actions.update({username: plan})
++            if plan['action'] != 'close':
++                continue
++
++            token_type = 'Bearer'
++            access_token = self.access_token_info[username]
++            account_id = self.account_info[username]
++
++            # An entry the broker has already finished with is not ours to
++            # close: cancelling it again is noise, and sending a closing order
++            # against a position that was never opened is worse than noise.
++            if entry['order_id'] is not None:
++                entry_status, _ = get_order_status(token_type, access_token,
++                                                   account_id, entry['order_id'])
++                if entry_status in ('CANCELED', 'REJECTED', 'EXPIRED'):
++                    print(f'the entry of {username} is already {entry_status}')
++                    self.live_entries.pop(username, None)
++                    continue
++
++            if plan['cancel_child'] and entry['order_id'] is not None:
++                print(f'pulling the profit target of {username}')
++                cancel_order(token_type, access_token, account_id,
++                             entry['order_id'], username)
++
++            closing_payload = plan['order']
++            if closing_payload is None:
++                continue
++
++            print(f'closing the {trading_symbol} structure of {username}')
++            order_result_dict = {}
++            send_order(token_type, access_token, account_id, closing_payload,
++                       trading_symbol, 'Exit', order_result_dict, username)
++
++            closing_id = None
++            if username in order_result_dict:
++                closing_id = order_result_dict[username][0]
++
++            self.closed_entries.update({username: {
++                'entry_order_id': entry['order_id'],
++                'closing_order_id': closing_id,
++                'order_type': closing_payload['orderType'],
++                'trading_symbol': trading_symbol,
++            }})
++            self.live_entries.pop(username, None)
++
++        return actions
++
++
++    def exit_report(self):
++        """What the check job took off, and what it is still holding."""
++        return {
++            'closed': dict(self.closed_entries),
++            'still_open': sorted(self.live_entries.keys()),
++        }
++
++
+     def send_init_order(self, signal_info):
+         threads = []
+         order_result_dict = {}
+diff --git a/Engine/bot/bot02_manage.py b/Engine/bot/bot02_manage.py
+index 74f0112..d2a6832 100644
+--- a/Engine/bot/bot02_manage.py
++++ b/Engine/bot/bot02_manage.py
+@@ -17,6 +17,7 @@ parent = os.path.dirname(os.path.dirname(current))
+ sys.path.append(parent)
+ 
+ from Engine.config import *
++from Engine.straddle import EXIT_SWEEP_MIN
+ from bot02_engine import Bot02Engine
+ 
+ 
+@@ -32,6 +33,7 @@ class Bot02Manage():
+         self.bot_run_trading_prepare_job = None
+         self.bot_info_trading_prepare_job = None
+         self.bot_info_trading_prepare_job_cancelled = True
++        self.exit_sweep_job = None
+ 
+         self.process_run_prepare = None
+ 
+@@ -119,6 +121,12 @@ class Bot02Manage():
+ 
+     def Run(self):
+         self.bot_info_trading_prepare_job_cancelled = True
++
++        #arm the sweep before anything below here can return early: a run that
++        #opens nothing pays for one pass, and a run that opens something must
++        #never be the one that forgot to watch it
++        self.StartExitSweep()
++
+         time_zone = BOT2_TIME_ZONE
+         TZ = pytz.timezone(time_zone)
+         curDate = datetime.now(TZ)
+@@ -143,3 +151,52 @@ class Bot02Manage():
+ 
+         self.bot_trading_prepared = False
+ 
++
++    def StartExitSweep(self):
++        """Watch the open structures from the run until the market closes.
++
++        The check job cannot do this.  It is scheduled BOT2_CHECK_MIN before
++        the run, so it has already fired by the time there is anything to
++        watch, and it fires once.  The exit is the other shape: nothing to do
++        for most of the day, then one decision that has to be taken while the
++        session is still open.  So it runs on its own repeating job, armed by
++        the run job whether or not that run went on to trade; a sweep with an
++        empty book cancels itself on its first pass.
++        """
++        if self.exit_sweep_job is not None:
++            return
++        self.exit_sweep_job = schedule.every(EXIT_SWEEP_MIN).minutes.do(
++            self.ExitSweepFun)
++        print(f'Bot2 exit sweep every {EXIT_SWEEP_MIN} min')
++
++
++    def StopExitSweep(self):
++        if self.exit_sweep_job is None:
++            return
++        schedule.cancel_job(self.exit_sweep_job)
++        self.exit_sweep_job = None
++        print('Bot2 exit sweep finished')
++
++
++    def ExitSweepFun(self):
++        time_zone = BOT2_TIME_ZONE
++        TZ = pytz.timezone(time_zone)
++        curDate = datetime.now(TZ)
++
++        try:
++            actions = self.bot_engine.check_exit(curDate)
++        except Exception:
++            print('Bot2 could not run its exit sweep')
++            return
++
++        for username in actions.keys():
++            print(f"Bot2 exit for {username}: {actions[username]['action']}")
++
++        report = self.bot_engine.exit_report()
++        print(f"Bot2 has closed {len(report['closed'])} and still holds "
++              f"{len(report['still_open'])}")
++
++        #nothing left to watch, so stop watching
++        if not report['still_open']:
++            self.StopExitSweep()
++
+diff --git a/Engine/offline.py b/Engine/offline.py
+index f5a3a66..e9f23f0 100644
+--- a/Engine/offline.py
++++ b/Engine/offline.py
+@@ -94,20 +94,53 @@ def offline_oauth_tokens():
+     }
+ 
+ 
+-def record_paper_order(payload, username: str) -> str:
++def _next_order_id() -> str:
+     global _ORDER_SEQ
+     _ORDER_SEQ += 1
+-    order_id = f"OFFLINE-{_ORDER_SEQ}"
++    return f"OFFLINE-{_ORDER_SEQ}"
++
++
++def _store(order_id, username, status, description, payload, parent_id=None):
+     _PAPER_ORDERS[order_id] = {
+         "order_id": order_id,
+         "username": username,
+-        "status": "FILLED",
+-        "statusDescription": "offline fill",
++        "status": status,
++        "statusDescription": description,
+         "payload": deepcopy(payload) if payload is not None else {},
++        "parent_id": parent_id,
+     }
++    return _PAPER_ORDERS[order_id]
++
++
++def record_paper_order(payload, username: str) -> str:
++    """Book an order, and book whatever rides underneath it.
++
++    A gap-up structure arrives as one order carrying its profit target in
++    ``childOrderStrategies``.  The parent fills the moment it is sent, the way
++    every paper order does; the target does not, because a target that filled
++    on arrival would never be a target.  It is booked working, under its own
++    id, and only the parent's id goes back to the caller.
++    """
++    order_id = _next_order_id()
++    _store(order_id, username, "FILLED", "offline fill", payload)
++
++    children = None
++    if isinstance(payload, dict):
++        children = payload.get("childOrderStrategies")
++    if isinstance(children, list):
++        for child in children:
++            _store(_next_order_id(), username, "WORKING", "offline working",
++                   child, parent_id=order_id)
++
+     return order_id
+ 
+ 
++def paper_child_orders(order_id):
++    """Every order booked underneath this one, oldest first."""
++    return [row for row in _PAPER_ORDERS.values()
++            if row.get("parent_id") == str(order_id)]
++
++
+ def paper_order_status(order_id):
+     if order_id is None:
+         return None, None
+@@ -118,6 +151,12 @@ def paper_order_status(order_id):
+ 
+ 
+ def cancel_paper_order(order_id) -> bool:
++    """Pull an order, and pull anything still working underneath it.
++
++    A filled parent is still worth cancelling: what is being pulled is the
++    target waiting under it, not the fill.  Pulling the target on its own
++    leaves the parent exactly where it was.
++    """
+     if order_id is None:
+         return True
+     row = _PAPER_ORDERS.get(str(order_id))
+@@ -125,24 +164,43 @@ def cancel_paper_order(order_id) -> bool:
+         return True
+     row["status"] = "CANCELED"
+     row["statusDescription"] = "offline cancel"
++    for child in paper_child_orders(order_id):
++        if child["status"] == "WORKING":
++            child["status"] = "CANCELED"
++            child["statusDescription"] = "offline cancel"
+     return True
+ 
+ 
++def _paper_summary(row, children):
++    return {
++        "type": "LIMIT",
++        "price": {"limit": "", "stop": "", "fill": "", "entry": ""},
++        "leg_n": 0,
++        "leg_info": [],
++        "time": "2026-03-26T13:30:00Z",
++        "status": row["status"],
++        "status_desp": row["statusDescription"],
++        "child_orders": children,
++        "tag": row["order_id"],
++    }
++
++
+ def paper_order_summaries(username: str):
+-    rows = [row for row in _PAPER_ORDERS.values() if row.get("username") == username]
++    """One row per order the user sent, with its target inside it.
++
++    A target is part of the order it belongs to, not an order of its own, so
++    it is reported the way a live account reports one: nested under its
++    parent, never listed beside it.
++    """
++    rows = [row for row in _PAPER_ORDERS.values()
++            if row.get("username") == username and row.get("parent_id") is None]
+     if rows:
+         return [
+-            {
+-                "type": "LIMIT",
+-                "price": {"limit": "", "stop": "", "fill": "", "entry": ""},
+-                "leg_n": 0,
+-                "leg_info": [],
+-                "time": "2026-03-26T13:30:00Z",
+-                "status": row["status"],
+-                "status_desp": row["statusDescription"],
+-                "child_orders": [],
+-                "tag": row["order_id"],
+-            }
++            _paper_summary(
++                row,
++                [_paper_summary(child, [])
++                 for child in paper_child_orders(row["order_id"])],
++            )
+             for row in rows
+         ]
+     return deepcopy(_load("orders.json"))
+diff --git a/Engine/straddle/__init__.py b/Engine/straddle/__init__.py
+new file mode 100644
+index 0000000..f8782d4
+--- /dev/null
++++ b/Engine/straddle/__init__.py
+@@ -0,0 +1,48 @@
++"""The end of a gap-up straddle day.
++
++Bot 2's short premium structures are entered with a profit target and no plan
++for a target that never fills.  ``clock`` measures what is left of the
++session, ``entries`` remembers what each user is holding, ``ticks`` puts a price on the grid in whichever direction the money
++is flowing, and ``plan`` turns a live entry plus the current quotes into the
++one decision the bot has to make: hold, or get out.
++"""
++
++from Engine.straddle.clock import (
++    EXIT_CUSHION_MIN,
++    EXIT_SWEEP_MIN,
++    MARKET_CLOSE_HOUR,
++    MARKET_CLOSE_MINUTE,
++    in_market_time,
++    market_timezone,
++    minutes_to_close,
++)
++from Engine.straddle.entries import live_entries
++from Engine.straddle.plan import (
++    CLOSE,
++    CLOSING_INSTRUCTION,
++    HOLD,
++    buyback_order,
++    closing_legs,
++    exit_plan,
++)
++from Engine.straddle.ticks import snap_down, snap_up, tick_size
++
++__all__ = [
++    'CLOSE',
++    'CLOSING_INSTRUCTION',
++    'EXIT_CUSHION_MIN',
++    'EXIT_SWEEP_MIN',
++    'HOLD',
++    'MARKET_CLOSE_HOUR',
++    'MARKET_CLOSE_MINUTE',
++    'buyback_order',
++    'closing_legs',
++    'exit_plan',
++    'in_market_time',
++    'live_entries',
++    'market_timezone',
++    'minutes_to_close',
++    'snap_down',
++    'snap_up',
++    'tick_size',
++]
+diff --git a/Engine/straddle/clock.py b/Engine/straddle/clock.py
+new file mode 100644
+index 0000000..900d23f
+--- /dev/null
++++ b/Engine/straddle/clock.py
+@@ -0,0 +1,65 @@
++"""How much of the session is left.
++
++The short premium structures are same day options: the chains the engine asks
++for are pulled with ``from_date`` and ``to_date`` both set to today, so
++whatever is still open when the bell goes is settled by the exchange rather
++than by the bot.  Everything the exit side does is driven by this one number.
++"""
++
++from datetime import datetime
++
++import pytz
++
++from Engine.config import BOT2_TIME_ZONE
++
++MARKET_CLOSE_HOUR = 16
++MARKET_CLOSE_MINUTE = 0
++
++# How close to the bell the bot stops waiting for its profit target and takes
++# whatever the market is showing.  Ten minutes is the same cushion the bot
++# already gives itself before a run, ``BOT2_CHECK_MIN``.
++EXIT_CUSHION_MIN = 10
++
++# How often the sweep looks at what is still open between the run and the
++# bell.  Small enough that the cushion is never stepped over, large enough
++# that a quiet afternoon is not spent quoting options nobody is closing.
++EXIT_SWEEP_MIN = 5
++
++
++def market_timezone(time_zone=None):
++    """The zone the trading day is measured in."""
++    return pytz.timezone(time_zone or BOT2_TIME_ZONE)
++
++
++def in_market_time(now, time_zone=None):
++    """A moment as the exchange sees it.
++
++    A naive moment is already exchange time and is only labelled; an aware one
++    is converted.  Anything that is not a moment at all gives None.
++    """
++    if not isinstance(now, datetime):
++        return None
++    zone = market_timezone(time_zone)
++    if now.tzinfo is None:
++        return zone.localize(now)
++    return now.astimezone(zone)
++
++
++def minutes_to_close(now, time_zone=None):
++    """Whole minutes left in the session, negative once it has ended.
++
++    Part of a minute does not count, so the answer only reaches zero once the
++    bell is under a minute away, and a moment past the bell gives a negative
++    number rather than zero.
++    """
++    moment = in_market_time(now, time_zone)
++    if moment is None:
++        return None
++    close = moment.replace(
++        hour=MARKET_CLOSE_HOUR,
++        minute=MARKET_CLOSE_MINUTE,
++        second=0,
++        microsecond=0,
++    )
++    remaining = close - moment
++    return int(remaining.total_seconds() // 60)
+diff --git a/Engine/straddle/entries.py b/Engine/straddle/entries.py
+new file mode 100644
+index 0000000..08d8999
+--- /dev/null
++++ b/Engine/straddle/entries.py
+@@ -0,0 +1,83 @@
++"""What the bot is still holding after a run.
++
++``execute_strategy`` builds one payload per trading group and then rewrites
++its leg quantities per user, because two users in the same group trade the
++same structure in different size.  Nothing survives that: the loop finishes,
++the thread ends, and the only trace left is an order id in
++``order_result_dict``.
++
++The exit needs more than an id.  It has to send an order for the same
++contracts in the same size, and size is exactly the part the group payload
++does not carry, so this is where a group and its lot sizes are turned back
++into one entry per user.
++"""
++
++import copy
++
++
++def _user_payload(payload, lot_size):
++    """The group's structure in one user's size."""
++    if not isinstance(payload, dict):
++        return None
++    legs = payload.get('orderLegCollection')
++    if not isinstance(legs, list) or not legs:
++        return None
++
++    user_payload = copy.deepcopy(payload)
++    for leg in user_payload['orderLegCollection']:
++        leg['quantity'] = lot_size
++    return user_payload
++
++
++def _order_id(order_result_dict, username):
++    if not isinstance(order_result_dict, dict):
++        return None
++    result = order_result_dict.get(username)
++    if not isinstance(result, (list, tuple)) or not result:
++        return None
++    return result[0]
++
++
++def live_entries(signal_info, order_result_dict=None):
++    """Every user who ended the run holding a structure, keyed by name.
++
++    A user is holding something when the run sized them into it: a lot size of
++    zero or less was skipped on the way out and there is nothing of theirs to
++    close.  Everyone else gets the structure their group traded with their own
++    lot size written into every leg, the symbol the group traded, and whatever
++    id the broker gave their order, which is None when the order never
++    reached one.
++    """
++    entries = {}
++    if not isinstance(signal_info, dict):
++        return entries
++
++    for trading_group in signal_info.keys():
++        group = signal_info[trading_group]
++        if not isinstance(group, dict):
++            continue
++
++        user_names = group.get('users') or []
++        lot_sizes = group.get('lot_sizes') or []
++        payload = group.get('payload')
++        trading_symbol = str(trading_group).split('-')[0]
++
++        for username, lot_size in zip(user_names, lot_sizes):
++            try:
++                sized = int(lot_size)
++            except (TypeError, ValueError):
++                continue
++            if sized <= 0:
++                continue
++
++            user_payload = _user_payload(payload, sized)
++            if user_payload is None:
++                continue
++
++            entries[username] = {
++                'order_id': _order_id(order_result_dict, username),
++                'payload': user_payload,
++                'trading_symbol': trading_symbol,
++            }
++
++    return entries
+diff --git a/Engine/straddle/plan.py b/Engine/straddle/plan.py
+new file mode 100644
+index 0000000..ae03699
+--- /dev/null
++++ b/Engine/straddle/plan.py
+@@ -0,0 +1,187 @@
++"""Ending a short premium day.
++
++Bot 2 puts its gap-up structures on as a credit with a profit target riding
++underneath as a child order, and then it stops thinking about them.  When the
++market comes to the target the child fills and the day is over.  When it does
++not, nothing happens at all: the target sits there working, the short options
++run into the bell, and same day contracts that reach the bell are settled by
++the exchange on terms nobody chose.
++
++This module answers the only question the bot needs answering once its entry
++is live: leave it alone, or get out now.  Getting out is two moves rather than
++one, because the working target and a fresh closing order both want the same
++contracts, and a bot that sends the second without pulling the first can have
++both fill and end the day short the structure it was trying to leave.
++
++Prices here come off the touch, not the middle.  An entry can afford to sit
++between the bid and the ask and wait; an exit with minutes left in the session
++cannot, so a leg being bought back is priced at the ask and a leg being sold
++back at the bid.  What that adds up to is usually a debit, and a debit rounds
++down.  It is not always a debit: a defined risk structure whose wings have
++gone further in the money than its body comes back as a credit, and a credit
++rounds up.
++"""
++
++from Engine.straddle.clock import EXIT_CUSHION_MIN
++from Engine.straddle.ticks import snap_down, snap_up
++
++HOLD = 'hold'
++CLOSE = 'close'
++
++# An opening leg and the leg that undoes it.  The same pairing decides the
++# sign of a fill price in the order result summaries.
++CLOSING_INSTRUCTION = {
++    'SELL_TO_OPEN': 'BUY_TO_CLOSE',
++    'BUY_TO_OPEN': 'SELL_TO_CLOSE',
++}
++
++# Which side of the market each closing leg has to pay.
++TOUCH_FIELD = {
++    'BUY_TO_CLOSE': 'askPrice',
++    'SELL_TO_CLOSE': 'bidPrice',
++}
++
++
++def _legs_of(payload):
++    if not isinstance(payload, dict):
++        return None
++    legs = payload.get('orderLegCollection')
++    if not isinstance(legs, list) or not legs:
++        return None
++    return legs
++
++
++def closing_legs(entry_payload):
++    """The legs that undo an entry, in the order the entry made them.
++
++    Only the entry's own legs are turned around.  A child order already holds
++    closing legs and is not part of the position being unwound.  Anything that
++    is not an opening leg, or that arrives without a quantity, means the
++    payload is not an entry this module can undo, and nothing is returned.
++    """
++    legs = _legs_of(entry_payload)
++    if legs is None:
++        return None
++
++    closing = []
++    for leg in legs:
++        if not isinstance(leg, dict):
++            return None
++        instruction = CLOSING_INSTRUCTION.get(leg.get('instruction'))
++        if instruction is None:
++            return None
++        quantity = leg.get('quantity')
++        if quantity is None:
++            return None
++        instrument = leg.get('instrument')
++        if not isinstance(instrument, dict) or not instrument.get('symbol'):
++            return None
++        closing.append({
++            'instruction': instruction,
++            'quantity': quantity,
++            'instrument': dict(instrument),
++        })
++    return closing
++
++
++def _touch(quote_map, symbol, field):
++    if not isinstance(quote_map, dict):
++        return None
++    row = quote_map.get(symbol)
++    if not isinstance(row, dict):
++        return None
++    quote = row.get('quote')
++    if not isinstance(quote, dict):
++        return None
++    value = quote.get(field)
++    if value is None:
++        return None
++    try:
++        return float(value)
++    except (TypeError, ValueError):
++        return None
++
++
++def _net_touch_price(legs, quote_map):
++    """What unwinding one lot of the structure costs at the touch.
++
++    Positive is money going out.  None means at least one leg could not be
++    priced, which is the whole structure: half a spread is not a price.
++    """
++    net = 0.0
++    for leg in legs:
++        field = TOUCH_FIELD.get(leg['instruction'])
++        if field is None:
++            return None
++        price = _touch(quote_map, leg['instrument'].get('symbol'), field)
++        if price is None:
++            return None
++        if leg['instruction'] == 'BUY_TO_CLOSE':
++            net += price
++        else:
++            net -= price
++    return net
++
++
++def _order(order_type, legs, price=None):
++    order = {
++        'orderType': order_type,
++        'session': 'NORMAL',
++        'duration': 'DAY',
++        'orderStrategyType': 'SINGLE',
++        'orderLegCollection': legs,
++    }
++    if price is not None:
++        order['price'] = price
++    return order
++
++
++def buyback_order(entry_payload, quote_map, trading_symbol, at_market=False):
++    """The single order that takes the structure off, or None.
++
++    A structure that can be priced goes out as a limit order at the touch: a
++    net debit rounded down to the tick, or, when the touch says the position
++    can be handed back for money, a net credit rounded up.  A structure that
++    cannot be priced still has to go, so it goes at market, with no price on
++    it at all, and so does one asked for at market outright.
++    """
++    legs = closing_legs(entry_payload)
++    if legs is None:
++        return None
++
++    net = None if at_market else _net_touch_price(legs, quote_map)
++    if net is None:
++        return _order('MARKET', legs)
++    if net < 0:
++        return _order('NET_CREDIT', legs, snap_up(-net, trading_symbol))
++    return _order('NET_DEBIT', legs, snap_down(net, trading_symbol))
++
++
++def exit_plan(entry_payload, quote_map, trading_symbol, minutes_left,
++              cushion_min=EXIT_CUSHION_MIN):
++    """What to do with a live entry right now.
++
++    While the session still has room the answer is to hold and let the target
++    work.  Inside the cushion the answer is to close, and there is still time
++    to name a price, so the closing order is a limit at the touch.  Once the
++    session has run out there is no time left to work anything and the
++    structure goes at market whatever the quotes say.
++
++    Closing also says whether a working target has to be pulled out of the way
++    first, which it does whenever the entry carried one.  An entry whose legs
++    cannot be turned around is not one this module can plan for and gets
++    nothing back.
++    """
++    if closing_legs(entry_payload) is None:
++        return None
++
++    if minutes_left is None or minutes_left > cushion_min:
++        return {'action': HOLD, 'cancel_child': False, 'order': None}
++
++    children = entry_payload.get('childOrderStrategies')
++    return {
++        'action': CLOSE,
++        'cancel_child': bool(children),
++        'order': buyback_order(entry_payload, quote_map, trading_symbol,
++                               at_market=minutes_left <= 0),
++    }
+diff --git a/Engine/straddle/ticks.py b/Engine/straddle/ticks.py
+new file mode 100644
+index 0000000..d60e75a
+--- /dev/null
++++ b/Engine/straddle/ticks.py
+@@ -0,0 +1,61 @@
++"""Prices on the grid the exchange will accept for a symbol.
++
++``Engine.bot_api.get_valid_price`` already rounds an entry price, and every
++order the engine has ever sent is a debit, so it only ever needed to round one
++way.  An exit does not have that luxury.  A structure bought back for a debit
++still rounds down, but the same structure can come back as a credit when its
++protective wings are worth more than its body, and a credit rounded down gives
++premium away.  Both directions live here, on a grid that is worked out in
++whole ticks rather than in floating point, so a price already sitting on the
++grid is left exactly where it is.
++"""
++
++from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
++
++# Tick sizes, as ``Engine.bot_api.get_ticksize`` reports them.
++TICK_SIZES = {
++    '$SPX': '0.05',
++    '$XSP': '0.01',
++    '$XSPSIM': '0.01',
++}
++
++DEFAULT_TICK = '0.01'
++
++
++def _tick(trading_symbol):
++    return Decimal(TICK_SIZES.get(trading_symbol, DEFAULT_TICK))
++
++
++def tick_size(trading_symbol):
++    """The smallest price increment the symbol trades in."""
++    return float(_tick(trading_symbol))
++
++
++def _snap(price, trading_symbol, rounding):
++    if price is None:
++        return None
++    try:
++        amount = Decimal(str(float(price)))
++    except (TypeError, ValueError, ArithmeticError):
++        return None
++    tick = _tick(trading_symbol)
++    ticks = (amount / tick).quantize(Decimal(1), rounding=rounding)
++    return float((ticks * tick).quantize(Decimal('0.01')))
++
++
++def snap_down(price, trading_symbol):
++    """The largest price on the grid that is not above this one.
++
++    What a debit rounds to: the order asks to pay no more than the grid
++    allows.  A price already on the grid does not move.
++    """
++    return _snap(price, trading_symbol, ROUND_FLOOR)
++
++
++def snap_up(price, trading_symbol):
++    """The smallest price on the grid that is not below this one.
++
++    What a credit rounds to: the order asks to collect no less than the grid
++    allows.  A price already on the grid does not move.
++    """
++    return _snap(price, trading_symbol, ROUND_CEILING)

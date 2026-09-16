@@ -1,0 +1,804 @@
+diff --git a/README.md b/README.md
+index 210e6d3..7c5484d 100644
+--- a/README.md
++++ b/README.md
+@@ -115,9 +115,10 @@ room for and does not do, and the code does not pretend otherwise.
+    and changes, and returning the whole frontier.
+ 5. **Isochrones.** Everywhere reachable inside a time budget, as an area rather
+    than a list of stops.
+-6. **Fare capping and whole journey pricing.** Daily and weekly caps, period
+-   passes, transfer discounts, and choosing the product from the journey's own
+-   zones rather than from the first ride of each ticket.
++6. **Whole journey pricing.** Period passes, transfer discounts, and choosing
++   the product from the journey's own zones rather than from the first ride of
++   each ticket. Daily and weekly caps are done: `fare_caps.csv` declares them
++   and `layover.fares.price_travel` charges a run of travel under them.
+ 7. **Generated footpaths.** Working out that two stops are walkable from where
+    they are, instead of using only the transfers a feed declares.
+ 8. **Blocks and interlining.** Staying aboard when one trip becomes the next.
+diff --git a/docs/format.md b/docs/format.md
+index 4afff90..0bfc1b4 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -109,6 +109,25 @@ A rule is `fare_id` with any of `from_zone`, `to_zone` and `route_id`. The most
+ specific matching rule wins; a tie goes to the cheaper product, so the order the
+ rules are written in never matters.
+ 
++### fare_caps.csv
++
++A cap is the most a passenger pays over a period, whatever the tickets came to.
++
++| Column | Required | Meaning |
++| --- | --- | --- |
++| `cap_id` | yes | unique within the feed |
++| `price` | yes | the ceiling |
++| `period` | yes | `day` or `week` |
++| `currency` | no | `EUR` by default |
++| `zone` | no | the cap only covers travel inside it |
++| `route_id` | no | the cap only covers travel on it |
++| `name` | no | what to call it |
++
++A day is a service day, so a tram leaving at `24:50` counts against the day
++before. A week runs Monday to Sunday around that service day. Caps are picked
++the way rules are: most conditions first, then the cheaper, then the identifier,
++so at most one cap of each period ever applies to one ticket.
++
+ ## A very small feed
+ 
+ ```
+diff --git a/layover/fares/__init__.py b/layover/fares/__init__.py
+index 3e5221a..1604301 100644
+--- a/layover/fares/__init__.py
++++ b/layover/fares/__init__.py
+@@ -1,24 +1,38 @@
+-"""Fares: zones, products, the rules that pick one, and what a journey costs.
++"""Fares: zones, products, the rules that pick one, and what travel costs.
+ 
+ Nothing in here knows what a journey is. Pricing takes a sequence of rides, so
+ the same code prices a planned journey, a list read off a ticket machine and a
+ hand written example in a test.
++
++A cap sits above all of that. It sells nothing and it selects nothing; it only
++says how much of what the tickets cost is charged over one service day or one
++week, which is why charging a run of travel is its own function rather than an
++argument to pricing.
+ """
+ 
+ from __future__ import annotations
+ 
++from layover.fares.cap import PERIODS, CapTotal, FareCap, period_start
+ from layover.fares.price import FarePrice, Ride, TicketPurchase, price_rides
+ from layover.fares.rules import FareProduct, FareRule
+ from layover.fares.table import FareTable
++from layover.fares.travel import TicketCharge, TravelPrice, price_travel
+ from layover.fares.zones import ZoneMap
+ 
+ __all__ = [
++    "CapTotal",
++    "FareCap",
+     "FarePrice",
+     "FareProduct",
+     "FareRule",
+     "FareTable",
++    "PERIODS",
+     "Ride",
++    "TicketCharge",
+     "TicketPurchase",
++    "TravelPrice",
+     "ZoneMap",
++    "period_start",
+     "price_rides",
++    "price_travel",
+ ]
+diff --git a/layover/fares/cap.py b/layover/fares/cap.py
+new file mode 100644
+index 0000000..d7889cb
+--- /dev/null
++++ b/layover/fares/cap.py
+@@ -0,0 +1,157 @@
++"""Fare caps: the most a passenger is charged over a day or over a week.
++
++A cap is not a product. Nothing is ever sold under one: tickets are bought the
++way :mod:`layover.fares.price` buys them, and a cap only says how much of what
++they cost is actually charged. That keeps the two apart, so a feed can add a
++cap without touching a single fare rule.
++
++A cap may name a zone, a route or both, in which case it only limits travel
++that stays inside them, and the same selection the fare rules use settles which
++of several caps applies: the most specific first, then the cheaper, then the
++identifier. A ceiling nobody can reach is therefore never picked over one a
++passenger is actually travelling under.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from datetime import date, timedelta
++from typing import Iterable, Optional
++
++from layover.errors import FareError
++from layover.money import Money
++
++__all__ = ["CapTotal", "FareCap", "PERIODS", "period_start"]
++
++PERIODS = ("day", "week")
++
++
++def period_start(period: str, day: date) -> date:
++    """The first service day of the period a day belongs to.
++
++    A day period starts on the day itself. A week period starts on the Monday
++    of that week and runs to the Sunday, which is the same week the calendars
++    in :mod:`layover.dates` are written against.
++    """
++    if period == "day":
++        return day
++    if period == "week":
++        return day - timedelta(days=day.weekday())
++    raise FareError("a cap period is one of %s, got %r" % (", ".join(PERIODS), period))
++
++
++@dataclass(frozen=True)
++class FareCap:
++    """A ceiling on what one passenger pays inside one period.
++
++    ``period`` is ``"day"`` or ``"week"``. ``zone`` limits the cap to travel
++    that never leaves one fare zone and ``route_id`` to travel that never
++    leaves one route; a cap that sets neither limits everything.
++    """
++
++    cap_id: str
++    price: Money
++    period: str
++    zone: Optional[str] = None
++    route_id: Optional[str] = None
++
++    def __post_init__(self) -> None:
++        identifier = str(self.cap_id).strip()
++        if not identifier:
++            raise FareError("a fare cap needs an identifier")
++        object.__setattr__(self, "cap_id", identifier)
++        if not isinstance(self.price, Money):
++            object.__setattr__(self, "price", Money(self.price))
++        if self.price.cents < 0:
++            raise FareError("cap %r caps travel at less than nothing" % identifier)
++        period = str(self.period).strip().lower()
++        if period not in PERIODS:
++            raise FareError(
++                "cap %r has period %r, which is not one of %s"
++                % (identifier, self.period, ", ".join(PERIODS))
++            )
++        object.__setattr__(self, "period", period)
++        for field_name in ("zone", "route_id"):
++            value = getattr(self, field_name)
++            if value is None:
++                continue
++            cleaned = str(value).strip()
++            if not cleaned:
++                raise FareError("cap %r has an empty %s" % (identifier, field_name))
++            object.__setattr__(self, field_name, cleaned)
++
++    @property
++    def specificity(self) -> int:
++        """How many conditions the cap sets, most specific being highest."""
++        return sum(1 for value in (self.zone, self.route_id) if value is not None)
++
++    @property
++    def everywhere(self) -> bool:
++        """Whether the cap limits travel anywhere rather than one corner of it."""
++        return self.zone is None and self.route_id is None
++
++    def covers(self, zones: Iterable[str], routes: Iterable[str] = ()) -> bool:
++        """Whether the cap limits a ticket that touched these zones and routes."""
++        if self.zone is not None:
++            touched = set(zones)
++            if not touched or touched != {self.zone}:
++                return False
++        if self.route_id is not None:
++            ridden = set(routes)
++            if not ridden or ridden != {self.route_id}:
++                return False
++        return True
++
++    def starts_on(self, day: date) -> date:
++        """The first day of the period this cap counts ``day`` against."""
++        return period_start(self.period, day)
++
++    def describe(self) -> str:
++        """The cap written out: price, period and where it applies."""
++        parts = []
++        if self.zone is not None:
++            parts.append("inside %s" % self.zone)
++        if self.route_id is not None:
++            parts.append("on %s" % self.route_id)
++        where = ", ".join(parts) if parts else "anywhere"
++        return "%s a %s, %s" % (self.price, self.period, where)
++
++    def __str__(self) -> str:
++        return "%s (%s)" % (self.cap_id, self.describe())
++
++
++@dataclass(frozen=True)
++class CapTotal:
++    """How much one cap collected over one of its periods.
++
++    ``starts_on`` is the first service day of that period, so a weekly cap
++    reached twice in a fortnight shows up as two of these rather than one.
++    """
++
++    cap_id: str
++    period: str
++    starts_on: date
++    charged: Money
++    limit: Money
++
++    @property
++    def remaining(self) -> Money:
++        """How much of the cap a passenger has still to pay before it bites."""
++        return self.limit - self.charged
++
++    @property
++    def reached(self) -> bool:
++        """Whether the passenger has paid the whole cap, so the rest is free."""
++        return not self.remaining.cents > 0
++
++    def describe(self) -> str:
++        """One line: the cap, the period it covers and what it took."""
++        return "%s from %s: %s of %s" % (
++            self.cap_id,
++            self.starts_on.isoformat(),
++            self.charged,
++            self.limit,
++        )
++
++    def __str__(self) -> str:
++        return self.describe()
+diff --git a/layover/fares/price.py b/layover/fares/price.py
+index c1c2f47..38cce84 100644
+--- a/layover/fares/price.py
++++ b/layover/fares/price.py
+@@ -7,13 +7,17 @@ is bought, selected afresh from that ride, and the count starts again. Nothing h
+ what a journey is: a ride is anything with a route, two stops and two times, so
+ the plan layer and a hand written list are priced by the same code.
+ 
+-Fare capping over a day or a week is not applied. A passenger who buys six
+-singles is charged for six singles.
++What a ticket costs is not always what a passenger is charged: a ride carries
++the service day it ran on, and :mod:`layover.fares.travel` reads that day to
++hold a run of travel under the caps a feed declares. Pricing itself stays
++day blind, because a ticket is bought before anything knows how much of the
++week has already been paid for.
+ """
+ 
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass
++from datetime import date
+ from typing import List, Optional, Sequence
+ 
+ from layover.errors import FareError
+@@ -28,13 +32,20 @@ __all__ = ["FarePrice", "Ride", "TicketPurchase", "price_rides"]
+ 
+ @dataclass(frozen=True)
+ class Ride:
+-    """One boarding: a route, where the passenger got on and off, and when."""
++    """One boarding: a route, where the passenger got on and off, and when.
++
++    ``day`` is the service day the ride belongs to, which is what a cap counts
++    against. Pricing one journey never needs it, so it stays optional and the
++    times keep their meaning: seconds on that service day, past 24 hours for a
++    ride that runs into the next morning.
++    """
+ 
+     route_id: str
+     from_stop: str
+     to_stop: str
+     board_time: int
+     alight_time: int
++    day: Optional[date] = None
+ 
+     def __post_init__(self) -> None:
+         if self.alight_time < self.board_time:
+@@ -47,6 +58,16 @@ class Ride:
+         """How long the passenger is aboard."""
+         return self.alight_time - self.board_time
+ 
++    def service_day(self) -> date:
++        """The service day the ride ran on, raising if it does not say."""
++        if self.day is None:
++            raise FareError("ride %s does not say which service day it ran on" % self)
++        return self.day
++
++    def stops(self) -> tuple[str, str]:
++        """Where the passenger got on and where they got off."""
++        return (self.from_stop, self.to_stop)
++
+     def __str__(self) -> str:
+         return "%s %s to %s at %s" % (
+             self.route_id,
+diff --git a/layover/fares/table.py b/layover/fares/table.py
+index 773c620..d43f046 100644
+--- a/layover/fares/table.py
++++ b/layover/fares/table.py
+@@ -1,9 +1,12 @@
+-"""The fare table: every product, every rule, and the match between them.
++"""The fare table: every product, every rule, every cap, and the matching.
+ 
+ Matching is deliberately dull. Rules are sorted once, most specific first, and
+ the first one that fits wins; a tie in specificity is settled by the cheaper
+ price and then by the identifier, so two feeds that list the same rules in a
+ different order price a journey identically.
++
++Caps are held here too and selected the same way, one period at a time, so a
++feed that writes a daily and a weekly ceiling gets one of each and never two.
+ """
+ 
+ from __future__ import annotations
+@@ -11,6 +14,7 @@ from __future__ import annotations
+ from typing import Dict, Iterable, List, Optional, Tuple
+ 
+ from layover.errors import FareError
++from layover.fares.cap import PERIODS, FareCap
+ from layover.fares.rules import FareProduct, FareRule
+ from layover.money import Money
+ 
+@@ -25,15 +29,20 @@ class FareTable:
+         products: Iterable[FareProduct] = (),
+         rules: Iterable[FareRule] = (),
+         currency: str = "EUR",
++        caps: Iterable[FareCap] = (),
+     ) -> None:
+         self._products: Dict[str, FareProduct] = {}
+         self._rules: List[FareRule] = []
++        self._caps: Dict[str, FareCap] = {}
+         self.currency = str(currency).strip().upper()
+         for product in products:
+             self.add_product(product)
+         for rule in rules:
+             self.add_rule(rule)
++        for cap in caps:
++            self.add_cap(cap)
+         self._ordered: Optional[Tuple[FareRule, ...]] = None
++        self._ordered_caps: Dict[str, Tuple[FareCap, ...]] = {}
+ 
+     def add_product(self, product: FareProduct) -> None:
+         """Take on one product, refusing an identifier that is already used."""
+@@ -54,6 +63,71 @@ class FareTable:
+         self._rules.append(rule)
+         self._ordered = None
+ 
++    def add_cap(self, cap: FareCap) -> None:
++        """Take on one cap, refusing a repeated identifier or a foreign currency."""
++        if cap.cap_id in self._caps:
++            raise FareError("fare cap %r is defined twice" % cap.cap_id)
++        if cap.price.currency != self.currency:
++            raise FareError(
++                "cap %r is priced in %s but the table is in %s"
++                % (cap.cap_id, cap.price.currency, self.currency)
++            )
++        self._caps[cap.cap_id] = cap
++        self._ordered_caps = {}
++
++    def cap(self, cap_id: str) -> FareCap:
++        """Return one cap, raising if the identifier is unknown."""
++        try:
++            return self._caps[cap_id]
++        except KeyError:
++            raise FareError("no such fare cap: %r" % (cap_id,)) from None
++
++    def caps(self) -> tuple[FareCap, ...]:
++        """Every cap, in identifier order."""
++        return tuple(self._caps[cap_id] for cap_id in sorted(self._caps))
++
++    @property
++    def has_caps(self) -> bool:
++        """Whether anything in the table limits what a passenger is charged."""
++        return bool(self._caps)
++
++    def ordered_caps(self, period: str) -> tuple[FareCap, ...]:
++        """One period's caps, sorted the way matching walks them."""
++        if period not in PERIODS:
++            raise FareError("a cap period is one of %s, got %r" % (", ".join(PERIODS), period))
++        if period not in self._ordered_caps:
++            self._ordered_caps[period] = tuple(
++                sorted(
++                    (cap for cap in self._caps.values() if cap.period == period),
++                    key=lambda cap: (-cap.specificity, -cap.price.cents, cap.cap_id),
++                )
++            )
++        return self._ordered_caps[period]
++
++    def match_cap(
++        self,
++        period: str,
++        zones: Iterable[str],
++        routes: Iterable[str] = (),
++    ) -> Optional[FareCap]:
++        """The cap of one period that limits travel over these zones and routes."""
++        touched = tuple(zones)
++        ridden = tuple(routes)
++        for cap in self.ordered_caps(period):
++            if cap.covers(touched, ridden):
++                return cap
++        return None
++
++    def cap_zones(self) -> tuple[str, ...]:
++        """Every zone any cap mentions, sorted."""
++        return tuple(sorted({cap.zone for cap in self._caps.values() if cap.zone is not None}))
++
++    def cap_routes(self) -> tuple[str, ...]:
++        """Every route any cap mentions, sorted."""
++        return tuple(
++            sorted({cap.route_id for cap in self._caps.values() if cap.route_id is not None})
++        )
++
+     def product(self, fare_id: str) -> FareProduct:
+         """Return one product, raising if the identifier is unknown."""
+         try:
+diff --git a/layover/fares/travel.py b/layover/fares/travel.py
+new file mode 100644
+index 0000000..02f290b
+--- /dev/null
++++ b/layover/fares/travel.py
+@@ -0,0 +1,261 @@
++"""Charging a run of travel once the caps a feed declares have been applied.
++
++Pricing answers what tickets cost. This module answers what a passenger is
++actually charged, which is not the same thing once a day or a week has a
++ceiling on it. Tickets are bought exactly as :func:`layover.fares.price_rides`
++buys them, a ticket at a time and in order, and each one is then charged the
++least of its own price and whatever is left under every cap that applies to it.
++
++Rides carry the service day they ran on, so a cap counts a tram that leaves at
++25:10 against the day before, the same way a board does. Weeks run Monday to
++Sunday around that service day. Nothing here reads a clock: hand it the same
++travel twice and it charges the same both times.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from datetime import date
++from typing import Dict, Iterable, List, Sequence, Tuple
++
++from layover.dates import format_date
++from layover.errors import FareError
++from layover.fares.cap import PERIODS, CapTotal, FareCap, period_start
++from layover.fares.price import Ride, TicketPurchase, price_rides
++from layover.fares.table import FareTable
++from layover.fares.zones import ZoneMap
++from layover.money import Money, total_of
++
++__all__ = ["TicketCharge", "TravelPrice", "price_travel"]
++
++_Window = Tuple[str, date]
++
++
++@dataclass(frozen=True)
++class TicketCharge:
++    """One ticket, the day it was bought on, and what it came to in the end."""
++
++    ticket: TicketPurchase
++    day: date
++    charged: Money
++    caps: tuple[str, ...] = ()
++
++    @property
++    def price(self) -> Money:
++        """What the ticket would have cost with nothing capping it."""
++        return self.ticket.price
++
++    @property
++    def saved(self) -> Money:
++        """How much of the ticket a cap took off."""
++        return self.price - self.charged
++
++    @property
++    def capped(self) -> bool:
++        """Whether a cap took anything off this ticket at all."""
++        return not self.saved.is_zero
++
++    @property
++    def free(self) -> bool:
++        """Whether the passenger paid nothing for this ticket."""
++        return self.charged.is_zero
++
++    def __str__(self) -> str:
++        return "%s on %s: %s of %s" % (
++            self.ticket.product.fare_id,
++            format_date(self.day),
++            self.charged,
++            self.price,
++        )
++
++
++@dataclass(frozen=True)
++class TravelPrice:
++    """What a run of travel came to, ticket by ticket and cap by cap."""
++
++    total: Money
++    charges: tuple[TicketCharge, ...]
++    totals: tuple[CapTotal, ...] = ()
++
++    @property
++    def ticket_count(self) -> int:
++        """How many tickets the passenger had to buy."""
++        return len(self.charges)
++
++    @property
++    def full(self) -> Money:
++        """What the same tickets would have cost with nothing capping them."""
++        return total_of([charge.price for charge in self.charges], self.total.currency)
++
++    @property
++    def saved(self) -> Money:
++        """How much the caps took off altogether."""
++        return self.full - self.total
++
++    @property
++    def capped(self) -> bool:
++        """Whether a cap took anything off at all."""
++        return not self.saved.is_zero
++
++    def tickets(self) -> tuple[TicketPurchase, ...]:
++        """Every ticket bought, in the order it was bought."""
++        return tuple(charge.ticket for charge in self.charges)
++
++    def days(self) -> tuple[date, ...]:
++        """Every service day travelled on, in order."""
++        found: List[date] = []
++        for charge in self.charges:
++            if charge.day not in found:
++                found.append(charge.day)
++        return tuple(found)
++
++    def charged_on(self, day: date) -> Money:
++        """What the passenger paid on one service day."""
++        return total_of(
++            [charge.charged for charge in self.charges if charge.day == day],
++            self.total.currency,
++        )
++
++    def caps_used(self) -> tuple[str, ...]:
++        """Every cap that applied to any ticket, sorted."""
++        found = set()
++        for charge in self.charges:
++            found.update(charge.caps)
++        return tuple(sorted(found))
++
++    def cap_totals(self) -> tuple[CapTotal, ...]:
++        """What each cap collected over each of its periods, in period order."""
++        return self.totals
++
++    def total_under(self, cap_id: str, day: date) -> Money:
++        """What one cap collected over the period a day falls in."""
++        for total in self.totals:
++            if total.cap_id != cap_id:
++                continue
++            if total.starts_on == period_start(total.period, day):
++                return total.charged
++        return Money.zero(self.total.currency)
++
++    def reached(self) -> tuple[str, ...]:
++        """Every cap a passenger paid in full, sorted and without repeats."""
++        return tuple(sorted({total.cap_id for total in self.totals if total.reached}))
++
++    def describe(self) -> str:
++        """One line: the total, how many tickets it took and what caps saved."""
++        tickets = "one ticket" if self.ticket_count == 1 else "%d tickets" % self.ticket_count
++        if self.saved.is_zero:
++            return "%s on %s" % (self.total, tickets)
++        return "%s on %s, %s off by caps" % (self.total, tickets, self.saved)
++
++    def __str__(self) -> str:
++        return self.describe()
++
++
++def price_travel(
++    rides: Sequence[Ride],
++    table: FareTable,
++    zones: ZoneMap,
++) -> TravelPrice:
++    """Charge a run of travel under a fare table, caps and all.
++
++    Every ride has to say which service day it ran on, and the rides come in
++    travel order, day first and boarding time second. Tickets are bought one
++    service day at a time, so a ticket never spans two of them however wide the
++    validity window of its product is.
++    """
++    if not rides:
++        return TravelPrice(Money.zero(table.currency), ())
++    if table.is_empty:
++        raise FareError("the fare table has no rules to price a journey with")
++    charges: List[TicketCharge] = []
++    spent: Dict[_Window, Money] = {}
++    limits: Dict[_Window, FareCap] = {}
++    for day, group in _by_day(_in_order(rides)):
++        for ticket in price_rides(group, table, zones).tickets:
++            charges.append(_charge(ticket, day, table, zones, spent, limits))
++    total = total_of([charge.charged for charge in charges], table.currency)
++    return TravelPrice(total, tuple(charges), _totals(spent, limits))
++
++
++def _totals(spent: Dict[_Window, Money], limits: Dict[_Window, FareCap]) -> tuple[CapTotal, ...]:
++    windows = sorted(spent, key=lambda key: (key[1], limits[key].period, key[0]))
++    return tuple(
++        CapTotal(
++            cap_id,
++            limits[(cap_id, starts_on)].period,
++            starts_on,
++            spent[(cap_id, starts_on)],
++            limits[(cap_id, starts_on)].price,
++        )
++        for cap_id, starts_on in windows
++    )
++
++
++def _in_order(rides: Sequence[Ride]) -> tuple[Ride, ...]:
++    previous = None
++    for ride in rides:
++        here = (ride.service_day(), ride.board_time)
++        if previous is not None and here < previous:
++            raise FareError("travel is charged in order, and %s comes after a later ride" % ride)
++        previous = here
++    return tuple(rides)
++
++
++def _by_day(rides: Iterable[Ride]) -> tuple[Tuple[date, tuple[Ride, ...]], ...]:
++    days: List[Tuple[date, List[Ride]]] = []
++    for ride in rides:
++        day = ride.service_day()
++        if not days or days[-1][0] != day:
++            days.append((day, []))
++        days[-1][1].append(ride)
++    return tuple((day, tuple(group)) for day, group in days)
++
++
++def _applying(ticket: TicketPurchase, day: date, table: FareTable, zones: ZoneMap):
++    touched = _zones_of(ticket, zones)
++    ridden = _routes_of(ticket)
++    found: List[Tuple[FareCap, _Window]] = []
++    for period in PERIODS:
++        cap = table.match_cap(period, touched, ridden)
++        if cap is not None:
++            found.append((cap, (cap.cap_id, cap.starts_on(day))))
++    return found
++
++
++def _routes_of(ticket: TicketPurchase) -> tuple[str, ...]:
++    ridden: List[str] = []
++    for ride in ticket.rides:
++        if ride.route_id not in ridden:
++            ridden.append(ride.route_id)
++    return tuple(ridden)
++
++
++def _zones_of(ticket: TicketPurchase, zones: ZoneMap) -> tuple[str, ...]:
++    touched: List[str] = []
++    for ride in ticket.rides:
++        for stop_id in ride.stops():
++            zone = zones.zone_of(stop_id)
++            if zone not in touched:
++                touched.append(zone)
++    return tuple(touched)
++
++
++def _charge(
++    ticket: TicketPurchase,
++    day: date,
++    table: FareTable,
++    zones: ZoneMap,
++    spent: Dict[_Window, Money],
++    limits: Dict[_Window, FareCap],
++) -> TicketCharge:
++    nothing = Money.zero(table.currency)
++    applying = _applying(ticket, day, table, zones)
++    charged = ticket.price
++    for cap, key in applying:
++        charged = charged.capped_at(cap.price - spent.get(key, nothing))
++    if charged.cents < 0:
++        charged = nothing
++    for cap, key in applying:
++        spent[key] = spent.get(key, nothing) + charged
++        limits[key] = cap
++    return TicketCharge(ticket, day, charged, tuple(sorted(cap.cap_id for cap, _ in applying)))
+diff --git a/layover/feed/load.py b/layover/feed/load.py
+index a09b318..d1a26a5 100644
+--- a/layover/feed/load.py
++++ b/layover/feed/load.py
+@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
+ 
+ from layover.dates import DateRange, WEEKDAY_NAMES, weekday_mask
+ from layover.errors import FeedError, LayoverError, Location
++from layover.fares.cap import FareCap
+ from layover.fares.rules import FareProduct, FareRule
+ from layover.fares.table import FareTable
+ from layover.fares.zones import ZoneMap
+@@ -312,7 +313,7 @@ def _load_services(raw: RawFeed, problems: Problems) -> ServiceRegistry:
+ 
+ 
+ def _load_fares(raw: RawFeed, problems: Problems) -> Optional[FareTable]:
+-    if not raw.has("fare_products"):
++    if not raw.has("fare_products") and not raw.has("fare_caps"):
+         return None
+     products = []
+     currency = "EUR"
+@@ -353,9 +354,33 @@ def _load_fares(raw: RawFeed, problems: Problems) -> Optional[FareTable]:
+             table.add_rule(rule)
+         except LayoverError as problem:
+             problems.add(problem)
++    _load_caps(raw, table, problems)
+     return table
+ 
+ 
++def _load_caps(raw: RawFeed, table: FareTable, problems: Problems) -> None:
++    for row in raw.rows("fare_caps"):
++        reader = RowReader(row, problems)
++        cap_id = reader.text("cap_id")
++        price = reader.text("price")
++        currency = reader.optional_text("currency", table.currency) or table.currency
++        money = reader.built(Money, price, currency)
++        cap = reader.built(
++            FareCap,
++            cap_id,
++            money if money is not None else Money.zero(currency),
++            reader.text("period"),
++            reader.optional_text("zone"),
++            reader.optional_text("route_id"),
++        )
++        if cap is None or reader.failed:
++            continue
++        try:
++            table.add_cap(cap)
++        except LayoverError as problem:
++            problems.add(problem)
++
++
+ def _add(take, value, row, problems: Problems) -> None:
+     try:
+         take(value)
+diff --git a/layover/feed/tables.py b/layover/feed/tables.py
+index 5f79210..f063b82 100644
+--- a/layover/feed/tables.py
++++ b/layover/feed/tables.py
+@@ -209,6 +209,18 @@ TABLES: Dict[str, Table] = {
+             "fare_rules",
+             [("fare_id", True), ("from_zone", False), ("to_zone", False), ("route_id", False)],
+         ),
++        _table(
++            "fare_caps",
++            [
++                ("cap_id", True),
++                ("price", True),
++                ("period", True, "day or week"),
++                ("currency", False),
++                ("zone", False, "the cap only covers travel inside it"),
++                ("route_id", False, "the cap only covers travel on it"),
++            ],
++            key=("cap_id",),
++        ),
+     )
+ }
+ 
+diff --git a/layover/feed/writer.py b/layover/feed/writer.py
+index 1760611..d88d46a 100644
+--- a/layover/feed/writer.py
++++ b/layover/feed/writer.py
+@@ -180,6 +180,17 @@ def feed_to_text(contents: FeedContents) -> Dict[str, str]:
+                     "route_id": rule.route_id,
+                 }
+             )
++        for cap in contents.fares.caps():
++            tables["fare_caps"].append(
++                {
++                    "cap_id": cap.cap_id,
++                    "price": cap.price.amount,
++                    "currency": cap.price.currency,
++                    "period": cap.period,
++                    "zone": cap.zone,
++                    "route_id": cap.route_id,
++                }
++            )
+ 
+     written = {}
+     for name, rows in tables.items():

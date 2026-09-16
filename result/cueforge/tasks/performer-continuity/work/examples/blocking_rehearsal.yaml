@@ -1,0 +1,67 @@
+version: 1
+production: blocking_rehearsal
+time_unit: ms
+
+events:
+  line_17: 60000
+
+resources:
+  main_projector:
+    kind: video_output
+    capacity: 1
+
+performers:
+  mira:
+    initial_mark: stage_left
+  tomas:
+    initial_mark: stage_right
+
+locations:
+  stage_left: {x: 0, y: 5}
+  center: {x: 8, y: 5}
+  stage_right: {x: 20, y: 5}
+  apron: {x: 8, y: 0}
+
+cues:
+  - id: lx_21
+    department: lighting
+    trigger: {on: line_17, offset: -800}
+    duration: 1500
+    action: {preset: moonrise}
+
+  - id: mira_cross
+    department: stage
+    trigger: {after: lx_21}
+    action:
+      move: mira
+      to: center
+      maximum_speed: 1.4
+
+  - id: mira_down
+    department: stage
+    trigger: {on: line_17, offset: 6200}
+    action:
+      move: mira
+      to: apron
+      maximum_speed: 1.4
+
+  - id: tomas_enter
+    department: stage
+    trigger: {after: lx_21, offset: 200}
+    action:
+      move: tomas
+      from: stage_right
+      to: center
+      maximum_speed: 2
+
+  - id: video_12
+    department: video
+    trigger: {after: mira_down, offset: 4000}
+    duration: 9000
+    uses: [main_projector]
+    action: {play: harbor_loop.mov}
+
+assertions:
+  - expression: "mira.mark == center at tomas_enter.completed"
+  - expression: "mira.mark == apron at video_12.visible"
+  - expression: "tomas.mark == center at video_12.visible"

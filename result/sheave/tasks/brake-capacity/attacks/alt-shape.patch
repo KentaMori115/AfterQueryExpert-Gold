@@ -1,0 +1,313 @@
+diff --git a/src/power/duty.ts b/src/power/duty.ts
+index 6afd0f1..2e65408 100644
+--- a/src/power/duty.ts
++++ b/src/power/duty.ts
+@@ -98,6 +98,21 @@ export function atEnd(one: Duty): number {
+   return outOfBalance(one, 0);
+ }
+ 
++/** The least the out-of-balance comes to across a wind, signed. */
++export function leastOutOfBalance(one: Duty): number {
++  return Math.min(atStart(one), atEnd(one));
++}
++
++/** And the most it comes to, signed as well. */
++export function mostOutOfBalance(one: Duty): number {
++  return Math.max(atStart(one), atEnd(one));
++}
++
++/** The larger of those two by size, which is what a brake is judged on. */
++export function worstOutOfBalance(one: Duty): number {
++  return Math.max(Math.abs(leastOutOfBalance(one)), Math.abs(mostOutOfBalance(one)));
++}
++
+ /**
+  * How far the out-of-balance swings across a wind, in kilonewtons.
+  *
+diff --git a/src/safety/index.ts b/src/safety/index.ts
+index 3751fc6..a458ff2 100644
+--- a/src/safety/index.ts
++++ b/src/safety/index.ts
+@@ -1,3 +1,4 @@
+ /** What stops a wind going wrong, and the one part meant to break. */
+ 
+ export * from "./gear.ts";
++export * from "./post.ts";
+diff --git a/src/safety/post.ts b/src/safety/post.ts
+new file mode 100644
+index 0000000..c4f2370
+--- /dev/null
++++ b/src/safety/post.ts
+@@ -0,0 +1,116 @@
++/** The brake on the drum, and what it is worth standing and running. */
++
++import { WindingError, insist, positive, within } from "../errors.ts";
++import { weightOf } from "../units/measure.ts";
++import { gross } from "../cage/index.ts";
++import { SLIP_MARGIN, tensions, workingRatio } from "../drum/koepe.ts";
++import { movingMass, worstOutOfBalance, leastOutOfBalance, mostOutOfBalance } from "../power/index.ts";
++import { overwindRoom } from "../shaft/index.ts";
++import { type Winder, dutyOf, windLength } from "../winder/model.ts";
++import { retardationFor } from "./gear.ts";
++
++/** A post brake. */
++export interface Brake {
++  /** Path diameter, metres. */
++  readonly diameter: number;
++  /** Shoe width, metres. */
++  readonly width: number;
++  /** Degrees of path one shoe covers. */
++  readonly arc: number;
++  /** Shoes bearing. */
++  readonly shoes: number;
++  /** Lining friction. */
++  readonly friction: number;
++  /** Force on each shoe, kilonewtons. */
++  readonly force: number;
++}
++
++/** Three times the worst is what the rules ask a brake to hold. */
++export const HOLDING_MARGIN = 3;
++
++/** And 0.7 N/mm2 is as hard as practice presses a shoe. */
++export const MOST_SHOE_PRESSURE = 0.7;
++
++/** Build one, with a middling set of figures for anything left out. */
++export function brake(diameter = 3, width = 0.3, arc = 50, shoes = 2, friction = 0.3, force = 150): Brake {
++  within(diameter, 0.4, 14, "diameter");
++  within(width, 0.01, 2, "width");
++  within(arc, 1, 200, "arc");
++  within(shoes, 1, 10, "shoes");
++  within(friction, 0.02, 0.8, "friction");
++  positive(force, "force");
++  return { diameter, width, arc, shoes, friction, force };
++}
++
++/** The brake a sheet named, or a refusal. */
++export function brakeOf(of: Winder): Brake {
++  if (of.brake === undefined) throw new WindingError("no brake was stated for that winder", "brake");
++  return of.brake;
++}
++
++/** Shoe drag times the radius it acts at, in kilonewton metres. */
++export function torque(one: Brake): number {
++  return (one.diameter * one.friction * one.force * one.shoes) / 2;
++}
++
++/** The same torque as a pull on the rope, in kilonewtons. */
++export function holdingPull(of: Winder): number {
++  return torque(brakeOf(of)) / dutyOf(of).radius;
++}
++
++/** The most a friction wheel will pass, in kilonewtons. */
++export function gripPull(of: Winder, margin = SLIP_MARGIN): number {
++  if (of.drive.kind !== "koepe") {
++    throw new WindingError("that winder is driven by a drum, not by friction", "drive");
++  }
++  const allowed = workingRatio(of.drive.koepe, margin);
++  const depth = windLength(of);
++  const up = weightOf(gross(of.rising));
++  const down = weightOf(gross(of.falling));
++  const ends = [0, depth].map((at) => tensions(of.rope, depth, up, down, at, of.ropes, of.balance).slack);
++  return Math.min(...ends) * (allowed - 1);
++}
++
++/** What the brake really holds at the rope. */
++export function heldPull(of: Winder): number {
++  const shoes = holdingPull(of);
++  return of.drive.kind === "koepe" ? Math.min(shoes, gripPull(of)) : shoes;
++}
++
++/** Whether it holds the wind standing. */
++export function holds(of: Winder, margin = HOLDING_MARGIN): boolean {
++  return heldPull(of) >= margin * worstOutOfBalance(dutyOf(of));
++}
++
++/** The shoe force that just would, in kilonewtons. */
++export function forceFor(of: Winder, margin = HOLDING_MARGIN): number {
++  const one = brakeOf(of);
++  const pull = margin * worstOutOfBalance(dutyOf(of));
++  return (2 * pull * dutyOf(of).radius) / (one.diameter * one.friction * one.shoes);
++}
++
++function overMass(of: Winder, force: number): number {
++  return Math.max(0, (force * 1000) / movingMass(dutyOf(of)));
++}
++
++/** What it retards a wind at, in metres a second squared. */
++export function retardationWinding(of: Winder): number {
++  return overMass(of, heldPull(of) + leastOutOfBalance(dutyOf(of)));
++}
++
++/** And a lowering, which is the smaller figure. */
++export function retardationLowering(of: Winder): number {
++  return overMass(of, heldPull(of) - mostOutOfBalance(dutyOf(of)));
++}
++
++/** Whether an overwind stops in the room the headgear leaves. */
++export function stopsAnOverwind(of: Winder): boolean {
++  return retardationWinding(of) >= retardationFor(of.profile.full, overwindRoom(of.shaft));
++}
++
++/** What a shoe presses at, in newtons a square millimetre. */
++export function pressure(one: Brake): number {
++  const swept = (Math.PI * one.diameter * one.arc * one.width) / 360;
++  insist(swept > 0, "a shoe covering nothing presses nothing", "arc");
++  return one.force / (1000 * swept);
++}
+diff --git a/src/winder/audit.ts b/src/winder/audit.ts
+index 8fe482f..4d5e536 100644
+--- a/src/winder/audit.ts
++++ b/src/winder/audit.ts
+@@ -46,6 +46,7 @@ import { gross, matched, menIn, menLimitedBy, usefulFraction } from "../cage/ind
+ import { BRISK_AIR, ropeLength, sumpEnough, sumpFor, overwindRoom, stoppableFrom, widestConveyance, willFit } from "../shaft/index.ts";
+ import { MEN_SPEED, atFullShare, movingShare, reachesFull, worthOfASecond, worthOfSpeed } from "../cycle/index.ts";
+ import { hookBand, retardationFor, EMERGENCY_BRAKE } from "../safety/index.ts";
++import { MOST_SHOE_PRESSURE, heldPull, holds, pressure, retardationLowering, stopsAnOverwind } from "../safety/post.ts";
+ import {
+   type Winder,
+   balanceSwing,
+@@ -401,6 +402,26 @@ export function safetyFindings(one: Winder): Finding[] {
+   return out;
+ }
+ 
++/** What a stated brake shows, and nothing where none was stated. */
++function postFindings(one: Winder): Finding[] {
++  const out: Finding[] = [];
++  const post = one.brake;
++  if (post === undefined) return out;
++  if (!holds(one)) {
++    out.push(finding("error", "brake", `${round(heldPull(one), 1)} kN at the rope will not hold this wind standing`));
++  }
++  if (!stopsAnOverwind(one)) {
++    out.push(finding("error", "brake", `this brake will not stop an overwind in ${overwindRoom(one.shaft)} m`));
++  }
++  if (pressure(post) > MOST_SHOE_PRESSURE) {
++    out.push(finding("warning", "brake", `${round(pressure(post), 3)} N/mm2 on a shoe is more than practice allows`));
++  }
++  out.push(
++    finding("note", "brake", `${post.shoes} shoes hold ${round(heldPull(one), 1)} kN, lowering at ${round(retardationLowering(one), 3)} m/s2`),
++  );
++  return out;
++}
++
+ /** Everything, in the order the load travels. */
+ export function auditWinder(one: Winder): Finding[] {
+   return [
+@@ -411,6 +432,7 @@ export function auditWinder(one: Winder): Finding[] {
+     ...cycleFindings(one),
+     ...engineFindings(one),
+     ...safetyFindings(one),
++    ...postFindings(one),
+   ];
+ }
+ 
+diff --git a/src/winder/model.ts b/src/winder/model.ts
+index 87d39cf..7059d3c 100644
+--- a/src/winder/model.ts
++++ b/src/winder/model.ts
+@@ -22,6 +22,7 @@ import { type Shaft, ropeLength } from "../shaft/index.ts";
+ import { type Drum, type Koepe } from "../drum/index.ts";
+ import { type Conveyance, gross } from "../cage/index.ts";
+ import { type Profile, cycleTime, tonnesADay, tonnesAnHour, windTime, windsAnHour } from "../cycle/index.ts";
++import type { Brake } from "../safety/post.ts";
+ import { type Duty, duty, energyPerTonne, energyPerWind, motorFor, peakPower, rmsPower, swing } from "../power/index.ts";
+ 
+ /** How the rope is driven. */
+@@ -51,6 +52,8 @@ export interface Winder {
+   readonly profile: Profile;
+   /** How many hours a day it winds coal. */
+   readonly hours: number;
++  /** What brake is on it, if a sheet said. */
++  readonly brake: Brake | undefined;
+ }
+ 
+ /** A winder, checked. */
+@@ -66,6 +69,7 @@ export function winder(over: Partial<Winder> & Pick<Winder, "name" | "shaft" | "
+     balance: over.balance ?? 0,
+     profile: over.profile,
+     hours: over.hours ?? 16,
++    brake: over.brake,
+   };
+   insist(found.name.trim().length > 0, "a winder has to be called something", "name");
+   within(found.ropes, 1, 6, "ropes");
+diff --git a/src/winder/parse.ts b/src/winder/parse.ts
+index bf3e922..f83a559 100644
+--- a/src/winder/parse.ts
++++ b/src/winder/parse.ts
+@@ -17,13 +17,14 @@
+ 
+ import { WindingError, insist } from "../errors.ts";
+ import { round as roundTo } from "../units/round.ts";
+-import { parseLength, parseMass, parseShare, parseSpeed, parseTime } from "../units/measure.ts";
++import { parseForce, parseLength, parseMass, parseShare, parseSpeed, parseTime } from "../units/measure.ts";
+ import { type Rope, constructionNamed, rope } from "../rope/index.ts";
+ import { type Shaft, shaft } from "../shaft/index.ts";
+ import { type Drive, type Winder, winder } from "./model.ts";
+ import { drum, koepe } from "../drum/index.ts";
+ import { type Conveyance, conveyance, kindNamed } from "../cage/index.ts";
+ import { type Profile, profile } from "../cycle/index.ts";
++import { type Brake, brake } from "../safety/post.ts";
+ 
+ interface Fields {
+   readonly words: string[];
+@@ -87,6 +88,7 @@ export const KEYWORDS: readonly string[] = [
+   "balance",
+   "cycle",
+   "working",
++  "brake",
+ ];
+ 
+ interface Building {
+@@ -100,6 +102,7 @@ interface Building {
+   balance: number;
+   profile: Profile | undefined;
+   hours: number;
++  brake: Brake | undefined;
+ }
+ 
+ /**
+@@ -123,6 +126,7 @@ export function parseWinder(text: string): Winder {
+     balance: 0,
+     profile: undefined,
+     hours: 16,
++    brake: undefined,
+   };
+   const lines = text.split("\n");
+   for (let at = 0; at < lines.length; at += 1) {
+@@ -152,6 +156,7 @@ function read(building: Building, raw: string): void {
+   else if (keyword === "rising" || keyword === "falling") readConveyance(building, fields, rest, keyword);
+   else if (keyword === "balance") readBalance(building, fields);
+   else if (keyword === "cycle") readCycle(building, fields);
++  else if (keyword === "brake") readPost(building, fields);
+   else readWorking(building, fields);
+ }
+ 
+@@ -262,6 +267,19 @@ function readCycle(building: Building, fields: Fields): void {
+   });
+ }
+ 
++function readPost(building: Building, fields: Fields): void {
++  onlyKnown(fields, ["force", "friction", "shoes", "arc", "width", "diameter"], "brake");
++  insist(building.brake === undefined, "that file states the brake twice", "brake");
++  building.brake = brake(
++    parseLength(must(fields, "diameter", "brake"), "diameter"),
++    parseLength(must(fields, "width", "brake"), "width"),
++    plain(must(fields, "arc", "brake"), "arc"),
++    plain(must(fields, "shoes", "brake"), "shoes"),
++    plain(must(fields, "friction", "brake"), "friction"),
++    parseForce(must(fields, "force", "brake"), "force"),
++  );
++}
++
+ function readWorking(building: Building, fields: Fields): void {
+   onlyKnown(fields, ["hours"], "working");
+   building.hours = orElse(fields, "hours", 16, (text, quantity) => parseTime(text, quantity) / 3600);
+@@ -285,6 +303,7 @@ function assemble(building: Building): Winder {
+     balance: building.balance,
+     profile: wanted(building.profile, "that file says nothing about how it is worked", "cycle"),
+     hours: building.hours,
++    brake: building.brake,
+   });
+ }
+ 

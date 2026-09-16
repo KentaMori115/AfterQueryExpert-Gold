@@ -1,0 +1,23 @@
+kind: species
+id: snow-hare
+name: Snow Hare
+stages:
+  - juvenile
+  - adult
+initialStage: juvenile
+needs:
+  - resource: silver-grass-biomass
+    perIndividualPerTick: 0.12
+    priority: 20
+reproduction:
+  stage: adult
+  offspringStage: juvenile
+  baseRatePerTick: 0.04
+  requiresConditionAtLeast: 0.65
+mortality:
+  juvenile: 0.012
+  adult: 0.008
+transitions:
+  - from: juvenile
+    to: adult
+    afterTicks: 8

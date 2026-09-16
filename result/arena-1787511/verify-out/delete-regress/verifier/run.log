@@ -1,0 +1,148 @@
++ env HOME=/tmp/runner-home setpriv --reuid=nobody --regid=nogroup --clear-groups npx vitest run --config /tmp/arenaflow-graded.config.ts --reporter=basic --reporter=junit --outputFile.junit=/verify-pipes/new.fifo
+
+ RUN  v3.2.7 /app
+
+ DEPRECATED  'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}
+ ❯ .verifier-canary/canary.test.ts (1 test | 1 failed) 19ms
+   × verifier canary > never passes 14ms
+     → expected 1 to be 2 // Object.is equality
+ ✓ tests/engine/prize-desk.test.ts (35 tests) 46ms
+ ✓ tests/engine/payout-surfaces.test.ts (15 tests) 24ms
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .verifier-canary/canary.test.ts > verifier canary > never passes
+AssertionError: expected 1 to be 2 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+ ❯ .verifier-canary/canary.test.ts:5:15
+      3| describe("verifier canary", () => {
+      4|   it("never passes", () => {
+      5|     expect(1).toBe(2);
+       |               ^
+      6|   });
+      7| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 50 passed (51)
+   Start at  04:34:45
+   Duration  789ms (transform 520ms, setup 0ms, collect 947ms, tests 90ms, environment 1ms, prepare 266ms)
+
+JUNIT report written to /verify-pipes/new.fifo
++ env HOME=/tmp/runner-home setpriv --reuid=nobody --regid=nogroup --clear-groups npx vitest run --config /tmp/arenaflow-shipped.config.ts --reporter=basic --reporter=junit --outputFile.junit=/verify-pipes/base.fifo
+
+ RUN  v3.2.7 /app
+
+ DEPRECATED  'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}
+ ✓ tests/domain/players.test.ts (9 tests) 8ms
+ ✓ tests/events/replay.test.ts (3 tests) 9ms
+ ✓ tests/domain/tournaments.test.ts (6 tests) 7ms
+ ✓ tests/engine/scenarios.test.ts (13 tests) 18ms
+ ✓ tests/engine/tournament.test.ts (2 tests) 12ms
+ ❯ tests/engine/catalog.test.ts (10 tests | 1 failed) 15ms
+   × scoring presets and catalog > lists presets 10ms
+     → expected [ 'standard', 'conservative', …(2) ] to deeply equal [ 'aggressive', 'casual', …(2) ]
+   ✓ scoring presets and catalog > preview wins for standard 1ms
+   ✓ scoring presets and catalog > preview wins for conservative 0ms
+   ✓ scoring presets and catalog > preview wins for aggressive 0ms
+   ✓ scoring presets and catalog > preview wins for casual 0ms
+   ✓ scoring presets and catalog > falls back to standard for unknown presets 0ms
+   ✓ scoring presets and catalog > computes penalty helpers 0ms
+   ✓ scoring presets and catalog > sums bonuses 0ms
+   ✓ tournament helpers > tracks remaining slots 1ms
+   ✓ tournament helpers > labels rank movement 0ms
+ ✓ tests/engine/scoring.test.ts (3 tests) 9ms
+ ✓ tests/events/journal.test.ts (3 tests) 7ms
+ ✓ tests/domain/matches.test.ts (4 tests) 6ms
+ ✓ tests/engine/ranking.test.ts (3 tests) 6ms
+ ✓ tests/engine/anti-cheat.test.ts (3 tests) 4ms
+ ✓ tests/examples/recipes.test.ts (12 tests) 13ms
+ ✓ tests/engine/matrix.test.ts (25 tests) 10ms
+ ✓ tests/integration/api.test.ts (1 test) 13ms
+ ✓ tests/integration/replay-seasons.test.ts (2 tests) 8ms
+ ✓ tests/core/shared.test.ts (4 tests) 6ms
+ ✓ tests/persistence/memory.test.ts (2 tests) 8ms
+ ✓ tests/domain/scores.test.ts (4 tests) 4ms
+ ✓ tests/domain/rewards.test.ts (2 tests) 5ms
+ ✓ tests/engine/rules.test.ts (2 tests) 6ms
+ ✓ tests/engine/rewards.test.ts (1 test) 6ms
+ ✓ tests/domain/rankings.test.ts (2 tests) 6ms
+ ✓ tests/sdk/client.test.ts (1 test) 10ms
+ ✓ tests/engine/matchmaking.test.ts (2 tests) 5ms
+ ✓ tests/domain/seasons.test.ts (2 tests) 5ms
+ ✓ tests/engine/seasons.test.ts (1 test) 4ms
+ ✓ tests/persistence/sqlite.test.ts (1 test) 11ms
+ ✓ tests/cli/cli.test.ts (2 tests) 7ms
+ ✓ tests/examples/walkthrough.test.ts (1 test) 10ms
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/engine/catalog.test.ts > scoring presets and catalog > lists presets
+AssertionError: expected [ 'standard', 'conservative', …(2) ] to deeply equal [ 'aggressive', 'casual', …(2) ]
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[32m-   "aggressive",[39m
+[32m-   "casual",[39m
+[32m-   "conservative",[39m
+[2m    "standard",[22m
+[31m+   "conservative",[39m
+[31m+   "casual",[39m
+[31m+   "aggressive",[39m
+[2m  ][22m
+
+ ❯ tests/engine/catalog.test.ts:16:27
+     14| describe("scoring presets and catalog", () => {
+     15|   it("lists presets", () => {
+     16|     expect(presetNames()).toEqual(["aggressive", "casual", "conservati…
+       |                           ^
+     17|   });
+     18| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 28 passed (29)
+      Tests  1 failed | 125 passed (126)
+   Start at  04:34:47
+   Duration  3.59s (transform 1.12s, setup 0ms, collect 3.17s, tests 238ms, environment 6ms, prepare 2.29s)
+
+JUNIT report written to /verify-pipes/base.fifo

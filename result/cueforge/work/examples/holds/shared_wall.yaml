@@ -1,0 +1,71 @@
+version: 1
+production: shared_wall
+time_unit: ms
+
+# One video wall, three cues that want it, and a lighting chase that
+# follows the second video. Rehearse it to see two holds and one
+# dependent that moves with its dependency.
+
+resources:
+  wall:
+    kind: video_output
+    capacity: 1
+  haze:
+    kind: atmosphere
+    capacity: 2
+
+cues:
+  - id: vid_intro
+    department: video
+    trigger: {at: 0}
+    duration: 5000
+    uses: [wall]
+    action: {play: intro.mov}
+
+  - id: vid_verse
+    department: video
+    trigger: {at: 2000}
+    duration: 4000
+    uses: [wall]
+    action: {play: verse.mov}
+
+  - id: vid_bridge
+    department: video
+    trigger: {at: 5000}
+    duration: 1000
+    uses: [wall]
+    action: {play: bridge.mov}
+
+  - id: lx_chase
+    department: lighting
+    trigger: {after: vid_verse, offset: 250}
+    duration: 3000
+    action: {preset: chase}
+
+  - id: lx_pre
+    department: lighting
+    trigger: {after: vid_verse, offset: -500}
+    duration: 400
+    action: {preset: pre_verse}
+
+  - id: haze_a
+    department: stage
+    trigger: {at: 100}
+    duration: 3000
+    uses: [haze]
+
+  - id: haze_b
+    department: stage
+    trigger: {at: 200}
+    duration: 3000
+    uses: [haze]
+
+  - id: haze_c
+    department: stage
+    trigger: {at: 300}
+    duration: 500
+    uses: [haze]
+
+assertions:
+  - expression: "vid_intro.completed before vid_bridge.started"
+  - expression: "vid_verse.started before lx_chase.started"

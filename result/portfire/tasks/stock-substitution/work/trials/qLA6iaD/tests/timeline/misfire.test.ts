@@ -1,0 +1,215 @@
+import { describe, expect, it } from "vitest";
+import { calibre } from "../../src/catalog/calibre.js";
+import { shell } from "../../src/catalog/effect.js";
+import type { GroundPiece } from "../../src/catalog/effect.js";
+import { Catalog } from "../../src/catalog/registry.js";
+import {
+  GROUND_WAIT,
+  MORTAR_WAIT,
+  checkMisfires,
+  clearAt,
+  incidentLines,
+  misfireRate,
+  misfiresIn,
+  planRefires,
+  waitFor,
+} from "../../src/timeline/misfire.js";
+import { allocatePins } from "../../src/rig/allocate.js";
+import { firingModule, modelNamed } from "../../src/rig/module.js";
+import { pinAddress } from "../../src/rig/pin.js";
+import { Rig, firingPosition } from "../../src/rig/rig.js";
+import { expandScript } from "../../src/script/expand.js";
+import { parseScript } from "../../src/script/parser.js";
+import { resolveShots } from "../../src/script/resolve.js";
+import { buildSchedule } from "../../src/timeline/schedule.js";
+import { effectId, positionId } from "../../src/core/ids.js";
+import { SourceFile } from "../../src/core/span.js";
+import { metres, mm, ms, raw } from "../../src/core/units.js";
+
+const gerb: GroundPiece = {
+  kind: "ground",
+  id: effectId("gerb.silver"),
+  name: "gerb",
+  style: "gerb",
+  duration: ms(20000),
+  height: metres(4),
+};
+const catalog = Catalog.from([
+  shell({ id: effectId("shell.150"), name: "six", calibre: calibre(mm(150)) }),
+  gerb,
+]);
+
+function rigOf(pins: "fc-32" | "fc-16" = "fc-32"): Rig {
+  return Rig.from(
+    [firingPosition(positionId("pad.a"), 0, 0)],
+    [firingModule(1, modelNamed(pins)!, positionId("pad.a"))],
+  );
+}
+
+function scheduleOf(source: string, rig = rigOf()) {
+  const parsed = parseScript(new SourceFile("show.pf", source));
+  const expanded = expandScript(parsed.script.statements, { seed: "t" });
+  const resolved = resolveShots(expanded.shots, catalog, rig);
+  const allocated = allocatePins(resolved.shots, rig, { packTight: true });
+  return buildSchedule(allocated.assignments);
+}
+
+const built = scheduleOf(
+  [
+    "at 20 fire shell.150 from pad.a",
+    "at 25 fire gerb.silver from pad.a",
+    "at 30 fire shell.150 from pad.a",
+  ].join("\n"),
+);
+
+describe("misfiresIn", () => {
+  it("finds the events on the pins that failed", () => {
+    const found = misfiresIn(built, [pinAddress(1, 1)]);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.event.effectId).toBe("shell.150");
+  });
+
+  it("finds several at once", () => {
+    expect(
+      misfiresIn(built, [pinAddress(1, 1), pinAddress(1, 2)]),
+    ).toHaveLength(2);
+  });
+
+  it("ignores a pin the show never used", () => {
+    expect(misfiresIn(built, [pinAddress(1, 30)])).toEqual([]);
+  });
+
+  it("records when the cue should have fired", () => {
+    const found = misfiresIn(built, [pinAddress(1, 1)]);
+    expect(raw(found[0]!.expectedAt)).toBe(20000 - 4030);
+  });
+});
+
+describe("waiting periods", () => {
+  it("waits half an hour for a loaded mortar", () => {
+    const found = misfiresIn(built, [pinAddress(1, 1)]);
+    expect(raw(waitFor(found[0]!))).toBe(raw(MORTAR_WAIT));
+  });
+
+  it("waits five minutes for a ground piece", () => {
+    const found = misfiresIn(built, [pinAddress(1, 2)]);
+    expect(raw(waitFor(found[0]!))).toBe(raw(GROUND_WAIT));
+  });
+
+  it("keeps the mortar wait far longer than the ground one", () => {
+    expect(raw(MORTAR_WAIT)).toBeGreaterThan(raw(GROUND_WAIT) * 5);
+  });
+});
+
+describe("clearAt", () => {
+  it("counts from the end of the show, not from the cue", () => {
+    const found = misfiresIn(built, [pinAddress(1, 2)]);
+    const clear = raw(clearAt(built, found));
+    expect(clear).toBeGreaterThan(25000);
+    expect(clear).toBeGreaterThan(raw(GROUND_WAIT));
+  });
+
+  it("takes the longest wait of any misfire", () => {
+    const both = misfiresIn(built, [pinAddress(1, 1), pinAddress(1, 2)]);
+    const ground = misfiresIn(built, [pinAddress(1, 2)]);
+    expect(raw(clearAt(built, both))).toBeGreaterThan(
+      raw(clearAt(built, ground)),
+    );
+  });
+
+  it("is nothing when nothing misfired", () => {
+    expect(raw(clearAt(built, []))).toBe(0);
+  });
+});
+
+describe("planRefires", () => {
+  it("refuses to refire a shell", () => {
+    const plans = planRefires(
+      built,
+      misfiresIn(built, [pinAddress(1, 1)]),
+      rigOf(),
+    );
+    expect(plans[0]?.spare).toBeUndefined();
+    expect(plans[0]?.reason).toContain("made safe");
+  });
+
+  it("finds a spare pin for a ground piece", () => {
+    const plans = planRefires(
+      built,
+      misfiresIn(built, [pinAddress(1, 2)]),
+      rigOf(),
+    );
+    expect(plans[0]?.spare).toBeDefined();
+    expect(plans[0]?.spare?.pin).toBeGreaterThan(3);
+  });
+
+  it("does not hand two misfires the same spare", () => {
+    const twoGerbs = scheduleOf(
+      [
+        "at 20 fire gerb.silver from pad.a",
+        "at 25 fire gerb.silver from pad.a",
+      ].join("\n"),
+    );
+    const plans = planRefires(
+      twoGerbs,
+      misfiresIn(twoGerbs, [pinAddress(1, 1), pinAddress(1, 2)]),
+      rigOf(),
+    );
+    expect(plans[0]?.spare).not.toEqual(plans[1]?.spare);
+  });
+
+  it("says when there is nowhere left to move it", () => {
+    const small = rigOf("fc-16");
+    const full = scheduleOf(
+      "at 20 ripple 16 of gerb.silver from pad.a every 1s",
+      small,
+    );
+    const plans = planRefires(
+      full,
+      misfiresIn(full, [pinAddress(1, 1)]),
+      small,
+    );
+    expect(plans[0]?.reason).toContain("no free pin");
+  });
+});
+
+describe("checkMisfires", () => {
+  it("says nothing when nothing failed", () => {
+    expect(checkMisfires(built, []).size).toBe(0);
+  });
+
+  it("warns with the time nobody may approach before", () => {
+    const found = misfiresIn(built, [pinAddress(1, 1)]);
+    const diagnostic = checkMisfires(built, found).byCode("PF3400")[0];
+    expect(diagnostic?.message).toContain("1 cues did not fire");
+    expect(diagnostic?.help).toContain("nobody approaches before");
+  });
+
+  it("notes each misfire separately", () => {
+    const found = misfiresIn(built, [pinAddress(1, 1), pinAddress(1, 2)]);
+    expect(checkMisfires(built, found).byCode("PF3401")).toHaveLength(2);
+  });
+});
+
+describe("the incident book", () => {
+  it("writes a line per misfire in time order", () => {
+    const found = misfiresIn(built, [pinAddress(1, 3), pinAddress(1, 1)]);
+    const lines = incidentLines(found);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("01.01");
+    expect(lines[0]).toContain("wait 30 minutes");
+  });
+
+  it("writes the ground piece wait as five minutes", () => {
+    const found = misfiresIn(built, [pinAddress(1, 2)]);
+    expect(incidentLines(found)[0]).toContain("wait 5 minutes");
+  });
+
+  it("reports the rate", () => {
+    expect(
+      misfireRate(built, misfiresIn(built, [pinAddress(1, 1)])),
+    ).toBeCloseTo(1 / 3, 5);
+    expect(misfireRate(built, [])).toBe(0);
+    expect(misfireRate(scheduleOf(""), [])).toBe(0);
+  });
+});

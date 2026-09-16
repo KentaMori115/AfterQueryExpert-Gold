@@ -1,0 +1,119 @@
++ npx vitest run --config /tmp/arenaflow-graded.config.ts --reporter=default --reporter=junit --outputFile.junit=/logs/verifier/new_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+ [31m❯[39m .verifier-canary/canary.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 15[2mms[22m[39m
+[31m   [31m×[31m verifier canary[2m > [22mnever passes[39m[32m 13[2mms[22m[39m
+[31m     → expected 1 to be 2 // Object.is equality[39m
+ [32m✓[39m tests/engine/withdrawn-results.test.ts [2m([22m[2m29 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m tests/events/withdrawn-replay.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m .verifier-canary/canary.test.ts[2m > [22mverifier canary[2m > [22mnever passes
+[31m[1mAssertionError[22m: expected 1 to be 2 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+[36m [2m❯[22m .verifier-canary/canary.test.ts:[2m5:15[22m[39m
+    [90m  3| [39m[34mdescribe[39m([32m"verifier canary"[39m[33m,[39m () [33m=>[39m {
+    [90m  4| [39m  [34mit[39m([32m"never passes"[39m[33m,[39m () [33m=>[39m {
+    [90m  5| [39m    [34mexpect[39m([34m1[39m)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m   | [39m              [31m^[39m
+    [90m  6| [39m  })[33m;[39m
+    [90m  7| [39m})[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m2 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m43 passed[39m[22m[90m (44)[39m
+[2m   Start at [22m 04:32:31
+[2m   Duration [22m 832ms[2m (transform 485ms, setup 0ms, collect 1.03s, tests 78ms, environment 1ms, prepare 243ms)[22m
+
+JUNIT report written to /logs/verifier/new_junit.xml
++ npx vitest run --config /tmp/arenaflow-shipped.config.ts --reporter=default --reporter=junit --outputFile.junit=/logs/verifier/base_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+ [32m✓[39m tests/engine/tournament.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/engine/scenarios.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/engine/corrections.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m tests/persistence/sqlite.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/examples/recipes.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m tests/sdk/client.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/engine/matrix.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/domain/players.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/examples/walkthrough.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/events/replay.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [31m❯[39m tests/engine/catalog.test.ts [2m([22m[2m10 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 16[2mms[22m[39m
+[31m   [31m×[31m scoring presets and catalog[2m > [22mlists presets[39m[32m 10[2mms[22m[39m
+[31m     → expected [ 'standard', 'conservative', …(2) ] to deeply equal [ 'aggressive', 'casual', …(2) ][39m
+   [32m✓[39m scoring presets and catalog[2m > [22mpreview wins for standard[32m 1[2mms[22m[39m
+   [32m✓[39m scoring presets and catalog[2m > [22mpreview wins for conservative[32m 0[2mms[22m[39m
+   [32m✓[39m scoring presets and catalog[2m > [22mpreview wins for aggressive[32m 0[2mms[22m[39m
+   [32m✓[39m scoring presets and catalog[2m > [22mpreview wins for casual[32m 0[2mms[22m[39m
+   [32m✓[39m scoring presets and catalog[2m > [22mfalls back to standard for unknown presets[32m 0[2mms[22m[39m
+   [32m✓[39m scoring presets and catalog[2m > [22mcomputes penalty helpers[32m 0[2mms[22m[39m
+   [32m✓[39m scoring presets and catalog[2m > [22msums bonuses[32m 0[2mms[22m[39m
+   [32m✓[39m tournament helpers[2m > [22mtracks remaining slots[32m 1[2mms[22m[39m
+   [32m✓[39m tournament helpers[2m > [22mlabels rank movement[32m 0[2mms[22m[39m
+ [32m✓[39m tests/integration/api.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/integration/replay-seasons.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/engine/matchmaking.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/core/shared.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/domain/tournaments.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/cli/cli.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/engine/ranking.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/persistence/memory.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/engine/scoring.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/domain/scores.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/events/journal.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/domain/rewards.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/rules.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/domain/matches.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/rewards.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/domain/seasons.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/engine/anti-cheat.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/engine/seasons.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/domain/rankings.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/engine/catalog.test.ts[2m > [22mscoring presets and catalog[2m > [22mlists presets
+[31m[1mAssertionError[22m: expected [ 'standard', 'conservative', …(2) ] to deeply equal [ 'aggressive', 'casual', …(2) ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[32m-   "aggressive",[39m
+[32m-   "casual",[39m
+[32m-   "conservative",[39m
+[2m    "standard",[22m
+[31m+   "conservative",[39m
+[31m+   "casual",[39m
+[31m+   "aggressive",[39m
+[2m  ][22m
+
+[36m [2m❯[22m tests/engine/catalog.test.ts:[2m16:27[22m[39m
+    [90m 14| [39m[34mdescribe[39m([32m"scoring presets and catalog"[39m[33m,[39m () [33m=>[39m {
+    [90m 15| [39m  [34mit[39m([32m"lists presets"[39m[33m,[39m () [33m=>[39m {
+    [90m 16| [39m    expect(presetNames()).toEqual(["aggressive", "casual", "conservati…
+    [90m   | [39m                          [31m^[39m
+    [90m 17| [39m  })[33m;[39m
+    [90m 18| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m29 passed[39m[22m[90m (30)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m136 passed[39m[22m[90m (137)[39m
+[2m   Start at [22m 04:32:32
+[2m   Duration [22m 3.55s[2m (transform 930ms, setup 0ms, collect 3.30s, tests 266ms, environment 6ms, prepare 2.24s)[22m
+
+JUNIT report written to /logs/verifier/base_junit.xml

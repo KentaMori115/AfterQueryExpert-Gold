@@ -1,0 +1,440 @@
+[verifier] model.patch applied (18897 bytes)
+[verifier] Resetting files touched by test.patch
+[verifier] Applying test.patch
+[verifier] harness dir /run/aqh
+[verifier] running suites as nobody
+PASS __tests__/stats.test.ts (9.865 s)
+PASS __tests__/api-key.test.ts (9.953 s)
+PASS __tests__/file-utils.test.ts (10.224 s)
+PASS __tests__/share-utils.test.ts
+PASS __tests__/workspace-rbac.test.ts
+PASS __tests__/image-processor.test.ts
+PASS __tests__/version-trash.test.ts
+PASS __tests__/webhook.test.ts
+PASS __tests__/share-manager.test.ts
+
+Test Suites: 9 passed, 9 total
+Tests:       95 passed, 95 total
+Snapshots:   0 total
+Time:        12.238 s
+Ran all test suites within paths "/app/__tests__/api-key.test.ts", "/app/__tests__/file-utils.test.ts", "/app/__tests__/image-processor.test.ts", "/app/__tests__/share-manager.test.ts", "/app/__tests__/share-utils.test.ts", "/app/__tests__/stats.test.ts", "/app/__tests__/version-trash.test.ts", "/app/__tests__/webhook.test.ts", "/app/__tests__/workspace-rbac.test.ts".
+[publish] p2p_node_ids -> 95 declared, 95 passed, 0 failed (honest=True)
+PASS __tests__/metering-fold.test.ts (6.291 s)
+FAIL __tests__/plan-balances.test.ts (6.38 s)
+  ● allowances and the bank › banks what a quiet period left unspent
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 199
+    Received: 100
+
+      42 |         expect(balances[0].requestsUsed).toBe(1)
+      43 |         expect(balances[1].carriedInRequests).toBe(99)
+    > 44 |         expect(balances[1].requestCredit).toBe(199)
+         |                                           ^
+      45 |     })
+      46 |
+      47 |     it("holds the bank down to the plan's carry ceiling", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:44:43)
+
+  ● allowances and the bank › holds the bank down to the plan's carry ceiling
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 100
+
+      47 |     it("holds the bank down to the plan's carry ceiling", () => {
+      48 |         const balances = foldBalances(plan, ledgerOf([], [], day(2025, 3, 20)))
+    > 49 |         expect(balances[1].requestCredit).toBe(200)
+         |                                           ^
+      50 |         expect(balances[2].carriedInRequests).toBe(100)
+      51 |     })
+      52 |
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:49:43)
+
+  ● allowances and the bank › lets the bank cover a period that would otherwise have run over
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 0
+    Received: 50
+
+      79 |         const balances = foldBalances(plan, ledgerOf(heavy, [], day(2025, 2, 20)))
+      80 |         expect(balances[1].requestsUsed).toBe(150)
+    > 81 |         expect(balances[1].requestOverage).toBe(0)
+         |                                            ^
+      82 |     })
+      83 |
+      84 |     it("measures storage against the ceiling and not against a bank", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:81:44)
+
+  ● allowances and the bank › lets a wider carry ceiling bank more than one period of allowance
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 100
+
+      126 |         const roomy: Plan = { ...plan, carryPeriods: 3 }
+      127 |         const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
+    > 128 |         expect(balances[2].carriedInRequests).toBe(200)
+          |                                               ^
+      129 |         expect(balances[3].carriedInRequests).toBe(300)
+      130 |     })
+      131 |
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:128:47)
+
+  ● more of the bank › stacks two quiet periods against a wider carry ceiling
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 2
+    + Received  + 2
+
+      Array [
+        0,
+        100,
+    -   200,
+    -   200,
+    +   100,
+    +   100,
+      ]
+
+      263 |         const roomy: Plan = { ...plan, carryPeriods: 2 }
+      264 |         const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
+    > 265 |         expect(balances.map((b) => b.carriedInRequests)).toEqual([0, 100, 200, 200])
+          |                                                          ^
+      266 |     })
+      267 |
+      268 |     it("empties the bank after a period runs over and refills it after a quiet one", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:265:58)
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       5 failed, 90 passed, 95 total
+Snapshots:   0 total
+Time:        6.839 s
+Ran all test suites within paths "/app/__tests__/metering-fold.test.ts", "/app/__tests__/plan-balances.test.ts".
+[publish] stream not trustworthy: ended=True claimed=95 seen=95 forged=190
+[publish] f2p_node_ids -> 95 declared, 0 passed, 95 failed (honest=False)
+===== raw suite output: run.log =====
++ jest selection base: /app/__tests__/api-key.test.ts /app/__tests__/file-utils.test.ts /app/__tests__/image-processor.test.ts /app/__tests__/share-manager.test.ts /app/__tests__/share-utils.test.ts /app/__tests__/stats.test.ts /app/__tests__/version-trash.test.ts /app/__tests__/webhook.test.ts /app/__tests__/workspace-rbac.test.ts
+PASS __tests__/stats.test.ts (9.865 s)
+PASS __tests__/api-key.test.ts (9.953 s)
+PASS __tests__/file-utils.test.ts (10.224 s)
+PASS __tests__/share-utils.test.ts
+PASS __tests__/workspace-rbac.test.ts
+PASS __tests__/image-processor.test.ts
+PASS __tests__/version-trash.test.ts
+PASS __tests__/webhook.test.ts
+PASS __tests__/share-manager.test.ts
+
+Test Suites: 9 passed, 9 total
+Tests:       95 passed, 95 total
+Snapshots:   0 total
+Time:        12.238 s
+Ran all test suites within paths "/app/__tests__/api-key.test.ts", "/app/__tests__/file-utils.test.ts", "/app/__tests__/image-processor.test.ts", "/app/__tests__/share-manager.test.ts", "/app/__tests__/share-utils.test.ts", "/app/__tests__/stats.test.ts", "/app/__tests__/version-trash.test.ts", "/app/__tests__/webhook.test.ts", "/app/__tests__/workspace-rbac.test.ts".
+[publish] p2p_node_ids -> 95 declared, 95 passed, 0 failed (honest=True)
++ jest selection new: /app/__tests__/metering-fold.test.ts /app/__tests__/plan-balances.test.ts
+PASS __tests__/metering-fold.test.ts (6.291 s)
+FAIL __tests__/plan-balances.test.ts (6.38 s)
+  ● allowances and the bank › banks what a quiet period left unspent
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 199
+    Received: 100
+
+      42 |         expect(balances[0].requestsUsed).toBe(1)
+      43 |         expect(balances[1].carriedInRequests).toBe(99)
+    > 44 |         expect(balances[1].requestCredit).toBe(199)
+         |                                           ^
+      45 |     })
+      46 |
+      47 |     it("holds the bank down to the plan's carry ceiling", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:44:43)
+
+  ● allowances and the bank › holds the bank down to the plan's carry ceiling
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 100
+
+      47 |     it("holds the bank down to the plan's carry ceiling", () => {
+      48 |         const balances = foldBalances(plan, ledgerOf([], [], day(2025, 3, 20)))
+    > 49 |         expect(balances[1].requestCredit).toBe(200)
+         |                                           ^
+      50 |         expect(balances[2].carriedInRequests).toBe(100)
+      51 |     })
+      52 |
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:49:43)
+
+  ● allowances and the bank › lets the bank cover a period that would otherwise have run over
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 0
+    Received: 50
+
+      79 |         const balances = foldBalances(plan, ledgerOf(heavy, [], day(2025, 2, 20)))
+      80 |         expect(balances[1].requestsUsed).toBe(150)
+    > 81 |         expect(balances[1].requestOverage).toBe(0)
+         |                                            ^
+      82 |     })
+      83 |
+      84 |     it("measures storage against the ceiling and not against a bank", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:81:44)
+
+  ● allowances and the bank › lets a wider carry ceiling bank more than one period of allowance
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 100
+
+      126 |         const roomy: Plan = { ...plan, carryPeriods: 3 }
+      127 |         const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
+    > 128 |         expect(balances[2].carriedInRequests).toBe(200)
+          |                                               ^
+      129 |         expect(balances[3].carriedInRequests).toBe(300)
+      130 |     })
+      131 |
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:128:47)
+
+  ● more of the bank › stacks two quiet periods against a wider carry ceiling
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 2
+    + Received  + 2
+
+      Array [
+        0,
+        100,
+    -   200,
+    -   200,
+    +   100,
+    +   100,
+      ]
+
+      263 |         const roomy: Plan = { ...plan, carryPeriods: 2 }
+      264 |         const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
+    > 265 |         expect(balances.map((b) => b.carriedInRequests)).toEqual([0, 100, 200, 200])
+          |                                                          ^
+      266 |     })
+      267 |
+      268 |     it("empties the bank after a period runs over and refills it after a quiet one", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:265:58)
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       5 failed, 90 passed, 95 total
+Snapshots:   0 total
+Time:        6.839 s
+Ran all test suites within paths "/app/__tests__/metering-fold.test.ts", "/app/__tests__/plan-balances.test.ts".
+[publish] stream not trustworthy: ended=True claimed=95 seen=95 forged=190
+[publish] f2p_node_ids -> 95 declared, 0 passed, 95 failed (honest=False)
+===== grade =====
+[verifier] ===== FAILURES (95) =====
+[verifier] ✗ [f2p] a year of boundaries carries an anchor across the turn of the year
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] a year of boundaries gives every month of a leap year a boundary of its own
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] a year of boundaries keeps a 29th anchor through a leap February and a common one
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] a year of boundaries walks a 15th anchor through every month of a common year
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request admits a request that trips nothing
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request admits an upload that exactly fills the remaining storage
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request denies a request landing outside every period
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request denies a transfer larger than the bandwidth left
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request denies an upload the remaining storage cannot hold
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request does not weigh a download against storage
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request leaves every remaining figure at zero outside every period
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request measures the wait to the next boundary
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request offers no wait when nothing covers the instant
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request reports bandwidth before requests when both stand in the way
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request reports every remaining figure on an admitted request
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request reports storage first when storage and bandwidth both stand in the way
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request reports the period it judged the request in
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request throttles a listing even when storage is full, since it moves nothing
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request throttles once the request credit is spent
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] admitting the next request weighs an upload against bandwidth once storage has room for it
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank banks bandwidth the same way and to its own ceiling
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank banks nothing out of a period that ran past its credit
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank banks what a quiet period left unspent
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank calls a period clear when nothing ran past its limit
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank calls a period unclear on storage alone
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank covers no instant before the subscription opened
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank folds one balance per ledger entry, in the order they were metered
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank holds the bank down to the plan's carry ceiling
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank leaves the next period on its bare allowance when nothing may bank
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank lets a wider carry ceiling bank more than one period of allowance
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank lets the bank cover a period that would otherwise have run over
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank measures storage against the ceiling and not against a bank
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank opens the first period with an empty bank
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank places an instant in the period a boundary opens, not the one it closes
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] allowances and the bank reports how far past its credit each counter ran
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] anchor clamping leaves an anchor the month can hold alone
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] anchor clamping settles a 30th anchor in February and leaves it in April
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] anchor clamping settles a 31st anchor onto the end of February
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] anchor clamping settles onto the leap day in a leap February
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] anchor clamping treats an anchor day below 1 as 1
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] locating a period answers with nothing before the subscription opened
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] locating a period finds the period holding an instant inside it
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] locating a period puts an instant exactly on a boundary in the period it opens
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] locating a period puts the instant one millisecond earlier in the period before
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] locating a period reaches periods far from the start
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] metering a period adds nothing to bandwidth when an upload reports no bytes
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] metering a period counts every event, failed ones included
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] metering a period moves no bandwidth on a deletion whatever size it reports
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] metering a period moves no bandwidth on a listing that reports a size anyway
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] metering a period sorts events into periods however they arrive
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] metering a period sums bandwidth over successful uploads and downloads only
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the bank banks requests and bandwidth independently of each other
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the bank calls a period unclear on a bandwidth overrun alone
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the bank calls a period unclear on a request overrun alone
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the bank empties the bank after a period runs over and refills it after a quiet one
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the bank keeps a storage overrun out of the next period's reckoning
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the bank stacks two quiet periods against a wider carry ceiling
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the decision admits a transfer that exactly spends the bandwidth left
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the decision judges the last millisecond of a period inside that period
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the decision never denies a deletion for want of storage
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the decision rounds a part second up to a whole one
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the decision spans a full January to February gap from the opening instant
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the decision treats an upload with no size as moving nothing
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the stored level adds uploads and downloads into one bandwidth figure
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the stored level counts a file uploaded exactly when a period opens
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the stored level counts requests separately in each period
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] more of the stored level meters only the opening period when nothing has closed yet
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] period boundaries carries the index it was asked for
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] period boundaries closes a period where the next one opens
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] period boundaries does not let a settled boundary drag the anchor down
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] period boundaries keeps returning to the original anchor after every short month
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] period boundaries opens period 0 in the month before when the anchor had not yet come
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] period boundaries opens period 0 on the anchor when the subscription began there
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods carries a level into a period that saw no events at all
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods counts a level that only rose in an earlier period as this period's peak
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods drops the level for a file deleted in an earlier period
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods includes the period a closing instant opens
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods leaves an event after the closing instant out of the count
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods meters one period per boundary crossed up to the closing instant
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods reports the level the period closed on
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] storage across periods takes the peak rather than the closing level
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level adds up several files held at once
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level counts a file from the very instant it was uploaded
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level counts nothing at all when no file has been stored
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level falls back to nothing once every file has gone
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level ignores a file reporting a size of zero
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level never counts a file deleted the instant it arrived
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level shows nothing in the period before a file arrives
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stored level stops counting a file at the instant it was deleted
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription counts an event landing exactly on the opening instant
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription leaves an event on that earlier stretch out of the count
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription leaves bandwidth moved before the subscription out of the sum
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription opens period 0 before the subscription began
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription still counts a file that was already stored when the subscription began
+    did not report a passing verdict on a trusted stream
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription takes the peak from the subscription onward, not from the boundary
+    did not report a passing verdict on a trusted stream
+P2P 95/95 pass 0 fail; F2P 0/95 pass 95 fail; PARTIAL 0.5; BINARY 0
+[verifier] reward.json={"reward": 0, "f2p_total": 95, "f2p_passed": 0, "p2p_total": 95, "p2p_passed": 95, "f2p": 0.0, "p2p": 1.0, "partial": 0.5}

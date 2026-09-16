@@ -1,0 +1,67 @@
++ jest selection base: /app/__tests__/api-key.test.ts /app/__tests__/file-utils.test.ts /app/__tests__/image-processor.test.ts /app/__tests__/share-manager.test.ts /app/__tests__/share-utils.test.ts /app/__tests__/stats.test.ts /app/__tests__/version-trash.test.ts /app/__tests__/webhook.test.ts /app/__tests__/workspace-rbac.test.ts
+PASS __tests__/api-key.test.ts
+PASS __tests__/stats.test.ts
+PASS __tests__/file-utils.test.ts
+PASS __tests__/share-utils.test.ts
+PASS __tests__/image-processor.test.ts
+PASS __tests__/workspace-rbac.test.ts
+PASS __tests__/version-trash.test.ts
+PASS __tests__/webhook.test.ts
+PASS __tests__/share-manager.test.ts
+
+Test Suites: 9 passed, 9 total
+Tests:       95 passed, 95 total
+Snapshots:   0 total
+Time:        6.018 s
+Ran all test suites within paths "/app/__tests__/api-key.test.ts", "/app/__tests__/file-utils.test.ts", "/app/__tests__/image-processor.test.ts", "/app/__tests__/share-manager.test.ts", "/app/__tests__/share-utils.test.ts", "/app/__tests__/stats.test.ts", "/app/__tests__/version-trash.test.ts", "/app/__tests__/webhook.test.ts", "/app/__tests__/workspace-rbac.test.ts".
+[publish] p2p_node_ids -> 95 declared, 95 passed, 0 failed (honest=True)
++ jest selection new: /app/__tests__/metering-fold.test.ts /app/__tests__/plan-balances.test.ts
+FAIL __tests__/metering-fold.test.ts
+  ● Test suite failed to run
+
+    jest: failed to cache transform results in: /run/aqh/scratch/cache-new/jest-transform-cache-9e2c3a1618914e540ea809be3ba7b201-79ef2876fae7ca75eedb2aa53dc48338/3f/usageledger_3f68412097a316dcaf75422830805b9c.map
+    Failure message: ENOENT: no such file or directory, rename '/run/aqh/scratch/cache-new/jest-transform-cache-9e2c3a1618914e540ea809be3ba7b201-79ef2876fae7ca75eedb2aa53dc48338/3f/usageledger_3f68412097a316dcaf75422830805b9c.map.4044647751' -> '/run/aqh/scratch/cache-new/jest-transform-cache-9e2c3a1618914e540ea809be3ba7b201-79ef2876fae7ca75eedb2aa53dc48338/3f/usageledger_3f68412097a316dcaf75422830805b9c.map'
+
+      1 | import { periodByIndex, periodAt, type BillingAnchor } from "../lib/billing-period"
+    > 2 | import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+        | ^
+      3 |
+      4 | const day = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
+      5 | const iso = (n: number) => new Date(n).toISOString().slice(0, 10)
+
+      at writeFileSync (node_modules/write-file-atomic/lib/index.js:252:8)
+      at writeCacheFile (node_modules/@jest/transform/build/ScriptTransformer.js:908:33)
+      at ScriptTransformer._buildTransformResult (node_modules/@jest/transform/build/ScriptTransformer.js:510:7)
+      at ScriptTransformer.transformSource (node_modules/@jest/transform/build/ScriptTransformer.js:554:17)
+      at ScriptTransformer._transformAndBuildScript (node_modules/@jest/transform/build/ScriptTransformer.js:674:40)
+      at ScriptTransformer.transform (node_modules/@jest/transform/build/ScriptTransformer.js:726:19)
+      at Object.<anonymous> (__tests__/metering-fold.test.ts:2:1)
+
+FAIL __tests__/plan-balances.test.ts
+  ● Test suite failed to run
+
+    jest: failed to cache transform results in: /run/aqh/scratch/cache-new/jest-transform-cache-9e2c3a1618914e540ea809be3ba7b201-79ef2876fae7ca75eedb2aa53dc48338/e8/allowance_e8d7ba0dec243051b105d3ea3515e7ce.map
+    Failure message: ENOENT: no such file or directory, rename '/run/aqh/scratch/cache-new/jest-transform-cache-9e2c3a1618914e540ea809be3ba7b201-79ef2876fae7ca75eedb2aa53dc48338/e8/allowance_e8d7ba0dec243051b105d3ea3515e7ce.map.4152711471' -> '/run/aqh/scratch/cache-new/jest-transform-cache-9e2c3a1618914e540ea809be3ba7b201-79ef2876fae7ca75eedb2aa53dc48338/e8/allowance_e8d7ba0dec243051b105d3ea3515e7ce.map'
+
+      1 | import { type BillingAnchor } from "../lib/billing-period"
+      2 | import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+    > 3 | import { foldBalances, type Plan } from "../lib/allowance"
+        | ^
+      4 | import { decideRequest, retryAfterSeconds } from "../lib/quota-decision"
+      5 |
+      6 | const day = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
+
+      at writeFileSync (node_modules/write-file-atomic/lib/index.js:252:8)
+      at writeCacheFile (node_modules/@jest/transform/build/ScriptTransformer.js:908:33)
+      at ScriptTransformer._buildTransformResult (node_modules/@jest/transform/build/ScriptTransformer.js:510:7)
+      at ScriptTransformer.transformSource (node_modules/@jest/transform/build/ScriptTransformer.js:554:17)
+      at ScriptTransformer._transformAndBuildScript (node_modules/@jest/transform/build/ScriptTransformer.js:674:40)
+      at ScriptTransformer.transform (node_modules/@jest/transform/build/ScriptTransformer.js:726:19)
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:3:1)
+
+Test Suites: 2 failed, 2 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        4.329 s
+Ran all test suites within paths "/app/__tests__/metering-fold.test.ts", "/app/__tests__/plan-balances.test.ts".
+[publish] f2p_node_ids -> 95 declared, 0 passed, 95 failed (honest=True)

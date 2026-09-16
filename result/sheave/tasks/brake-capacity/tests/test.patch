@@ -1,0 +1,681 @@
+diff --git a/test/holding.test.ts b/test/holding.test.ts
+new file mode 100644
+index 0000000..6afee10
+--- /dev/null
++++ b/test/holding.test.ts
+@@ -0,0 +1,312 @@
++/**
++ * What a brake is worth standing still.
++ *
++ * A winding installation is signed off on two brake figures and this is
++ * the first of them: with the wind stopped and the engineman gone for
++ * his tea, will the shoes hold the load where it is? The answer is not
++ * the ordinary out-of-balance but the worst one anywhere in the wind,
++ * three times over, and on a friction winder it is not the shoes at all
++ * once the ropes have had their say.
++ *
++ * The fixtures are three installations that fail in different places: a
++ * deep skip winder with a balance rope, whose brake holds by a whisker;
++ * a shallow cage winder with no balance rope and shoes that were sized
++ * for the payload rather than for the rope; and a four-rope friction
++ * winder whose springs are far harder than anything the wheel will
++ * pass, which is the case where the shoes stop being the answer.
++ */
++
++import { describe, expect, it } from "vitest";
++import {
++  brakeOf,
++  forceFor,
++  gripPull,
++  heldPull,
++  holds,
++  pressure,
++  torque,
++} from "../src/safety/index.ts";
++import { type Winder, dutyOf, parseWinder } from "../src/winder/index.ts";
++import {
++  atEnd,
++  atStart,
++  leastOutOfBalance,
++  mostOutOfBalance,
++  worstOutOfBalance,
++} from "../src/power/index.ts";
++import { tensions, workingRatio } from "../src/drum/koepe.ts";
++import { gross } from "../src/cage/index.ts";
++import { weightOf } from "../src/units/index.ts";
++import { WindingError } from "../src/errors.ts";
++
++/** A deep skip winder with a balance rope, and a brake that just holds it. */
++const deep = `
++winder Thoresby No.1
++shaft North diameter=7.3m depth=900m conveyances=2 sump=15m headgear=42m
++rope diameter=52mm construction=6x36 grade=1960 ropes=1
++drum diameter=4.2m width=2.4m layers=2 lead=46m
++rising skip loaded tare=5.04t payload=12t decks=1 width=2.2m across=1.8m
++falling skip empty tare=5.04t payload=0t decks=1 width=2.2m across=1.8m
++balance rate=9.94kg
++cycle full=15mps accelerate=1 decelerate=1.1 creep=0.5mps creepfor=6m rest=25s
++brake diameter=3.6m width=0.25m arc=60 shoes=4 friction=0.35 force=300kn
++`;
++
++/** A shallow cage winder with no balance rope and a brake too small for it. */
++const shallow = `
++winder Wheal Betsy
++shaft Engine diameter=4.9m depth=380m conveyances=2 sump=4m headgear=24m
++rope diameter=32mm construction=6x19 grade=1770 ropes=1
++drum diameter=2.1m width=1.4m layers=1 lead=18m
++rising cage full tare=6t payload=3t decks=2 width=1.9m across=1.2m
++falling cage empty tare=6t payload=0t decks=2 width=1.9m across=1.2m
++cycle full=9mps accelerate=0.9 decelerate=1 creep=0.5mps creepfor=6m rest=30s
++brake diameter=2.4m width=0.2m arc=45 shoes=2 friction=0.35 force=90kn
++`;
++
++/** A four-rope friction winder whose shoes are far harder than its ropes grip. */
++const wheel = `
++winder Zollverein XII
++shaft Schacht diameter=7.5m depth=1100m conveyances=2 sump=20m headgear=45m
++rope diameter=42mm construction=locked grade=1770 ropes=4
++koepe diameter=5.6m wrap=195 friction=0.25 ropes=4
++rising skip full tare=8t payload=20t decks=1 width=2.4m across=2m
++falling skip empty tare=8t payload=0t decks=1 width=2.4m across=2m
++balance rate=32kg
++cycle full=16mps accelerate=1.2 decelerate=1.2 creep=0.5mps creepfor=8m rest=20s
++brake diameter=4.6m width=0.3m arc=70 shoes=6 friction=0.4 force=700kn
++`;
++
++/** What the shoes alone are worth at the rope, which the drive decides. */
++function shoesPull(of: Winder): number {
++  return torque(brakeOf(of)) / dutyOf(of).radius;
++}
++
++/** The same sheet with one figure on its brake line written differently. */
++function sheet(text: string, key: string, value: string): string {
++  return text.replace(new RegExp(`(^brake .*?\\b${key}=)\\S+`, "m"), `$1${value}`);
++}
++
++/** And the same sheet with its whole brake line taken from another. */
++function shoesOf(text: string, from: string): string {
++  const line = from.split("\n").find((each) => each.startsWith("brake ")) as string;
++  return text.replace(/^brake .*$/m, line);
++}
++
++const deepWinder = parseWinder(deep);
++const shallowWinder = parseWinder(shallow);
++const soundWinder = parseWinder(sheet(shallow, "shoes", "4"));
++const wheelWinder = parseWinder(wheel);
++const wheelWeakWinder = parseWinder(sheet(wheel, "force", "100kn"));
++const bareWinder = parseWinder(deep.split("\n").filter((each) => !each.startsWith("balance ")).join("\n"));
++
++describe("the brake as a machine", () => {
++  it("takes its torque off the shoes and nothing else", () => {
++    // Friction times the applied force is one shoe's drag, every shoe
++    // drags at the same radius, so the shoes multiply and nothing else.
++    expect(torque(brakeOf(deepWinder))).toBeCloseTo(0.35 * 300 * 4 * 1.8, 3);
++    expect(torque(brakeOf(shallowWinder))).toBeCloseTo(0.35 * 90 * 2 * 1.2, 3);
++  });
++
++  it("refers that torque to the rope over the winding radius", () => {
++    // A drum winder is held by its shoes and nothing else, so what it
++    // holds is the torque over the radius the rope comes off at.
++    expect(heldPull(deepWinder)).toBeCloseTo(756 / 2.1, 3);
++    expect(heldPull(shallowWinder)).toBeCloseTo(torque(brakeOf(shallowWinder)) / 1.05, 3);
++  });
++
++  it("brakes a large drum worse than a small one with the same shoes", () => {
++    const small = parseWinder(shoesOf(shallow, deep));
++    expect(heldPull(small)).toBeGreaterThan(heldPull(deepWinder));
++    expect(heldPull(small) / heldPull(deepWinder)).toBeCloseTo(
++      dutyOf(deepWinder).radius / dutyOf(small).radius,
++      3,
++    );
++  });
++
++  it("refers it to the wheel radius on a friction winder", () => {
++    // A koepe wheel is the drive as much as a drum is, and the shoes on
++    // it are worth what the wheel's own radius makes of them.
++    expect(torque(brakeOf(wheelWinder))).toBeCloseTo(0.4 * 700 * 6 * 2.3, 3);
++    expect(dutyOf(wheelWinder).radius).toBeCloseTo(2.8, 6);
++    expect(heldPull(wheelWeakWinder)).toBeCloseTo(shoesPull(wheelWeakWinder), 3);
++  });
++
++  it("presses a shoe over the strip of path it covers", () => {
++    const swept = Math.PI * 3.6 * (60 / 360) * 0.25;
++    expect(pressure(brakeOf(deepWinder))).toBeCloseTo(300 / (swept * 1000), 3);
++    expect(pressure(brakeOf(shallowWinder))).toBeCloseTo(90 / (Math.PI * 2.4 * (45 / 360) * 0.2 * 1000), 3);
++  });
++
++  it("presses more gently the more path a shoe covers", () => {
++    const narrow = brakeOf(parseWinder(sheet(deep, "arc", "40")));
++    const wide = brakeOf(parseWinder(sheet(deep, "arc", "80")));
++    expect(pressure(wide)).toBeCloseTo(pressure(narrow) / 2, 3);
++    const broad = brakeOf(parseWinder(sheet(deep, "width", "0.5m")));
++    expect(pressure(broad)).toBeCloseTo(pressure(brakeOf(deepWinder)) / 2, 3);
++  });
++
++  it("counts every shoe in the torque and none of them in the pressure", () => {
++    const two = parseWinder(sheet(deep, "shoes", "2"));
++    expect(torque(brakeOf(deepWinder))).toBeCloseTo(2 * torque(brakeOf(two)), 3);
++    expect(pressure(brakeOf(deepWinder))).toBeCloseTo(pressure(brakeOf(two)), 6);
++  });
++
++  it("reads a figure the same however the sheet writes it", () => {
++    // A path is a length and a spring is a force, so the fathom and the
++    // ton force are as good as the metre and the kilonewton.
++    const metres = parseWinder(sheet(deep, "diameter", "3600mm"));
++    expect(torque(brakeOf(metres))).toBeCloseTo(torque(brakeOf(deepWinder)), 3);
++    expect(pressure(brakeOf(metres))).toBeCloseTo(pressure(brakeOf(deepWinder)), 3);
++  });
++
++  it("puts the friction of the lining straight into the torque", () => {
++    const glazed = parseWinder(sheet(deep, "friction", "0.175"));
++    expect(torque(brakeOf(glazed))).toBeCloseTo(torque(brakeOf(deepWinder)) / 2, 3);
++    expect(heldPull(glazed)).toBeCloseTo(heldPull(deepWinder) / 2, 3);
++  });
++});
++
++describe("what a wind puts on it", () => {
++  it("walks the out-of-balance from a least to a most", () => {
++    const what = dutyOf(shallowWinder);
++    expect(leastOutOfBalance(what)).toBeLessThan(mostOutOfBalance(what));
++    expect(mostOutOfBalance(what)).toBeCloseTo(atStart(what), 2);
++    expect(leastOutOfBalance(what)).toBeCloseTo(atEnd(what), 2);
++  });
++
++  it("reads the same figures at either end of the wind", () => {
++    // The ropes are the only thing moving, so the line through the wind
++    // is straight and the ends are where the two figures live.
++    for (const one of [deepWinder, shallowWinder, wheelWinder, bareWinder]) {
++      const what = dutyOf(one);
++      expect(leastOutOfBalance(what)).toBeCloseTo(Math.min(atStart(what), atEnd(what)), 2);
++      expect(mostOutOfBalance(what)).toBeCloseTo(Math.max(atStart(what), atEnd(what)), 2);
++    }
++  });
++
++  it("leaves the two together where a balance rope is hung", () => {
++    const what = dutyOf(deepWinder);
++    expect(mostOutOfBalance(what) - leastOutOfBalance(what)).toBeLessThan(0.01);
++  });
++
++  it("counts the balance rope in what the brake has to hold", () => {
++    // Same shaft, same skips, same shoes: the rope hung underneath is
++    // the whole of the difference and it is not a small one.
++    expect(worstOutOfBalance(dutyOf(bareWinder))).toBeGreaterThan(worstOutOfBalance(dutyOf(deepWinder)));
++    expect(mostOutOfBalance(dutyOf(bareWinder))).toBeCloseTo(atStart(dutyOf(bareWinder)), 2);
++    expect(leastOutOfBalance(dutyOf(bareWinder))).toBeCloseTo(atEnd(dutyOf(bareWinder)), 2);
++  });
++
++  it("counts the rope's own weight and not the payload alone", () => {
++    // Twelve tonnes of coal is 117.7 kN of it and the rope on a nine
++    // hundred metre shaft is most of another hundred.
++    expect(worstOutOfBalance(dutyOf(bareWinder))).toBeGreaterThan(180);
++    expect(holds(bareWinder)).toBe(false);
++    expect(holds(deepWinder)).toBe(true);
++  });
++
++  it("takes the worst of the two whichever way it points", () => {
++    for (const one of [deepWinder, shallowWinder, wheelWinder]) {
++      const what = dutyOf(one);
++      const worst = worstOutOfBalance(what);
++      expect(worst).toBeCloseTo(Math.max(Math.abs(leastOutOfBalance(what)), Math.abs(mostOutOfBalance(what))), 2);
++      expect(worst).toBeGreaterThan(0);
++    }
++  });
++});
++
++describe("what it holds", () => {
++  it("holds where the pull at the rope is three times the worst", () => {
++    expect(heldPull(deepWinder)).toBeGreaterThan(3 * worstOutOfBalance(dutyOf(deepWinder)));
++    expect(holds(deepWinder)).toBe(true);
++    expect(holds(soundWinder)).toBe(true);
++  });
++
++  it("does not hold where it is not", () => {
++    expect(heldPull(shallowWinder)).toBeLessThan(3 * worstOutOfBalance(dutyOf(shallowWinder)));
++    expect(holds(shallowWinder)).toBe(false);
++    expect(holds(wheelWinder)).toBe(false);
++  });
++
++  it("gives the shoe force that just holds it", () => {
++    const wanted = forceFor(shallowWinder);
++    expect(wanted).toBeGreaterThan(brakeOf(shallowWinder).force);
++    expect(holds(parseWinder(sheet(shallow, "force", `${wanted * 1.001}kn`)))).toBe(true);
++    expect(holds(parseWinder(sheet(shallow, "force", `${wanted * 0.999}kn`)))).toBe(false);
++  });
++
++  it("asks a balanced winder for less spring than a bare one", () => {
++    // The balance rope is worth more to the brake than any spring is:
++    // it takes the rope out of the out-of-balance and the brake was
++    // being sized on the rope.
++    expect(forceFor(deepWinder)).toBeLessThan(forceFor(bareWinder));
++    expect(forceFor(deepWinder)).toBeLessThan(brakeOf(deepWinder).force);
++  });
++
++  it("asks the shoes for that force and not the ropes", () => {
++    // On a friction winder no spring buys anything past what the wheel
++    // passes, so the force asked for is the shoes' own figure and the
++    // winder still will not hold once it is wound on.
++    const wanted = forceFor(wheelWeakWinder);
++    const sprung = parseWinder(sheet(wheel, "force", `${wanted}kn`));
++    expect(shoesPull(sprung)).toBeCloseTo(3 * worstOutOfBalance(dutyOf(wheelWeakWinder)), 2);
++    expect(holds(sprung)).toBe(false);
++  });
++
++  it("holds by the shoes alone on a drum winder", () => {
++    for (const one of [deepWinder, shallowWinder, soundWinder]) {
++      expect(heldPull(one)).toBeCloseTo(shoesPull(one), 3);
++    }
++  });
++});
++
++describe("what the ropes will pass", () => {
++  it("passes the slack side times one less than the working ratio", () => {
++    const allowed = workingRatio({ diameter: 5.6, wrap: 195, friction: 0.25, ropes: 4 });
++    const rising = weightOf(gross(wheelWinder.rising));
++    const falling = weightOf(gross(wheelWinder.falling));
++    let least = Number.POSITIVE_INFINITY;
++    for (let at = 0; at <= 100; at += 1) {
++      const found = tensions(wheelWinder.rope, 1100, rising, falling, (1100 * at) / 100, 4, wheelWinder.balance);
++      least = Math.min(least, found.slack * (allowed - 1));
++    }
++    expect(gripPull(wheelWinder)).toBeCloseTo(least, 2);
++  });
++
++  it("refuses a drum winder that question", () => {
++    expect(() => gripPull(deepWinder)).toThrow(WindingError);
++    expect(() => gripPull(shallowWinder)).toThrow(WindingError);
++  });
++
++  it("takes the lesser of the shoes and the grip on a friction winder", () => {
++    expect(shoesPull(wheelWinder)).toBeGreaterThan(gripPull(wheelWinder));
++    expect(heldPull(wheelWinder)).toBeCloseTo(gripPull(wheelWinder), 2);
++  });
++
++  it("leaves the shoes in charge where they are the weaker", () => {
++    expect(shoesPull(wheelWeakWinder)).toBeLessThan(gripPull(wheelWeakWinder));
++    expect(heldPull(wheelWeakWinder)).toBeCloseTo(shoesPull(wheelWeakWinder), 2);
++  });
++
++  it("leaves what the ropes pass alone when the springs change", () => {
++    // The grip is a property of the wheel, the ropes and the wind. What
++    // the engine house does to the springs has nothing to do with it.
++    expect(gripPull(wheelWinder)).toBeCloseTo(gripPull(wheelWeakWinder), 4);
++    expect(heldPull(wheelWeakWinder)).toBeLessThan(gripPull(wheelWinder));
++  });
++
++  it("narrows a wheel to its ropes and a drum to its shoes", () => {
++    // Two winders, two answers, and the reason a friction winder's
++    // brake is designed round the capstan equation and a drum winder's
++    // is designed round the springs.
++    expect(heldPull(wheelWinder)).toBeLessThan(shoesPull(wheelWinder));
++    expect(heldPull(deepWinder)).toBeCloseTo(shoesPull(deepWinder), 4);
++    expect(heldPull(bareWinder)).toBeCloseTo(shoesPull(bareWinder), 4);
++  });
++
++  it("buys nothing on a wheel from a spring past what the ropes grip", () => {
++    const harder = parseWinder(sheet(wheel, "force", "1400kn"));
++    expect(heldPull(harder)).toBeCloseTo(heldPull(wheelWinder), 3);
++  });
++});
+diff --git a/test/lowering.test.ts b/test/lowering.test.ts
+new file mode 100644
+index 0000000..5ef73db
+--- /dev/null
++++ b/test/lowering.test.ts
+@@ -0,0 +1,357 @@
++/**
++ * What a brake is worth with the wind moving, and what the sheet says
++ * about it.
++ *
++ * The second of the two brake figures, and the one an inspector asks
++ * for. Winding, the load is already pulling backwards on the drum and
++ * the shoes are only asked for the rest; lowering, the same load is
++ * driving and has to be taken off before a single metre a second
++ * squared appears. Nobody who has only ever seen the first figure has
++ * seen the brake.
++ *
++ * The rest of it is the sheet. A `brake` line is six figures off a
++ * maker's plate and none of them can be guessed at, so the reader wants
++ * all six or none, and a certificate that says nothing about a brake is
++ * a certificate nobody has measured rather than a winder without one.
++ * The audit is told to leave those alone, which is the difference
++ * between an audit somebody reads and an audit somebody learns to
++ * ignore.
++ */
++
++import { describe, expect, it } from "vitest";
++import {
++  brakeOf,
++  heldPull,
++  torque,
++  pressure,
++  retardationFor,
++  retardationLowering,
++  retardationWinding,
++  stopsAnOverwind,
++} from "../src/safety/index.ts";
++import { auditWinder, dutyOf, parseWinder } from "../src/winder/index.ts";
++import { leastOutOfBalance, mostOutOfBalance, movingMass } from "../src/power/index.ts";
++import { parseForce, parseLength } from "../src/units/index.ts";
++import { overwindRoom } from "../src/shaft/index.ts";
++import { WindingError } from "../src/errors.ts";
++
++/** A deep skip winder with a balance rope, and a brake that just holds it. */
++const deep = `
++winder Thoresby No.1
++shaft North diameter=7.3m depth=900m conveyances=2 sump=15m headgear=42m
++rope diameter=52mm construction=6x36 grade=1960 ropes=1
++drum diameter=4.2m width=2.4m layers=2 lead=46m
++rising skip loaded tare=5.04t payload=12t decks=1 width=2.2m across=1.8m
++falling skip empty tare=5.04t payload=0t decks=1 width=2.2m across=1.8m
++balance rate=9.94kg
++cycle full=15mps accelerate=1 decelerate=1.1 creep=0.5mps creepfor=6m rest=25s
++brake diameter=3.6m width=0.25m arc=60 shoes=4 friction=0.35 force=300kn
++`;
++
++/** A shallow cage winder with no balance rope and a brake too small for it. */
++const shallow = `
++winder Wheal Betsy
++shaft Engine diameter=4.9m depth=380m conveyances=2 sump=4m headgear=24m
++rope diameter=32mm construction=6x19 grade=1770 ropes=1
++drum diameter=2.1m width=1.4m layers=1 lead=18m
++rising cage full tare=6t payload=3t decks=2 width=1.9m across=1.2m
++falling cage empty tare=6t payload=0t decks=2 width=1.9m across=1.2m
++cycle full=9mps accelerate=0.9 decelerate=1 creep=0.5mps creepfor=6m rest=30s
++brake diameter=2.4m width=0.2m arc=45 shoes=2 friction=0.35 force=90kn
++`;
++
++/** A four-rope friction winder whose shoes are far harder than its ropes grip. */
++const wheel = `
++winder Zollverein XII
++shaft Schacht diameter=7.5m depth=1100m conveyances=2 sump=20m headgear=45m
++rope diameter=42mm construction=locked grade=1770 ropes=4
++koepe diameter=5.6m wrap=195 friction=0.25 ropes=4
++rising skip full tare=8t payload=20t decks=1 width=2.4m across=2m
++falling skip empty tare=8t payload=0t decks=1 width=2.4m across=2m
++balance rate=32kg
++cycle full=16mps accelerate=1.2 decelerate=1.2 creep=0.5mps creepfor=8m rest=20s
++brake diameter=4.6m width=0.3m arc=70 shoes=6 friction=0.4 force=700kn
++`;
++
++/**
++ * A deep cage winder with no balance rope, where the rope drives at the
++ * end of the wind and the out-of-balance goes through nought into the
++ * other side of it.
++ */
++const cages = `
++winder Clipstone No.2
++shaft Top Hard diameter=6.7m depth=850m conveyances=2 sump=14m headgear=40m
++rope diameter=48mm construction=6x36 grade=1960 ropes=1
++drum diameter=4m width=2.2m layers=2 lead=40m
++rising cage loaded tare=11t payload=4t decks=2 width=2.4m across=1.5m
++falling cage empty tare=11t payload=0t decks=2 width=2.4m across=1.5m
++cycle full=12mps accelerate=1 decelerate=1.1 creep=0.5mps creepfor=6m rest=25s
++brake diameter=3.4m width=0.26m arc=55 shoes=4 friction=0.35 force=240kn
++`;
++
++/** The same sheet with one figure on its brake line written differently. */
++function sheet(text: string, key: string, value: string): string {
++  return text.replace(new RegExp(`(^brake .*?\\b${key}=)\\S+`, "m"), `$1${value}`);
++}
++
++/** The deep winder as most certificates have it, with no brake line at all. */
++const unmeasured = deep.split("\n").filter((each) => !each.startsWith("brake ")).join("\n");
++
++/** The same shallow shaft with twice the shoes, which is enough of a brake. */
++const sound = sheet(shallow, "shoes", "4");
++
++const deepWinder = parseWinder(deep);
++const shallowWinder = parseWinder(shallow);
++const soundWinder = parseWinder(sound);
++const wheelWinder = parseWinder(wheel);
++const quietWinder = parseWinder(unmeasured);
++const cageWinder = parseWinder(cages);
++
++function brakeSaid(text: string) {
++  return auditWinder(parseWinder(text)).filter((each) => each.part === "brake");
++}
++
++describe("the two retardations", () => {
++  it("adds the least out-of-balance winding and takes the most off lowering", () => {
++    const what = dutyOf(shallowWinder);
++    const mass = movingMass(what);
++    const held = heldPull(shallowWinder);
++    expect(retardationWinding(shallowWinder)).toBeCloseTo(((held + leastOutOfBalance(what)) * 1000) / mass, 3);
++    expect(retardationLowering(shallowWinder)).toBeCloseTo(((held - mostOutOfBalance(what)) * 1000) / mass, 3);
++  });
++
++  it("takes a negative least off the winding figure and does not add it", () => {
++    // At the end of a deep cage wind the rope on the falling side
++    // outweighs everything the rising side carries, so the load has
++    // stopped helping the brake and started fighting it. The sign is
++    // the whole of the arithmetic and there is nothing to take an
++    // absolute value of.
++    const what = dutyOf(cageWinder);
++    const mass = movingMass(what);
++    const held = heldPull(cageWinder);
++    expect(leastOutOfBalance(what)).toBeLessThan(0);
++    expect(retardationWinding(cageWinder)).toBeCloseTo(((held + leastOutOfBalance(what)) * 1000) / mass, 3);
++    expect(retardationWinding(cageWinder)).toBeLessThan((held * 1000) / mass);
++  });
++
++  it("gives nought winding as well, where the rope drives harder than the shoes hold", () => {
++    // The other end of the same rule. A cage winder finishing its wind
++    // on an unbalanced rope is being driven backwards, and a brake too
++    // small to take that off does not retard the wind by a negative
++    // amount, it does not retard it at all.
++    const weak = parseWinder(sheet(cages, "force", "20kn"));
++    const what = dutyOf(weak);
++    expect(heldPull(weak) + leastOutOfBalance(what)).toBeLessThan(0);
++    expect(retardationWinding(weak)).toBe(0);
++    expect(retardationLowering(weak)).toBe(0);
++  });
++
++  it("puts lowering below winding wherever the load is not balanced out", () => {
++    for (const one of [deepWinder, shallowWinder, soundWinder]) {
++      expect(retardationLowering(one)).toBeLessThan(retardationWinding(one));
++    }
++  });
++
++  it("keeps the two apart by twice the load even on a balanced winder", () => {
++    const what = dutyOf(deepWinder);
++    const apart = retardationWinding(deepWinder) - retardationLowering(deepWinder);
++    const load = leastOutOfBalance(what) + mostOutOfBalance(what);
++    expect(apart).toBeCloseTo((load * 1000) / movingMass(what), 3);
++  });
++
++  it("gives nought lowering where the load is more than the brake holds", () => {
++    const weak = parseWinder(sheet(shallow, "force", "20kn"));
++    expect(heldPull(weak)).toBeLessThan(mostOutOfBalance(dutyOf(weak)));
++    expect(retardationLowering(weak)).toBe(0);
++    expect(retardationWinding(weak)).toBeGreaterThan(0);
++  });
++
++  it("spreads both figures over everything the wind moves", () => {
++    // Twice the brake is not twice the retardation, because the load is
++    // in the sum as well and the mass under it does not change.
++    const harder = parseWinder(sheet(sound, "force", "180kn"));
++    const mass = movingMass(dutyOf(soundWinder));
++    const gained = retardationWinding(harder) - retardationWinding(soundWinder);
++    expect(gained).toBeCloseTo((heldPull(soundWinder) * 1000) / mass, 3);
++  });
++
++  it("takes the most off lowering on a friction winder as well", () => {
++    // The figure the shoes are held to is the grip, and the load comes
++    // off that rather than off what the springs would have given.
++    const what = dutyOf(wheelWinder);
++    const mass = movingMass(what);
++    const held = heldPull(wheelWinder);
++    expect(retardationLowering(wheelWinder)).toBeCloseTo(((held - mostOutOfBalance(what)) * 1000) / mass, 3);
++    expect(retardationWinding(wheelWinder)).toBeCloseTo(((held + leastOutOfBalance(what)) * 1000) / mass, 3);
++  });
++
++  it("holds a friction winder to what the ropes pass and no further", () => {
++    const harder = parseWinder(sheet(wheel, "force", "2100kn"));
++    expect(retardationWinding(harder)).toBeCloseTo(retardationWinding(wheelWinder), 3);
++  });
++});
++
++describe("the overwind", () => {
++  it("answers it with the winding figure and not the lowering one", () => {
++    // This brake is the case the two figures were separated for: it
++    // stops an overwind comfortably and would not stop the same wind
++    // going the other way.
++    const wanted = retardationFor(soundWinder.profile.full, overwindRoom(soundWinder.shaft));
++    expect(retardationLowering(soundWinder)).toBeLessThan(wanted);
++    expect(retardationWinding(soundWinder)).toBeGreaterThan(wanted);
++    expect(stopsAnOverwind(soundWinder)).toBe(true);
++  });
++
++  it("is stopped where the winding figure covers the room the headgear leaves", () => {
++    const wanted = retardationFor(soundWinder.profile.full, overwindRoom(soundWinder.shaft));
++    expect(retardationWinding(soundWinder)).toBeGreaterThan(wanted);
++    expect(stopsAnOverwind(soundWinder)).toBe(true);
++  });
++
++  it("is not where it does not", () => {
++    for (const one of [deepWinder, shallowWinder, wheelWinder]) {
++      const wanted = retardationFor(one.profile.full, overwindRoom(one.shaft));
++      expect(retardationWinding(one)).toBeLessThan(wanted);
++      expect(stopsAnOverwind(one)).toBe(false);
++    }
++  });
++});
++
++describe("a brake line on a winder file", () => {
++  it("reads all six figures off it and uses every one", () => {
++    // Six keys, and each of them moves the figure it belongs to: the
++    // three that make torque, and the three that make the strip of path
++    // a shoe bears on.
++    const said = brakeOf(deepWinder);
++    expect(torque(brakeOf(parseWinder(sheet(deep, "force", "600kn"))))).toBeCloseTo(2 * torque(said), 3);
++    expect(torque(brakeOf(parseWinder(sheet(deep, "shoes", "8"))))).toBeCloseTo(2 * torque(said), 3);
++    expect(torque(brakeOf(parseWinder(sheet(deep, "friction", "0.175"))))).toBeCloseTo(torque(said) / 2, 3);
++    expect(torque(brakeOf(parseWinder(sheet(deep, "diameter", "7.2m"))))).toBeCloseTo(2 * torque(said), 3);
++    expect(pressure(brakeOf(parseWinder(sheet(deep, "arc", "120"))))).toBeCloseTo(pressure(said) / 2, 3);
++    expect(pressure(brakeOf(parseWinder(sheet(deep, "width", "0.5m"))))).toBeCloseTo(pressure(said) / 2, 3);
++  });
++
++  it("wants every one of the six", () => {
++    for (const key of ["diameter", "width", "arc", "shoes", "friction", "force"]) {
++      const short = deep
++        .split("\n")
++        .map((line) => (line.startsWith("brake ") ? line.replace(new RegExp(`\\s${key}=\\S+`), "") : line))
++        .join("\n");
++      expect(() => parseWinder(short), key).toThrow(WindingError);
++    }
++  });
++
++  it("refuses a word a brake line does not take", () => {
++    expect(() => parseWinder(deep.replace("brake diameter=", "brake springs=6 diameter="))).toThrow(WindingError);
++  });
++
++  it("refuses two brakes on one winder", () => {
++    const twice = `${deep}brake diameter=3m width=0.2m arc=60 shoes=2 friction=0.3 force=100kn\n`;
++    expect(() => parseWinder(twice)).toThrow(WindingError);
++  });
++
++  it("reads the force in whatever the trade wrote it in", () => {
++    // A spring is quoted in tons force on every old sheet, and a force
++    // is a force whichever of the two a fitter reaches for.
++    const tons = brakeOf(parseWinder(sheet(deep, "force", "30tonf")));
++    expect(torque(tons) / torque(brakeOf(deepWinder))).toBeCloseTo(parseForce("30tonf", "force") / 300, 4);
++  });
++
++  it("reads the path and the shoe as lengths", () => {
++    const millimetres = brakeOf(parseWinder(sheet(sheet(deep, "diameter", "3600mm"), "width", "250mm")));
++    expect(torque(millimetres)).toBeCloseTo(torque(brakeOf(deepWinder)), 4);
++    expect(pressure(millimetres)).toBeCloseTo(pressure(brakeOf(deepWinder)), 4);
++    expect(parseLength("3600mm", "diameter")).toBeCloseTo(3.6, 6);
++  });
++
++  it("refuses a figure on it that is not a figure", () => {
++    // Six figures off a maker's plate, and a word is not one of them.
++    expect(() => parseWinder(sheet(deep, "shoes", "four"))).toThrow(WindingError);
++    expect(() => parseWinder(sheet(deep, "friction", "good"))).toThrow(WindingError);
++  });
++
++  it("refuses to give a brake nobody has stated", () => {
++    expect(() => brakeOf(quietWinder)).toThrow(WindingError);
++  });
++});
++
++describe("what the audit says", () => {
++  it("says nothing at all about a winder nobody has measured", () => {
++    expect(brakeSaid(unmeasured)).toHaveLength(0);
++    expect(auditWinder(quietWinder).length).toBeGreaterThan(0);
++  });
++
++  it("calls a brake that will not hold the wind an error", () => {
++    const said = brakeSaid(shallow);
++    expect(said.filter((each) => each.severity === "error").length).toBeGreaterThan(0);
++  });
++
++  it("calls one that will not stop an overwind an error", () => {
++    // This brake holds the wind standing and still will not stop it, so
++    // the only error left to find is the overwind.
++    const said = brakeSaid(deep);
++    expect(said.filter((each) => each.severity === "error")).toHaveLength(1);
++    expect(said.filter((each) => each.severity === "warning")).toHaveLength(0);
++  });
++
++  it("warns where the shoe is pressed harder than practice allows", () => {
++    expect(pressure(brakeOf(wheelWinder))).toBeGreaterThan(0.7);
++    expect(brakeSaid(wheel).filter((each) => each.severity === "warning")).toHaveLength(1);
++    expect(pressure(brakeOf(soundWinder))).toBeLessThan(0.7);
++    expect(brakeSaid(sound).filter((each) => each.severity === "warning")).toHaveLength(0);
++  });
++
++  it("leaves a sound brake with a note and nothing else", () => {
++    const said = brakeSaid(sound);
++    expect(said).toHaveLength(1);
++    expect(said[0]?.severity).toBe("note");
++  });
++
++  it("leaves the rest of the audit exactly as it found it", () => {
++    // Same installation, one line more on the sheet. Everything the
++    // rope, the drum, the shaft and the engine had to say about it is
++    // the same, and the brake is added to the end of the list rather
++    // than argued with the middle of it.
++    const measured = auditWinder(deepWinder).filter((each) => each.part !== "brake");
++    const unsaid = auditWinder(quietWinder).filter((each) => each.part !== "brake");
++    expect(measured).toHaveLength(unsaid.length);
++    expect(measured.map((each) => `${each.part}:${each.severity}`)).toEqual(
++      unsaid.map((each) => `${each.part}:${each.severity}`),
++    );
++  });
++
++  it("carries a note on every brake it has been given", () => {
++    // The note is the reading, and a reading is worth having whether or
++    // not there is anything wrong with the machine it came off.
++    for (const text of [deep, shallow, wheel, sound]) {
++      expect(brakeSaid(text).filter((each) => each.severity === "note").length, text.slice(0, 20)).toBeGreaterThan(0);
++    }
++  });
++
++  it("counts the errors it finds and no more than that", () => {
++    // A brake that will neither hold the wind standing nor stop it
++    // running is two faults, not one and not three.
++    const said = brakeSaid(shallow);
++    expect(said.filter((each) => each.severity === "error")).toHaveLength(2);
++    expect(said.filter((each) => each.severity === "warning")).toHaveLength(0);
++    expect(said.filter((each) => each.severity === "note")).toHaveLength(1);
++  });
++
++  it("counts a shoe fault beside a holding fault and keeps both", () => {
++    // The friction winder is the one with everything wrong at once: it
++    // will not hold, it will not stop an overwind, and the springs
++    // behind its shoes are harder than the path will take.
++    const said = brakeSaid(wheel);
++    expect(said.filter((each) => each.severity === "error")).toHaveLength(2);
++    expect(said.filter((each) => each.severity === "warning")).toHaveLength(1);
++    expect(said.filter((each) => each.severity === "note")).toHaveLength(1);
++  });
++
++  it("files every one of them under the brake and not the gear", () => {
++    for (const text of [deep, shallow, wheel, sound]) {
++      const said = brakeSaid(text);
++      expect(said.length, text.slice(0, 20)).toBeGreaterThan(0);
++      for (const each of said) expect(each.part).toBe("brake");
++    }
++  });
++});

@@ -1,0 +1,130 @@
+[verifier] model.patch applied (820 bytes)
+[verifier] Resetting files touched by test.patch
+[verifier] Applying test.patch
+[verifier] vitest child runs as uid 65534 gid 65534
+===== raw suite output: run.log =====
++ vitest -> /verify/reports/base.xml (92 files)
+[publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed), child rc 0
++ suite exit 0
++ held-back files and run configuration re-checked before their suite: OK
++ vitest -> /verify/reports/new.xml (2 files)
+[publish] wrote /verify/reports/new.xml: 57 cases (0 declared ids added as failed), child rc 1
++ suite exit 0
+===== grade =====
+[verifier] ===== FAILURES (57) =====
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes a show that stays inside the sheet
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails fallout over the sheet's hard boundary
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > refuses a sheet beside an audience distance, and takes either alone
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet it cannot read once a readable one works
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet that will not parse and does not pass the show
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > takes the bearing as where the wind blows from, not towards
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > leaves a hedge across the wind alone
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails a house whose limit the show passes
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes the same show at a house with a higher limit
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > draws the boundaries and the houses on the plan
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > names the sheet's site on the permit
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > lets --site-name win over the sheet
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > prints a site section with the closest line and every house
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > quotes the nearer of two hard boundaries, at its own distance
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > passes over a soft line closer than the nearest hard one
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > puts the sheet's permit into the pack
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > lets --site-name win over the sheet in the pack as well
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > takes the sheet on the table and sheet commands too
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.every show command > takes a sheet without calling it a usage mistake
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.every show command > refuses a sheet beside an audience distance in every one of them
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.crowd with a sheet > measures the crowd against a surveyed line
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.crowd with a sheet > refuses a sheet it cannot read, or none at all, once a sheet works
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > reads every statement of a full sheet without complaint
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > keeps hard and soft boundaries apart, points and all
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > gives a house its own limit and the sheet's limit to one without
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > applies the sheet limit whichever line comes first
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > leaves a house unlimited when no line says otherwise
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > gets by without a site line or any boundary
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > refuses a sheet with no audience line
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > refuses a second audience line
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > refuses a boundary with fewer than two points
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > refuses coordinates that are not numbers
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > refuses a boundary or a house with no name
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > refuses a house without at, and a limit that is not a number
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > refuses a statement it does not know
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > raises one error per bad line and keeps reading past each
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > still fails a six inch whose disc reaches the hedge in still air
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > passes a three inch that stays inside in still air
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > leaves a line the disc's edge only touches alone
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > carries the disc downwind onto the hedge
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > leaves a boundary upwind of the mortar alone
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > leaves a boundary across the wind alone
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > counts a line the casing flew over as crossed
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > counts a line the disc came down clean beyond
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > resolves a diagonal wind against each boundary
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > finds the flight crossing a later segment of a bent boundary
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > measures to the nearest segment of a bent boundary
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > reports a crossing once per effect and boundary however many shots
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.fallout judged where it lands > never fails on a soft boundary
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > fails a house whose limit the show passes
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > warns inside three decibels of the limit
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > says nothing at a house with room to spare
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > judges each house at its own distance and limit
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > takes the sheet limit for a house without one
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > stays quiet about a house nobody gave a limit
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > adds reports that land together on an energy basis
+    failed; see the raw suite output in run.log
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.noise at the houses > names every single effect over the limit, not only the loudest
+    failed; see the raw suite output in run.log
+P2P 2116/2116 pass 0 fail; F2P 0/57 pass 57 fail; PARTIAL 0.9737689829728486; BINARY 0
+[verifier] reward.json={"reward": 0, "f2p_total": 57, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9737689829728486}

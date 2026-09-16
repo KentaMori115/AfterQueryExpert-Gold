@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+    <style>
+        .form-container {
+            max-width: 600px; /* Limit the maximum width of the form */
+            width: 100%; /* Ensure it takes up full width on smaller devices */
+        }
+    </style>
+    <div>
+        <div class="px-3">
+            <a class="text-start" href="{% url 'bots'%}">Return Bot Selection</a>
+        </div>
+        <h1 class="text-center">NO BOT</h1>
+        <div>
+            <p class="text-center"> The Bot does not exist</p>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block script %} 
+    {{ block.super }}
+    <script src="{% static 'js/bot_3.13.js' %}"></script>
+{% endblock %}

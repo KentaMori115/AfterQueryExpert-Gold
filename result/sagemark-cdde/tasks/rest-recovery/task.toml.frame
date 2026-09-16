@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/rest-recovery"
+
+[metadata]
+task_id = "rest-recovery"
+display_title = "<<EDIT-ME>> One-line title for this task"
+display_description = "<<EDIT-ME>> One or two sentences describing the change."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/BaWX5OzTFQ77YYpY2WQf"
+base_commit_hash = "00800e20bf11764d07d33a49ffd1f1798ed699ed"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-sagemark-bawx5o:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

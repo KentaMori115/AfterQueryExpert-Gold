@@ -1,0 +1,58 @@
+{
+  "name": "portfire",
+  "version": "0.1.0",
+  "description": "Firing scripts, cue timing and separation distances for computer fired pyrotechnic displays",
+  "keywords": [
+    "pyrotechnics",
+    "fireworks",
+    "firing-system",
+    "cue",
+    "pyromusical",
+    "display",
+    "safety-distance"
+  ],
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "portfire": "./dist/bin/portfire.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "bench": "tsc -p tsconfig.bench.json && node dist-bench/bench/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "@vitest/coverage-v8": "2.1.8",
+    "eslint": "9.18.0",
+    "prettier": "3.4.2",
+    "typescript": "5.7.3",
+    "typescript-eslint": "8.20.0",
+    "vitest": "2.1.8"
+  }
+}

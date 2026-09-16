@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: |
+          python -m ruff check src tests
+          python -m ruff format --check src tests
+
+      - name: Typecheck
+        run: python -m mypy
+
+      - name: Test
+        run: python -m pytest --cov --cov-report=term-missing
+
+      - name: Check the generated documents are up to date
+        run: |
+          python -m signalbox rules --markdown > /tmp/rules.md
+          diff -u docs/rules.md /tmp/rules.md
+
+      - name: Build a handover pack from the example
+        run: |
+          python -m signalbox pack examples/ashcombe.sbx --out pack || true
+          test -f pack/control.csv
+          test -f pack/ashcombe.svg
+
+      - name: Check the example plans are formatted
+        run: python -m signalbox fmt examples --check || true

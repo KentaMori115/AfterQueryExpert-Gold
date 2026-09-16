@@ -1,0 +1,787 @@
+diff --git a/tests/test_interval_queries.py b/tests/test_interval_queries.py
+new file mode 100644
+index 0000000..6950f9f
+--- /dev/null
++++ b/tests/test_interval_queries.py
+@@ -0,0 +1,342 @@
++"""INTERVAL values inside whole queries: keys, aggregates, plans and output."""
++
++from __future__ import annotations
++
++import datetime as dt
++import json
++
++import pytest
++
++from slateql import Session
++from slateql.cli.formatter import format_result
++from slateql.cli.main import main
++from slateql.sql.parser import parse
++from slateql.sql.unparser import unparse
++from slateql.types.datatypes import DATE, INTEGER, INTERVAL, STRING, TypeKind
++from slateql.types.schema import Schema
++
++MIXED = (
++    "CASE n WHEN 1 THEN INTERVAL 'P1M' WHEN 2 THEN INTERVAL 'P30D' "
++    "WHEN 3 THEN INTERVAL 'P1D' WHEN 4 THEN INTERVAL 'PT24H' "
++    "WHEN 5 THEN INTERVAL 'P29D' ELSE NULL END"
++)
++
++
++@pytest.fixture()
++def mixed() -> Session:
++    """Six rows whose ``n`` selects an interval through ``MIXED``."""
++
++    active = Session()
++    active.register_dicts("k", [{"n": n} for n in range(1, 7)])
++    return active
++
++
++def intervals_table(session: Session, name: str, expressions: list[str]) -> None:
++    """Register ``name`` with one INTERVAL column built from SQL expressions.
++
++    The values pass through the engine itself, so the table holds whatever
++    the engine uses for an interval without the test naming it.
++    """
++
++    rows = [session.sql(f"SELECT {expression} AS v").rows[0] for expression in expressions]
++    session.register_rows(name, Schema.of(("v", INTERVAL)), rows)
++
++
++TERMS_SCHEMA = Schema.of(
++    ("id", INTEGER),
++    ("plan", STRING),
++    ("started", DATE),
++    ("term", INTERVAL),
++)
++
++TERMS_ROWS = [
++    [1, "monthly", dt.date(2024, 1, 31), dt.timedelta(days=30)],
++    [2, "monthly", dt.date(2024, 1, 29), dt.timedelta(days=30)],
++    [3, "trial", dt.date(2024, 2, 20), dt.timedelta(days=14)],
++    [4, "weekly", dt.date(2024, 2, 27), dt.timedelta(days=7)],
++    [5, "paused", dt.date(2024, 3, 1), None],
++]
++
++
++@pytest.fixture()
++def terms() -> Session:
++    active = Session()
++    active.register_rows("terms", TERMS_SCHEMA, TERMS_ROWS)
++    return active
++
++
++# -- one identity for keys ------------------------------------------------------
++
++
++def test_group_by_merges_intervals_that_compare_equal(mixed: Session):
++    result = mixed.sql(
++        f"SELECT CAST({MIXED} AS STRING) AS v, COUNT(*) AS c FROM k GROUP BY {MIXED}"
++    )
++    assert result.to_tuples() == [("P1M", 2), ("P1D", 2), ("P29D", 1), (None, 1)]
++
++
++def test_distinct_merges_intervals_that_compare_equal(mixed: Session):
++    result = mixed.sql(f"SELECT DISTINCT {MIXED} AS v FROM k")
++    assert len(result) == 4
++    texts = mixed.sql(f"SELECT DISTINCT CAST({MIXED} AS STRING) AS v FROM k").column("v")
++    assert texts == ["P1M", "P30D", "P1D", "PT24H", "P29D", None]
++
++
++def test_union_merges_intervals_that_compare_equal(mixed: Session):
++    result = mixed.sql(
++        "SELECT INTERVAL 'P1M' AS v FROM k UNION SELECT INTERVAL 'P30D' FROM k "
++        "UNION SELECT INTERVAL 'PT24H' FROM k UNION SELECT INTERVAL 'P1D' FROM k"
++    )
++    assert len(result) == 2
++    result = mixed.sql(
++        "SELECT INTERVAL 'P1M' AS v FROM k WHERE n = 1 "
++        "UNION ALL SELECT INTERVAL 'P30D' FROM k WHERE n = 1"
++    )
++    assert len(result) == 2
++
++
++def test_hash_join_matches_intervals_that_compare_equal(empty_session: Session):
++    intervals_table(empty_session, "a", ["INTERVAL 'P1M'", "INTERVAL 'P1D'", "INTERVAL 'P2D'"])
++    intervals_table(
++        empty_session, "b", ["INTERVAL 'P30D'", "INTERVAL 'PT24H'", "INTERVAL 'PT47H'"]
++    )
++    matched = empty_session.sql(
++        "SELECT CAST(a.v AS STRING) AS l, CAST(b.v AS STRING) AS r "
++        "FROM a JOIN b ON a.v = b.v ORDER BY a.v"
++    )
++    assert matched.to_tuples() == [("P1D", "PT24H"), ("P1M", "P30D")]
++    outer = empty_session.sql(
++        "SELECT CAST(a.v AS STRING) AS l, CAST(b.v AS STRING) AS r "
++        "FROM a LEFT JOIN b ON a.v = b.v ORDER BY a.v"
++    )
++    assert outer.to_tuples() == [("P1D", "PT24H"), ("P2D", None), ("P1M", "P30D")]
++
++
++def test_join_never_matches_a_null_interval(terms: Session):
++    intervals_table(terms, "n", ["CAST(NULL AS INTERVAL)", "INTERVAL 'P14D'"])
++    matched = terms.sql("SELECT id FROM terms JOIN n ON terms.term = n.v ORDER BY id")
++    assert matched.column("id") == [3]
++
++
++# -- aggregates -------------------------------------------------------------------
++
++
++def test_sum_adds_fields_and_avg_scales_the_total(empty_session: Session):
++    intervals_table(empty_session, "s", ["INTERVAL 'P1M'", "INTERVAL 'PT0S'"])
++    result = empty_session.sql(
++        "SELECT CAST(SUM(v) AS STRING) AS total, CAST(AVG(v) AS STRING) AS mean, "
++        "COUNT(v) AS n FROM s"
++    )
++    assert result.to_tuples() == [("P1M", "P15D", 2)]
++    typed = empty_session.sql("SELECT SUM(v) AS total, AVG(v) AS mean FROM s").schema
++    assert typed.field("total").dtype.kind is TypeKind.INTERVAL
++    assert typed.field("mean").dtype.kind is TypeKind.INTERVAL
++    intervals_table(empty_session, "t", ["INTERVAL 'P1M20D'", "INTERVAL 'P20DT30H'"])
++    assert empty_session.scalar("SELECT CAST(SUM(v) AS STRING) FROM t") == "P1M40DT30H"
++    assert empty_session.scalar("SELECT CAST(AVG(v) AS STRING) FROM t") == "P35DT15H"
++
++
++def test_avg_of_three_carries_a_third_of_a_month(empty_session: Session):
++    intervals_table(
++        empty_session, "s", ["INTERVAL 'P1M'", "INTERVAL 'PT0S'", "INTERVAL 'PT0S'"]
++    )
++    assert empty_session.scalar("SELECT CAST(AVG(v) AS STRING) FROM s") == "P10D"
++    assert empty_session.scalar("SELECT CAST(MEAN(v) AS STRING) FROM s") == "P10D"
++
++
++def test_min_and_max_use_the_comparison_rule(empty_session: Session):
++    intervals_table(
++        empty_session, "s", ["INTERVAL 'P1M'", "INTERVAL 'P29D'", "INTERVAL 'P30DT1H'"]
++    )
++    result = empty_session.sql(
++        "SELECT CAST(MIN(v) AS STRING) AS lo, CAST(MAX(v) AS STRING) AS hi FROM s"
++    )
++    assert result.to_tuples() == [("P29D", "P30DT1H")]
++
++
++def test_aggregates_skip_nulls_and_empty_groups_are_null(terms: Session):
++    result = terms.sql(
++        "SELECT CAST(SUM(term) AS STRING) AS s, CAST(AVG(term) AS STRING) AS a, "
++        "CAST(MIN(term) AS STRING) AS lo, CAST(MAX(term) AS STRING) AS hi, "
++        "COUNT(term) AS n FROM terms"
++    )
++    assert result.to_tuples() == [("P81D", "P20DT6H", "P7D", "P30D", 4)]
++    empty = terms.sql(
++        "SELECT SUM(term) AS s, AVG(term) AS a, MIN(term) AS lo FROM terms WHERE id > 9"
++    )
++    assert empty.to_tuples() == [(None, None, None)]
++
++
++def test_grouped_aggregates_over_intervals(terms: Session):
++    result = terms.sql(
++        "SELECT plan, CAST(SUM(term) AS STRING) AS total FROM terms "
++        "GROUP BY plan HAVING SUM(term) > INTERVAL 'P10D' ORDER BY plan"
++    )
++    assert result.to_tuples() == [("monthly", "P60D"), ("trial", "P14D")]
++
++
++# -- planning ---------------------------------------------------------------------
++
++
++def test_optimized_and_unoptimized_plans_agree(terms: Session):
++    statement = (
++        "SELECT id, started + term AS renews, started + INTERVAL 'P1M' + INTERVAL 'P1M' AS later "
++        "FROM terms WHERE started + INTERVAL 'P1M' > CAST('2024-03-01T00:00:00' AS TIMESTAMP) "
++        "ORDER BY id"
++    )
++    fast = terms.sql(statement)
++    terms.configure(optimize=False)
++    slow = terms.sql(statement)
++    assert fast.to_tuples() == slow.to_tuples()
++    assert fast.schema.types == slow.schema.types
++    assert fast.column("id") == [3, 4, 5]
++    assert fast.column("later")[0] == dt.datetime(2024, 4, 20)
++
++
++def test_folded_interval_prints_as_an_interval_literal(terms: Session):
++    plan = terms.explain("SELECT started + (INTERVAL 'P1M' + INTERVAL 'P1M') AS x FROM terms")
++    assert "INTERVAL 'P2M'" in plan
++    assert "'P1M'" not in plan
++    terms.configure(optimize=False)
++    plan = terms.explain("SELECT started + (INTERVAL 'P1M' + INTERVAL 'P1M') AS x FROM terms")
++    assert plan.count("INTERVAL 'P1M'") == 2
++
++
++def test_folding_never_turns_a_month_into_days(terms: Session):
++    statement = "SELECT CAST('2024-01-31' AS DATE) + INTERVAL 'P1M' AS d FROM terms WHERE id = 1"
++    assert terms.scalar(statement) == dt.datetime(2024, 2, 29)
++    statement = (
++        "SELECT CAST('2024-01-31' AS DATE) + (INTERVAL 'P15D' * 2) AS d FROM terms WHERE id = 1"
++    )
++    assert terms.scalar(statement) == dt.datetime(2024, 3, 1)
++
++
++def test_interval_predicates_survive_pushdown(terms: Session):
++    statement = (
++        "SELECT id FROM terms WHERE term >= INTERVAL 'P2W' AND started - INTERVAL 'P1M' "
++        "< CAST('2024-01-01T00:00:00' AS TIMESTAMP) ORDER BY id"
++    )
++    assert terms.sql(statement).column("id") == [1, 2]
++    terms.configure(optimize=False)
++    assert terms.sql(statement).column("id") == [1, 2]
++
++
++def test_statistics_are_collected_over_interval_columns(terms: Session):
++    terms.configure(collect_statistics=True)
++    terms.analyze("terms")
++    assert terms.sql("SELECT id FROM terms WHERE term > INTERVAL 'P1W'").column("id") == [1, 2, 3]
++    assert terms.sql("SELECT id FROM terms WHERE term = INTERVAL 'PT168H'").column("id") == [4]
++
++
++def test_unparse_round_trips_interval_literals():
++    statement = (
++        "SELECT INTERVAL '3' DAY + INTERVAL 'P1M' AS x FROM t "
++        "WHERE d > CAST('2024-01-01' AS DATE) - INTERVAL 'P1Y'"
++    )
++    once = unparse(parse(statement))
++    assert "INTERVAL 'P3D'" in once
++    assert "INTERVAL 'P1M'" in once
++    assert "INTERVAL 'P1Y'" in once
++    assert unparse(parse(once)) == once
++
++
++def test_unit_word_after_the_text_belongs_to_the_literal(terms: Session):
++    result = terms.sql("SELECT CAST(INTERVAL '1' day AS STRING) AS d FROM terms WHERE id = 1")
++    assert result.column("d") == ["P1D"]
++    result = terms.sql("SELECT INTERVAL 'P1D' AS day FROM terms WHERE id = 1")
++    assert result.schema.names == ["day"]
++
++
++def test_case_and_coalesce_unify_intervals(terms: Session):
++    result = terms.sql(
++        "SELECT CAST(COALESCE(term, INTERVAL 'P0D') AS STRING) AS t, "
++        "CAST(CASE WHEN term > INTERVAL 'P2W' THEN term ELSE NULL END AS STRING) AS big "
++        "FROM terms ORDER BY id"
++    )
++    assert result.column("t") == ["P30D", "P30D", "P14D", "P7D", "PT0S"]
++    assert result.column("big") == ["P30D", "P30D", None, None, None]
++
++
++def test_three_valued_comparison_in_where(terms: Session):
++    rows = terms.sql("SELECT id FROM terms WHERE NOT term = INTERVAL 'P30D'").column("id")
++    assert rows == [3, 4]
++    assert terms.sql("SELECT id FROM terms WHERE term <> term").column("id") == []
++
++
++# -- output -----------------------------------------------------------------------
++
++
++def test_every_output_format_prints_iso_text(terms: Session):
++    result = terms.sql(
++        "SELECT id, CAST(term AS STRING) AS t, term FROM terms WHERE id IN (1, 5) ORDER BY id"
++    )
++    assert "| P30D" in format_result(result, "table")
++    assert "1,P30D,P30D" in format_result(result, "csv")
++    assert "1\tP30D\tP30D" in format_result(result, "tsv")
++    records = json.loads(format_result(result, "json"))
++    assert records[0]["term"] == "P30D" and records[1]["term"] is None
++    assert '"term": "P30D"' in format_result(result, "jsonl")
++    assert "term | P30D" in format_result(result, "vertical")
++    assert "| P30D" in result.pretty()
++
++
++def test_computed_intervals_print_the_same_way(terms: Session):
++    result = terms.sql(
++        "SELECT term / 2 AS half, CAST('2024-03-15T12:00:00' AS TIMESTAMP) - started AS running "
++        "FROM terms WHERE id = 1"
++    )
++    assert "| P15D" in format_result(result, "table") and "P44DT12H" in result.pretty()
++
++
++def test_cli_query_prints_intervals(capsys):
++    code = main(["query", "SELECT INTERVAL 'P1Y2M' AS span, INTERVAL 'P1M' / 2 AS half"])
++    out = capsys.readouterr().out
++    assert code == 0
++    assert "P1Y2M" in out
++    assert "P15D" in out
++
++
++# -- calendar walk over a table --------------------------------------------------
++
++
++def test_renewal_dates_over_a_table(terms: Session):
++    result = terms.sql(
++        "SELECT id, started + term AS renews FROM terms WHERE term IS NOT NULL ORDER BY renews, id"
++    )
++    assert result.column("renews") == [
++        dt.datetime(2024, 2, 28),
++        dt.datetime(2024, 3, 1),
++        dt.datetime(2024, 3, 5),
++        dt.datetime(2024, 3, 5),
++    ]
++    assert result.column("id") == [2, 1, 3, 4]
++
++
++def test_month_arithmetic_over_a_column(terms: Session):
++    result = terms.sql(
++        "SELECT id, started + INTERVAL '1' MONTH AS m1, started + INTERVAL '2' MONTH AS m2 "
++        "FROM terms ORDER BY id"
++    )
++    assert result.column("m1") == [
++        dt.datetime(2024, 2, 29),
++        dt.datetime(2024, 2, 29),
++        dt.datetime(2024, 3, 20),
++        dt.datetime(2024, 3, 27),
++        dt.datetime(2024, 4, 1),
++    ]
++    assert result.column("m2")[0] == dt.datetime(2024, 3, 31)
++    assert result.schema.field("m1").dtype.kind is TypeKind.TIMESTAMP
++
++
++def test_elapsed_time_between_columns(terms: Session):
++    result = terms.sql(
++        "SELECT id, CAST(CAST('2024-03-01' AS DATE) - started AS STRING) AS gap, "
++        "CAST('2024-03-01' AS DATE) - started AS raw FROM terms ORDER BY id"
++    )
++    assert result.column("raw") == [30, 32, 10, 3, 0]
++    assert result.column("gap") == ["30", "32", "10", "3", "0"]
++
++
++def test_ordering_by_a_computed_interval(terms: Session):
++    result = terms.sql("SELECT id FROM terms ORDER BY term / 7 NULLS FIRST, id")
++    assert result.column("id") == [5, 4, 3, 1, 2]
+diff --git a/tests/test_intervals.py b/tests/test_intervals.py
+new file mode 100644
+index 0000000..f398d35
+--- /dev/null
++++ b/tests/test_intervals.py
+@@ -0,0 +1,433 @@
++"""INTERVAL values: literals, text, arithmetic, comparison and extraction."""
++
++from __future__ import annotations
++
++import datetime as dt
++
++import pytest
++
++from slateql import Session
++from slateql.errors import ExecutionError, ParseError, TypeMismatchError
++from slateql.types.datatypes import DATE, INTEGER, INTERVAL, TIMESTAMP, TypeKind
++from slateql.types.schema import Schema
++
++
++def text(session: Session, expression: str) -> object:
++    """Evaluate ``expression`` and read it back as its canonical text."""
++
++    return session.scalar(f"SELECT CAST({expression} AS STRING)")
++
++
++def value(session: Session, expression: str) -> object:
++    return session.scalar(f"SELECT {expression}")
++
++
++def kind(session: Session, expression: str) -> TypeKind:
++    return session.sql(f"SELECT {expression}").schema[0].dtype.kind
++
++
++def date(text_value: str) -> str:
++    return f"CAST('{text_value}' AS DATE)"
++
++
++def stamp(text_value: str) -> str:
++    return f"CAST('{text_value}' AS TIMESTAMP)"
++
++
++SPANS_SCHEMA = Schema.of(
++    ("id", INTEGER),
++    ("started", DATE),
++    ("seen", TIMESTAMP),
++    ("span", INTERVAL),
++)
++
++SPANS_ROWS = [
++    [1, dt.date(2024, 1, 31), dt.datetime(2024, 1, 31, 10, 0), dt.timedelta(days=1, hours=2)],
++    [2, dt.date(2024, 3, 1), dt.datetime(2024, 3, 1, 0, 0), None],
++    [3, dt.date(2024, 1, 29), dt.datetime(2024, 2, 29, 23, 30), dt.timedelta(days=30)],
++    [4, dt.date(2024, 2, 29), dt.datetime(2024, 2, 29, 0, 0), dt.timedelta(hours=-2)],
++]
++
++
++@pytest.fixture()
++def spans() -> Session:
++    active = Session()
++    active.register_rows("spans", SPANS_SCHEMA, SPANS_ROWS)
++    return active
++
++
++# -- literals and text ---------------------------------------------------------
++
++
++def test_iso_literal_round_trips_through_cast(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'P1Y2M3DT4H5M6S'") == "P1Y2M3DT4H5M6S"
++    assert text(empty_session, "INTERVAL 'P1Y2M3DT4H5M6.5S'") == "P1Y2M3DT4H5M6.5S"
++    assert kind(empty_session, "INTERVAL 'P1Y2M3DT4H5M6S'") is TypeKind.INTERVAL
++    assert value(empty_session, "typeof(INTERVAL 'P1D')") == "INTERVAL"
++
++
++@pytest.mark.parametrize(
++    "literal, expected",
++    [
++        ("INTERVAL '1' YEAR", "P1Y"),
++        ("INTERVAL '14' MONTH", "P1Y2M"),
++        ("INTERVAL '2' WEEK", "P14D"),
++        ("INTERVAL '3' DAY", "P3D"),
++        ("INTERVAL '36' HOUR", "PT36H"),
++        ("INTERVAL '90' MINUTE", "PT1H30M"),
++        ("INTERVAL '61' SECOND", "PT1M1S"),
++    ],
++)
++def test_unit_literal_fills_one_field(empty_session: Session, literal, expected):
++    assert text(empty_session, literal) == expected
++
++
++def test_unit_literal_takes_a_signed_whole_number(empty_session: Session):
++    assert text(empty_session, "INTERVAL '-2' MONTH") == "P-2M"
++    assert text(empty_session, "INTERVAL '+5' DAY") == "P5D"
++    with pytest.raises(ParseError):
++        empty_session.sql("SELECT INTERVAL '1.5' DAY")
++    with pytest.raises(ParseError):
++        empty_session.sql("SELECT INTERVAL 'x' DAY")
++
++
++def test_years_and_weeks_fold_but_hours_stay_hours(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'P2Y'") == "P2Y"
++    assert text(empty_session, "INTERVAL 'P14M'") == "P1Y2M"
++    assert text(empty_session, "INTERVAL 'P2W'") == "P14D"
++    assert text(empty_session, "INTERVAL 'P1W1D'") == "P8D"
++    assert text(empty_session, "INTERVAL 'PT36H'") == "PT36H"
++    assert text(empty_session, "INTERVAL 'PT90M'") == "PT1H30M"
++    assert text(empty_session, "INTERVAL 'PT3661S'") == "PT1H1M1S"
++    assert text(empty_session, "INTERVAL 'P1DT24H'") == "P1DT24H"
++
++
++def test_zero_interval_renders_as_pt0s(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'P0D'") == "PT0S"
++    assert text(empty_session, "INTERVAL 'PT0S'") == "PT0S"
++    assert text(empty_session, "INTERVAL 'P1D' - INTERVAL 'P1D'") == "PT0S"
++
++
++def test_each_component_carries_its_own_sign(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'P1M-1D'") == "P1M-1D"
++    assert text(empty_session, "INTERVAL '-P1DT2H'") == "P-1DT-2H"
++    assert text(empty_session, "INTERVAL 'PT-1H30M'") == "PT-30M"
++    assert text(empty_session, "INTERVAL 'P-1Y14M'") == "P2M"
++
++
++def test_only_seconds_may_be_fractional(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'PT1.5S'") == "PT1.5S"
++    assert text(empty_session, "INTERVAL 'PT1.2500000S'") == "PT1.25S"
++    assert text(empty_session, "INTERVAL 'PT0.0000006S'") == "PT0.000001S"
++    with pytest.raises(ParseError):
++        empty_session.sql("SELECT INTERVAL 'P1.5D'")
++
++
++def test_bad_literal_text_is_a_parse_error(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'P1D'") == "P1D"
++    for bad in ("P", "PT", "P1DT", "1 day", "", "P1D2H", "PT1H1H", "1D", "P1Y2"):
++        with pytest.raises(ParseError):
++            empty_session.sql(f"SELECT INTERVAL '{bad}'")
++
++
++def test_cast_from_string_uses_the_literal_rules(empty_session: Session):
++    assert text(empty_session, "CAST('P14D' AS INTERVAL)") == "P14D"
++    assert text(empty_session, "CAST('P2W' AS INTERVAL)") == "P14D"
++    assert text(empty_session, "CAST('-P1M' AS INTERVAL)") == "P-1M"
++    assert kind(empty_session, "CAST('P14D' AS INTERVAL)") is TypeKind.INTERVAL
++    assert value(empty_session, "typeof(CAST('P14D' AS INTERVAL))") == "INTERVAL"
++
++
++def test_cast_of_bad_text_is_null_unless_strict(empty_session: Session):
++    empty_session.register_dicts("raw", [{"t": "P1D"}, {"t": "3 days"}, {"t": "P"}])
++    assert value(empty_session, "CAST('3 days' AS INTERVAL)") is None
++    assert value(empty_session, "CAST('P' AS INTERVAL)") is None
++    converted = empty_session.sql("SELECT CAST(CAST(t AS INTERVAL) AS STRING) AS s FROM raw")
++    assert converted.column("s") == ["P1D", None, None]
++    empty_session.configure(strict_casts=True)
++    with pytest.raises(ExecutionError):
++        empty_session.sql("SELECT CAST(t AS INTERVAL) FROM raw")
++
++
++def test_cast_of_an_interval_to_interval_is_identity(spans: Session):
++    rows = spans.sql(
++        "SELECT CAST(CAST(span AS INTERVAL) AS STRING) AS s FROM spans ORDER BY id"
++    ).column("s")
++    assert rows == ["P1DT2H", None, "P30D", "PT-2H"]
++
++
++# -- arithmetic ----------------------------------------------------------------
++
++
++def test_field_wise_sum_and_difference(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'P1M20D' + INTERVAL 'P20DT30H'") == "P1M40DT30H"
++    assert text(empty_session, "INTERVAL 'P1M' - INTERVAL 'P1D'") == "P1M-1D"
++    assert kind(empty_session, "INTERVAL 'P1M' + INTERVAL 'P1D'") is TypeKind.INTERVAL
++
++
++def test_unary_minus_negates_every_field(empty_session: Session):
++    assert text(empty_session, "-INTERVAL 'P1M15D'") == "P-1M-15D"
++    assert text(empty_session, "-INTERVAL 'P1M-1DT2H'") == "P-1M1DT-2H"
++    assert text(empty_session, "+INTERVAL 'P1D'") == "P1D"
++
++
++def test_january_31_plus_a_month_lands_on_february_29(empty_session: Session):
++    expression = f"{date('2024-01-31')} + INTERVAL 'P1M'"
++    assert value(empty_session, expression) == dt.datetime(2024, 2, 29)
++    assert kind(empty_session, expression) is TypeKind.TIMESTAMP
++    feb = value(empty_session, f"{date('2023-01-31')} + INTERVAL '1' MONTH")
++    assert feb == dt.datetime(2023, 2, 28)
++    assert value(empty_session, f"{date('2024-03-31')} + INTERVAL 'P1M'") == dt.datetime(2024, 4, 30)
++
++
++def test_adding_a_month_twice_differs_from_two_months(empty_session: Session):
++    twice = f"{date('2024-01-31')} + INTERVAL 'P1M' + INTERVAL 'P1M'"
++    once = f"{date('2024-01-31')} + INTERVAL 'P2M'"
++    assert value(empty_session, twice) == dt.datetime(2024, 3, 29)
++    assert value(empty_session, once) == dt.datetime(2024, 3, 31)
++
++
++def test_months_apply_before_days(empty_session: Session):
++    together = f"{date('2024-01-29')} + INTERVAL 'P1M2D'"
++    days_first = f"{date('2024-01-29')} + INTERVAL 'P2D' + INTERVAL 'P1M'"
++    assert value(empty_session, together) == dt.datetime(2024, 3, 2)
++    assert value(empty_session, days_first) == dt.datetime(2024, 2, 29)
++    expression = f"{stamp('2024-01-31T23:30:00')} + INTERVAL 'P1MT1H'"
++    assert value(empty_session, expression) == dt.datetime(2024, 3, 1, 0, 30)
++
++
++def test_leap_day_plus_a_year(empty_session: Session):
++    assert value(empty_session, f"{date('2024-02-29')} + INTERVAL 'P1Y'") == dt.datetime(2025, 2, 28)
++    assert value(empty_session, f"{date('2024-02-29')} + INTERVAL 'P4Y'") == dt.datetime(2028, 2, 29)
++
++
++def test_subtracting_an_interval_walks_backwards(empty_session: Session):
++    expression = f"{date('2024-03-31')} - INTERVAL 'P1M'"
++    assert value(empty_session, expression) == dt.datetime(2024, 2, 29)
++    assert kind(empty_session, expression) is TypeKind.TIMESTAMP
++    expression = f"{stamp('2024-03-01T00:00:00')} - INTERVAL 'PT1S'"
++    assert value(empty_session, expression) == dt.datetime(2024, 2, 29, 23, 59, 59)
++    expression = f"{date('2024-03-31')} + INTERVAL '-1' MONTH"
++    assert value(empty_session, expression) == dt.datetime(2024, 2, 29)
++
++
++def test_timestamp_difference_is_days_and_seconds(empty_session: Session):
++    expression = f"{stamp('2024-03-01T00:00:00')} - {stamp('2024-01-31T10:00:00')}"
++    assert text(empty_session, expression) == "P29DT14H"
++    assert kind(empty_session, expression) is TypeKind.INTERVAL
++    reverse = f"{stamp('2024-01-31T10:00:00')} - {stamp('2024-03-01T00:00:00')}"
++    assert text(empty_session, reverse) == "P-29DT-14H"
++    months_apart = f"{stamp('2024-03-31T00:00:00')} - {stamp('2024-01-01T00:00:00')}"
++    assert text(empty_session, months_apart) == "P90D"
++    assert text(empty_session, f"{stamp('2024-01-31T10:00:00')} - {date('2024-01-31')}") == "PT10H"
++    assert text(empty_session, f"{date('2024-01-31')} - {stamp('2024-01-31T10:00:00')}") == "PT-10H"
++
++
++def test_date_minus_date_stays_a_whole_number_of_days(spans: Session):
++    expression = f"{date('2024-03-01')} - {date('2024-01-31')}"
++    assert value(spans, expression) == 30
++    assert value(spans, f"{date('2024-01-01')} - {date('2024-01-31')}") == -30
++    typed = spans.sql("SELECT started - started AS d, seen - seen AS i FROM spans").schema
++    assert typed.field("d").dtype.kind is TypeKind.INTEGER
++    assert typed.field("i").dtype.kind is TypeKind.INTERVAL
++
++
++@pytest.mark.parametrize(
++    "expression, expected",
++    [
++        ("INTERVAL 'P1M' / 2", "P15D"),
++        ("INTERVAL 'P1M' / 3", "P10D"),
++        ("INTERVAL 'P1M' * 1.5", "P1M15D"),
++        ("INTERVAL 'P1D' / 4", "PT6H"),
++        ("2 * INTERVAL 'P1M1D'", "P2M2D"),
++        ("INTERVAL 'P1M1D' * 2", "P2M2D"),
++        ("INTERVAL 'P1D' * 0.1", "PT2H24M"),
++        ("INTERVAL 'P1Y' / 12", "P1M"),
++        ("INTERVAL 'P1M' * -1", "P-1M"),
++        ("INTERVAL 'P3D' / 2", "P1DT12H"),
++    ],
++)
++def test_scaling_keeps_whole_fields_and_carries_fractions_down(
++    empty_session: Session, expression, expected
++):
++    assert text(empty_session, expression) == expected
++    assert kind(empty_session, expression) is TypeKind.INTERVAL
++
++
++def test_scaling_rounds_to_the_microsecond(empty_session: Session):
++    assert text(empty_session, "INTERVAL 'PT1S' / 3") == "PT0.333333S"
++    assert text(empty_session, "INTERVAL 'PT2S' / 3") == "PT0.666667S"
++    assert text(empty_session, "INTERVAL 'P1M' / 7") == "P4DT6H51M25.714286S"
++
++
++def test_dividing_an_interval_by_zero_is_an_error(empty_session: Session):
++    with pytest.raises(ExecutionError):
++        empty_session.sql("SELECT INTERVAL 'P1D' / 0")
++    with pytest.raises(ExecutionError):
++        empty_session.sql("SELECT INTERVAL 'P1D' / 0.0")
++
++
++@pytest.mark.parametrize(
++    "expression",
++    [
++        "INTERVAL 'P1D' + 1",
++        "1 - INTERVAL 'P1D'",
++        "INTERVAL 'P1D' * INTERVAL 'P1D'",
++        "INTERVAL 'P1D' / INTERVAL 'P1D'",
++        "2 / INTERVAL 'P1D'",
++        "CAST('2024-01-01' AS DATE) * INTERVAL 'P1D'",
++        "INTERVAL 'P1D' - CAST('2024-01-01' AS DATE)",
++        "INTERVAL 'P1D' % 2",
++    ],
++)
++def test_any_other_mix_is_a_type_error(empty_session: Session, expression):
++    with pytest.raises(TypeMismatchError):
++        empty_session.sql(f"SELECT {expression}")
++
++
++def test_null_propagates_through_interval_arithmetic(empty_session: Session):
++    null = "CAST(NULL AS INTERVAL)"
++    assert value(empty_session, f"INTERVAL 'P1D' + {null}") is None
++    assert value(empty_session, f"{date('2024-01-01')} + {null}") is None
++    assert value(empty_session, f"{null} * 2") is None
++    assert value(empty_session, f"INTERVAL 'P1D' = {null}") is None
++    assert value(empty_session, f"{null} + {null}") is None
++
++
++# -- comparison ----------------------------------------------------------------
++
++
++def test_a_month_is_thirty_days_and_a_day_is_twenty_four_hours(empty_session: Session):
++    assert value(empty_session, "INTERVAL 'P1M' = INTERVAL 'P30D'") is True
++    assert value(empty_session, "INTERVAL 'P1D' = INTERVAL 'PT24H'") is True
++    assert value(empty_session, "INTERVAL 'P1Y' = INTERVAL 'P360D'") is True
++    assert value(empty_session, "INTERVAL 'P1M' <> INTERVAL 'P31D'") is True
++    assert value(empty_session, "INTERVAL 'P1M' > INTERVAL 'P29D'") is True
++    assert value(empty_session, "INTERVAL 'P1M' < INTERVAL 'P30DT1H'") is True
++    assert value(empty_session, "INTERVAL 'PT-1H' < INTERVAL 'PT0S'") is True
++
++
++def test_comparison_and_arithmetic_disagree_on_purpose(empty_session: Session):
++    assert value(empty_session, "INTERVAL 'P1M' = INTERVAL 'P30D'") is True
++    month = value(empty_session, f"{date('2024-01-31')} + INTERVAL 'P1M'")
++    days = value(empty_session, f"{date('2024-01-31')} + INTERVAL 'P30D'")
++    assert month == dt.datetime(2024, 2, 29)
++    assert days == dt.datetime(2024, 3, 1)
++
++
++def test_between_and_in_follow_the_comparison_rule(empty_session: Session):
++    assert value(empty_session, "INTERVAL 'P1M' BETWEEN INTERVAL 'P30D' AND INTERVAL 'P31D'")
++    assert value(empty_session, "INTERVAL 'P1M' IN (INTERVAL 'P1D', INTERVAL 'P30D')") is True
++    assert value(empty_session, "INTERVAL 'P1M' NOT IN (INTERVAL 'P29D')") is True
++    assert value(empty_session, "INTERVAL 'P1M' IN (INTERVAL 'P29D', NULL)") is None
++
++
++def test_order_by_sorts_by_length_not_text(spans: Session):
++    ordered = spans.sql(
++        "SELECT CAST(span AS STRING) AS s FROM spans WHERE span IS NOT NULL "
++        "ORDER BY span"
++    ).column("s")
++    assert ordered == ["PT-2H", "P1DT2H", "P30D"]
++    ordered = spans.sql(
++        "SELECT CAST(span AS STRING) AS s FROM spans ORDER BY span DESC"
++    ).column("s")
++    assert ordered == ["P30D", "P1DT2H", "PT-2H", None]
++
++
++def test_order_by_mixed_units_follows_thirty_day_months(empty_session: Session):
++    empty_session.register_dicts("k", [{"n": 1}, {"n": 2}, {"n": 3}, {"n": 4}])
++    ordered = empty_session.sql(
++        "SELECT CAST(CASE n WHEN 1 THEN INTERVAL 'P31D' WHEN 2 THEN INTERVAL 'P1M' "
++        "WHEN 3 THEN INTERVAL 'P29D' ELSE INTERVAL 'P30DT1H' END AS STRING) AS s "
++        "FROM k ORDER BY CASE n WHEN 1 THEN INTERVAL 'P31D' WHEN 2 THEN INTERVAL 'P1M' "
++        "WHEN 3 THEN INTERVAL 'P29D' ELSE INTERVAL 'P30DT1H' END"
++    ).column("s")
++    assert ordered == ["P29D", "P1M", "P30DT1H", "P31D"]
++
++
++def test_null_placement_comes_from_the_session_setting(spans: Session):
++    spans.configure(null_ordering="nulls_first")
++    ordered = spans.sql("SELECT CAST(span AS STRING) AS s FROM spans ORDER BY span").column("s")
++    assert ordered == [None, "PT-2H", "P1DT2H", "P30D"]
++    ordered = spans.sql(
++        "SELECT CAST(span AS STRING) AS s FROM spans ORDER BY span DESC NULLS LAST"
++    ).column("s")
++    assert ordered == ["P30D", "P1DT2H", "PT-2H", None]
++
++
++# -- extraction ----------------------------------------------------------------
++
++
++@pytest.mark.parametrize(
++    "field, literal, expected",
++    [
++        ("year", "P14M", 1),
++        ("month", "P14M", 2),
++        ("year", "-P14M", -1),
++        ("month", "-P14M", -2),
++        ("day", "PT36H", 0),
++        ("hour", "PT36H", 36),
++        ("day", "P40D", 40),
++        ("hour", "PT90M", 1),
++        ("minute", "PT90M", 30),
++        ("second", "PT1.5S", 1),
++        ("minute", "PT61S", 1),
++        ("minute", "PT-1H-30M", -30),
++    ],
++)
++def test_extract_over_intervals(empty_session: Session, field, literal, expected):
++    assert value(empty_session, f"extract('{field}', INTERVAL '{literal}')") == expected
++
++
++def test_extract_on_a_column(spans: Session):
++    hours = spans.sql("SELECT extract('hour', span) AS h FROM spans ORDER BY id").column("h")
++    assert hours == [2, None, 0, -2]
++    days = spans.sql("SELECT extract('day', span) AS d FROM spans ORDER BY id").column("d")
++    assert days == [1, None, 30, 0]
++
++
++@pytest.mark.parametrize("field", ["week", "quarter", "dayofweek", "dayofyear"])
++def test_calendar_fields_are_undefined_on_an_interval(empty_session: Session, field):
++    with pytest.raises(ExecutionError):
++        empty_session.sql(f"SELECT extract('{field}', INTERVAL 'P1D')")
++
++
++# -- values from Python --------------------------------------------------------
++
++
++def test_timedelta_rows_arrive_as_intervals(spans: Session):
++    assert spans.schema_of("spans").field("span").dtype.kind is TypeKind.INTERVAL
++    texts = spans.sql("SELECT CAST(span AS STRING) AS s FROM spans ORDER BY id").column("s")
++    assert texts == ["P1DT2H", None, "P30D", "PT-2H"]
++    assert spans.sql("SELECT typeof(span) FROM spans WHERE id = 1").scalar() == "INTERVAL"
++
++
++def test_timedelta_from_dicts_infers_interval(empty_session: Session):
++    empty_session.register_dicts(
++        "waits",
++        [
++            {"who": "a", "wait": dt.timedelta(minutes=90)},
++            {"who": "b", "wait": dt.timedelta(days=-1, hours=-2)},
++            {"who": "c", "wait": dt.timedelta(microseconds=1500)},
++        ],
++    )
++    assert empty_session.schema_of("waits").field("wait").dtype.kind is TypeKind.INTERVAL
++    texts = empty_session.sql(
++        "SELECT CAST(wait AS STRING) AS s FROM waits ORDER BY who"
++    ).column("s")
++    assert texts == ["PT1H30M", "P-1DT-2H", "PT0.0015S"]
++
++
++def test_timedelta_columns_take_part_in_arithmetic(spans: Session):
++    rows = spans.sql(
++        "SELECT started + span AS renews FROM spans WHERE span IS NOT NULL ORDER BY id"
++    ).column("renews")
++    assert rows == [
++        dt.datetime(2024, 2, 1, 2, 0),
++        dt.datetime(2024, 2, 28, 0, 0),
++        dt.datetime(2024, 2, 28, 22, 0),
++    ]
++    elapsed = spans.sql(
++        "SELECT CAST(seen - started AS STRING) AS e FROM spans ORDER BY id"
++    ).column("e")
++    assert elapsed == ["PT10H", "PT0S", "P31DT23H30M", "PT0S"]

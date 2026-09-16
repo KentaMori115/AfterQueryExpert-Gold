@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/chunk-audit"
+
+[metadata]
+task_id = "chunk-audit"
+display_title = "<<EDIT-ME>> One-line title for this task"
+display_description = "<<EDIT-ME>> One or two sentences describing the change."
+category = "feature_request"
+language = "rust"
+repository_url = "platform://gold/repos/2G9D18szl7aNlQIbAKTv"
+base_commit_hash = "8bed17cc554e77399347f7b0486dd1b7ecb717f0"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-skald-2g9d18:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

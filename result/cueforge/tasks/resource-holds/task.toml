@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/resource-holds"
+
+[metadata]
+task_id = "resource-holds"
+display_title = "Hold cues for busy resources during rehearsal"
+display_description = "The rehearsal scheduler holds a cue whose resources have no free slot and starts it when one frees, shifting its after-dependents, instead of double-booking and reporting CF4001 afterwards."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/Bfa8uKesz2L9eeQTgZiC"
+base_commit_hash = "474ce0944456bafbaa719a5e2304d56eaeccd768"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-cue-forge-bfa8uk:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

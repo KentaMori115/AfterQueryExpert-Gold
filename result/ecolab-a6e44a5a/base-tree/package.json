@@ -1,0 +1,37 @@
+{
+  "name": "biomeweaver-workspace",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "bin": {
+    "biomeweaver": "packages/biomeweaver-cli/dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node scripts/clean.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc -b --pretty false",
+    "test": "npm run test:unit && npm run test:biomes && npm run test:properties && npm run test:cli",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:biomes": "vitest run --config vitest.biomes.config.ts",
+    "test:properties": "vitest run --config vitest.properties.config.ts",
+    "test:cli": "vitest run --config vitest.cli.config.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.33.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.33.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.40.0",
+    "vitest": "^3.2.4"
+  }
+}

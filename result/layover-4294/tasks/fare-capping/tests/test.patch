@@ -1,0 +1,630 @@
+diff --git a/tests/test_fare_ceilings.py b/tests/test_fare_ceilings.py
+new file mode 100644
+index 0000000..93e772d
+--- /dev/null
++++ b/tests/test_fare_ceilings.py
+@@ -0,0 +1,329 @@
++"""Ceilings read off a feed: what they cover, which one wins, and saving them.
++
++Everything here goes in through the feed and comes out through what a passenger
++is charged, because that is the only thing a cap is for. Nothing pokes at the
++table's own accessors.
++"""
++
++import unittest
++from datetime import date
++
++from layover.document import to_document
++from layover.feed import RawFeed, load_feed
++from layover.feed.load import load_with_problems
++from layover.feed.writer import feed_to_text
++from layover.fares import Ride, price_travel
++
++MONDAY = date(2026, 7, 6)
++TUESDAY = date(2026, 7, 7)
++
++TABLES = {
++    "stops": (
++        "stop_id,name,lat,lon,zone\n"
++        "a,Alt Markt,52.500000,13.300000,A\n"
++        "b,Brunnen,52.500000,13.320000,A\n"
++        "c,Chaussee,52.500000,13.340000,B\n"
++        "d,Damm,52.500000,13.360000,B\n"
++    ),
++    "routes": (
++        "route_id,short_name,long_name,mode\n"
++        "x,X,West to east,tram\n"
++        "y,Y,East to west,bus\n"
++    ),
++    "patterns": (
++        "pattern_id,route_id,headsign,direction\n"
++        "x-east,x,East,0\n"
++        "y-west,y,West,1\n"
++    ),
++    "pattern_stops": (
++        "pattern_id,sequence,stop_id\n"
++        "x-east,1,a\n"
++        "x-east,2,b\n"
++        "x-east,3,c\n"
++        "x-east,4,d\n"
++        "y-west,1,d\n"
++        "y-west,2,c\n"
++        "y-west,3,b\n"
++        "y-west,4,a\n"
++    ),
++    "trips": (
++        "trip_id,pattern_id,service_id\n"
++        "tx,x-east,weekday\n"
++        "ty,y-west,weekday\n"
++    ),
++    "stop_times": (
++        "trip_id,sequence,arrival\n"
++        "tx,1,08:00:00\n"
++        "tx,2,08:05:00\n"
++        "tx,3,08:10:00\n"
++        "tx,4,08:15:00\n"
++        "ty,1,17:00:00\n"
++        "ty,2,17:05:00\n"
++        "ty,3,17:10:00\n"
++        "ty,4,17:15:00\n"
++    ),
++    "calendars": (
++        "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,"
++        "start_date,end_date\n"
++        "weekday,1,1,1,1,1,0,0,2026-07-01,2026-07-31\n"
++    ),
++    "fare_products": (
++        "fare_id,price,currency,transfers,window\n"
++        "inner,1.90,EUR,1,3600\n"
++        "cross,2.40,EUR,1,3600\n"
++    ),
++    "fare_rules": (
++        "fare_id,from_zone,to_zone\n"
++        "inner,A,A\n"
++        "inner,B,B\n"
++        "cross,A,B\n"
++        "cross,B,A\n"
++    ),
++}
++
++
++def raw(caps=None):
++    """The fixture feed as raw tables, with a cap table if one is wanted."""
++    texts = dict(TABLES)
++    if caps is not None:
++        texts["fare_caps"] = caps
++    return RawFeed.of_text(texts, "inline")
++
++
++def feed(caps=None):
++    """The fixture feed loaded, raising on the first problem."""
++    return load_feed(raw(caps), "inline")
++
++
++def problems_of(caps):
++    """Everything wrong with a cap table, without raising."""
++    return load_with_problems(raw(caps), "inline")[1]
++
++
++def ride(route, start, end, at, day=MONDAY):
++    """One ten minute ride on a route, on a service day."""
++    return Ride(route, start, end, at, at + 600, day=day)
++
++
++def charged(caps, rides):
++    """What the fixture feed charges for a run of travel under a cap table."""
++    contents = feed(caps)
++    return price_travel(rides, contents.fares, contents.zones())
++
++
++class CapTableTest(unittest.TestCase):
++    def test_a_daily_cap_holds_the_day_down(self):
++        rides = [ride("x", "a", "b", 8 * 3600), ride("x", "a", "b", 12 * 3600)]
++        price = charged("cap_id,price,period\nday,3.00,day\n", rides)
++        self.assertEqual(str(price.total), "3.00 EUR")
++
++    def test_a_weekly_cap_holds_a_run_of_days_down(self):
++        rides = [
++            ride("x", "a", "b", 8 * 3600),
++            ride("x", "a", "b", 8 * 3600, TUESDAY),
++            ride("x", "a", "b", 12 * 3600, TUESDAY),
++        ]
++        price = charged("cap_id,price,period\nweek,4.00,week\n", rides)
++        self.assertEqual(str(price.total), "4.00 EUR")
++
++    def test_a_feed_with_no_cap_table_charges_every_fare(self):
++        rides = [ride("x", "a", "b", 8 * 3600), ride("x", "a", "b", 12 * 3600)]
++        price = charged(None, rides)
++        self.assertEqual(str(price.total), "3.80 EUR")
++
++    def test_a_period_the_format_does_not_know_is_a_problem(self):
++        self.assertTrue(problems_of("cap_id,price,period\nd,3.00,fortnight\n"))
++
++    def test_an_identifier_used_twice_is_a_problem(self):
++        self.assertTrue(problems_of("cap_id,price,period\nd,3.00,day\nd,9.00,week\n"))
++
++    def test_a_cap_in_pounds_beside_euro_fares_is_refused(self):
++        self.assertTrue(
++            problems_of("cap_id,price,period,currency\nd,3.00,day,GBP\n")
++        )
++
++    def test_a_cap_without_an_identifier_is_a_problem(self):
++        self.assertTrue(problems_of("cap_id,price,period\n,3.00,day\n"))
++
++    def test_a_cap_without_a_price_is_a_problem(self):
++        self.assertTrue(problems_of("cap_id,price,period\nd,,day\n"))
++
++    def test_a_cap_without_a_period_is_a_problem(self):
++        self.assertTrue(problems_of("cap_id,price,period\nd,3.00,\n"))
++
++    def test_a_cap_priced_in_the_table_currency_is_no_problem(self):
++        self.assertFalse(
++            problems_of("cap_id,price,period,currency\nd,3.00,day,EUR\n")
++        )
++
++
++class WrittenBackTest(unittest.TestCase):
++    def setUp(self):
++        self.caps = "cap_id,price,period,zone\nday,3.00,day,\ninner,2.00,week,A\n"
++        self.rides = [ride("x", "a", "b", 8 * 3600), ride("x", "a", "b", 12 * 3600)]
++
++    def written(self, caps):
++        """The fixture feed written out and read back in."""
++        text = feed_to_text(feed(caps))
++        return load_feed(RawFeed.of_text(text, "written"), "written")
++
++    def test_the_writer_emits_a_cap_table(self):
++        self.assertIn("fare_caps", feed_to_text(feed(self.caps)))
++
++    def test_a_plain_feed_emits_no_cap_table(self):
++        self.assertNotIn("fare_caps", feed_to_text(feed(None)))
++
++    def test_what_is_written_charges_the_same(self):
++        contents = self.written(self.caps)
++        price = price_travel(self.rides, contents.fares, contents.zones())
++        self.assertEqual(str(price.total), "2.00 EUR")
++
++    def test_what_is_written_keeps_the_zone_a_cap_names(self):
++        contents = self.written(self.caps)
++        crossing = [ride("x", "a", "c", 8 * 3600), ride("x", "a", "c", 12 * 3600)]
++        price = price_travel(crossing, contents.fares, contents.zones())
++        self.assertEqual(sorted(price.charges[0].caps), ["day"])
++
++    def test_what_is_written_keeps_the_route_a_cap_names(self):
++        caps = "cap_id,price,period,route_id\ntram,2.00,day,x\n"
++        contents = self.written(caps)
++        rides = [ride("x", "a", "b", 8 * 3600), ride("y", "b", "a", 12 * 3600)]
++        price = price_travel(rides, contents.fares, contents.zones())
++        self.assertEqual(sorted(price.charges[0].caps), ["tram"])
++        self.assertEqual(sorted(price.charges[1].caps), [])
++
++    def test_what_is_written_holds_a_cap_to_one_route_only(self):
++        caps = "cap_id,price,period,route_id\ntram,2.00,day,x\n"
++        contents = self.written(caps)
++        rides = [ride("y", "a", "b", 8 * 3600), ride("y", "b", "a", 12 * 3600)]
++        price = price_travel(rides, contents.fares, contents.zones())
++        self.assertEqual(str(price.total), "3.80 EUR")
++
++
++class SavedDocumentTest(unittest.TestCase):
++    def section(self, caps):
++        """The fares section of a document written from the fixture feed."""
++        return to_document(feed(caps))["fares"]
++
++    def test_a_plain_feed_saves_three_fare_sections(self):
++        self.assertEqual(set(self.section(None)), {"currency", "products", "rules"})
++
++    def test_a_capped_feed_saves_three_fare_sections_too(self):
++        caps = "cap_id,price,period\nday,3.00,day\n"
++        self.assertEqual(set(self.section(caps)), {"currency", "products", "rules"})
++
++    def test_a_document_keeps_the_products_it_always_kept(self):
++        caps = "cap_id,price,period,zone\ninner,2.00,day,A\n"
++        section = self.section(caps)
++        self.assertEqual([row["id"] for row in section["products"]], ["cross", "inner"])
++        self.assertEqual(len(section["rules"]), 4)
++
++
++class WhatACapCoversTest(unittest.TestCase):
++    def two(self, first, second):
++        """Two rides at eight and at twelve, far enough apart to be two tickets."""
++        return [ride(*first, at=8 * 3600), ride(*second, at=12 * 3600)]
++
++    def test_a_zoned_cap_covers_travel_that_stays_inside_it(self):
++        rides = self.two(("x", "a", "b"), ("x", "b", "a"))
++        price = charged("cap_id,price,period,zone\ninner,2.00,day,A\n", rides)
++        self.assertEqual(str(price.total), "2.00 EUR")
++
++    def test_a_zoned_cap_leaves_travel_out_of_it_alone(self):
++        rides = self.two(("x", "a", "c"), ("x", "a", "c"))
++        price = charged("cap_id,price,period,zone\ninner,2.00,day,A\n", rides)
++        self.assertEqual(str(price.total), "4.80 EUR")
++
++    def test_a_routed_cap_covers_travel_on_that_route(self):
++        rides = self.two(("x", "a", "b"), ("x", "b", "a"))
++        price = charged("cap_id,price,period,route_id\ntram,2.00,day,x\n", rides)
++        self.assertEqual(str(price.total), "2.00 EUR")
++
++    def test_a_routed_cap_leaves_another_route_alone(self):
++        rides = self.two(("x", "a", "b"), ("y", "b", "a"))
++        price = charged("cap_id,price,period,route_id\ntram,2.00,day,x\n", rides)
++        self.assertEqual(str(price.total), "3.80 EUR")
++        self.assertEqual(sorted(price.charges[1].caps), [])
++
++    def test_a_cap_setting_both_conditions_needs_both(self):
++        rides = self.two(("x", "a", "c"), ("x", "a", "b"))
++        caps = "cap_id,price,period,zone,route_id\nboth,1.00,day,A,x\n"
++        price = charged(caps, rides)
++        self.assertEqual(sorted(price.charges[0].caps), [])
++        self.assertEqual(sorted(price.charges[1].caps), ["both"])
++
++    def test_a_zoned_cap_reads_every_ride_on_the_ticket(self):
++        rides = [ride("x", "a", "b", 8 * 3600), ride("x", "b", "c", 8 * 3600 + 900)]
++        price = charged("cap_id,price,period,zone\ninner,1.00,day,A\n", rides)
++        self.assertEqual(len(price.charges), 1)
++        self.assertEqual(sorted(price.charges[0].caps), [])
++
++    def test_a_routed_cap_reads_every_ride_on_the_ticket(self):
++        rides = [ride("x", "a", "b", 8 * 3600), ride("y", "b", "a", 8 * 3600 + 900)]
++        price = charged("cap_id,price,period,route_id\ntram,1.00,day,x\n", rides)
++        self.assertEqual(len(price.charges), 1)
++        self.assertEqual(sorted(price.charges[0].caps), [])
++
++    def test_a_cap_naming_a_zone_nothing_is_in_never_covers(self):
++        rides = self.two(("x", "a", "b"), ("x", "b", "a"))
++        price = charged("cap_id,price,period,zone\nfar,1.00,day,Z\n", rides)
++        self.assertEqual(str(price.total), "3.80 EUR")
++
++    def test_a_cap_naming_a_route_nothing_runs_never_covers(self):
++        rides = self.two(("x", "a", "b"), ("x", "b", "a"))
++        price = charged("cap_id,price,period,route_id\nghost,1.00,day,z\n", rides)
++        self.assertEqual(str(price.total), "3.80 EUR")
++
++    def test_a_cap_setting_nothing_covers_everything(self):
++        rides = self.two(("x", "a", "c"), ("y", "b", "a"))
++        price = charged("cap_id,price,period\nall,1.00,day\n", rides)
++        self.assertEqual(str(price.total), "1.00 EUR")
++
++
++class WhichCapWinsTest(unittest.TestCase):
++    def inside(self):
++        """Two tickets of inner travel, an hour and a half apart."""
++        return [ride("x", "a", "b", 8 * 3600), ride("x", "b", "a", 13 * 3600)]
++
++    def test_the_cap_with_more_conditions_wins(self):
++        caps = (
++            "cap_id,price,period,zone\n"
++            "everywhere,1.00,day,\n"
++            "inner,2.50,day,A\n"
++        )
++        price = charged(caps, self.inside())
++        self.assertEqual(sorted(price.charges[0].caps), ["inner"])
++        self.assertEqual(str(price.total), "2.50 EUR")
++
++    def test_a_tie_in_conditions_goes_to_the_cheaper_cap(self):
++        caps = (
++            "cap_id,price,period,zone\n"
++            "dear,3.50,day,A\n"
++            "cheap,2.00,day,A\n"
++        )
++        price = charged(caps, self.inside())
++        self.assertEqual(sorted(price.charges[0].caps), ["cheap"])
++
++    def test_a_tie_in_price_goes_to_the_identifier(self):
++        caps = (
++            "cap_id,price,period,zone\n"
++            "second,2.00,day,A\n"
++            "first,2.00,day,A\n"
++        )
++        price = charged(caps, self.inside())
++        self.assertEqual(sorted(price.charges[0].caps), ["first"])
++
++    def test_two_dailies_and_two_weeklies_leave_two_on_a_ticket(self):
++        caps = (
++            "cap_id,price,period\n"
++            "day-one,3.00,day\n"
++            "day-two,4.00,day\n"
++            "week-one,9.00,week\n"
++            "week-two,8.00,week\n"
++        )
++        price = charged(caps, self.inside())
++        self.assertEqual(sorted(price.charges[0].caps), ["day-one", "week-two"])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_travel_charges.py b/tests/test_travel_charges.py
+new file mode 100644
+index 0000000..e451a5a
+--- /dev/null
++++ b/tests/test_travel_charges.py
+@@ -0,0 +1,289 @@
++"""Charging a run of travel: which day a ticket belongs to, and what it costs.
++
++The fare table here is built once and never changes. What moves between cases
++is the cap table and the travel, so a wrong answer points at one rule rather
++than at the fixture.
++"""
++
++import unittest
++from datetime import date
++
++from layover.errors import FareError
++from layover.feed import RawFeed, load_feed
++from layover.fares import Ride, price_travel
++
++MONDAY = date(2026, 7, 6)
++TUESDAY = date(2026, 7, 7)
++SUNDAY = date(2026, 7, 12)
++NEXT_MONDAY = date(2026, 7, 13)
++
++TABLES = {
++    "stops": (
++        "stop_id,name,lat,lon,zone\n"
++        "a,Alt Markt,52.500000,13.300000,A\n"
++        "b,Brunnen,52.500000,13.320000,A\n"
++        "c,Chaussee,52.500000,13.340000,B\n"
++    ),
++    "routes": "route_id,short_name,long_name,mode\nx,X,West to east,tram\n",
++    "patterns": "pattern_id,route_id,headsign,direction\nx-east,x,East,0\n",
++    "pattern_stops": (
++        "pattern_id,sequence,stop_id\n"
++        "x-east,1,a\n"
++        "x-east,2,b\n"
++        "x-east,3,c\n"
++    ),
++    "trips": "trip_id,pattern_id,service_id\ntx,x-east,weekday\n",
++    "stop_times": (
++        "trip_id,sequence,arrival\n"
++        "tx,1,08:00:00\n"
++        "tx,2,08:05:00\n"
++        "tx,3,08:10:00\n"
++    ),
++    "calendars": (
++        "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,"
++        "start_date,end_date\n"
++        "weekday,1,1,1,1,1,1,1,2026-07-01,2026-07-31\n"
++    ),
++    "fare_products": (
++        "fare_id,price,currency,transfers,window\n"
++        "inner,1.90,EUR,1,3600\n"
++        "cross,2.40,EUR,1,3600\n"
++    ),
++    "fare_rules": (
++        "fare_id,from_zone,to_zone\n"
++        "inner,A,A\n"
++        "inner,B,B\n"
++        "cross,A,B\n"
++        "cross,B,A\n"
++    ),
++}
++
++
++def loaded(caps=None):
++    """The fixture feed, with a cap table if one is wanted."""
++    texts = dict(TABLES)
++    if caps is not None:
++        texts["fare_caps"] = caps
++    return load_feed(RawFeed.of_text(texts, "inline"), "inline")
++
++
++def ride(start, end, at, day=MONDAY, route="x"):
++    """One ten minute ride, on a service day."""
++    return Ride(route, start, end, at, at + 600, day=day)
++
++
++def charged(caps, rides):
++    """What a run of travel comes to under a cap table."""
++    contents = loaded(caps)
++    return price_travel(rides, contents.fares, contents.zones())
++
++
++def totals(price):
++    """Every cap total as a tuple, in an order a case can rely on."""
++    return sorted(
++        (total.cap_id, total.period, total.starts_on, str(total.charged), str(total.limit))
++        for total in price.cap_totals()
++    )
++
++
++class TravelOrderTest(unittest.TestCase):
++    def test_travel_with_no_rides_costs_nothing(self):
++        price = charged("cap_id,price,period\nday,3.00,day\n", [])
++        self.assertEqual(str(price.total), "0.00 EUR")
++        self.assertEqual(len(price.charges), 0)
++
++    def test_a_ride_that_does_not_say_its_day_is_refused(self):
++        rides = [Ride("x", "a", "b", 8 * 3600, 8 * 3600 + 600)]
++        with self.assertRaises(FareError):
++            charged(None, rides)
++
++    def test_rides_out_of_order_by_time_are_refused(self):
++        rides = [ride("a", "b", 12 * 3600), ride("a", "b", 8 * 3600)]
++        with self.assertRaises(FareError):
++            charged(None, rides)
++
++    def test_rides_out_of_order_by_day_are_refused(self):
++        rides = [ride("a", "b", 8 * 3600, TUESDAY), ride("a", "b", 12 * 3600, MONDAY)]
++        with self.assertRaises(FareError):
++            charged(None, rides)
++
++    def test_a_monday_ride_then_a_tuesday_one_is_taken(self):
++        rides = [ride("a", "b", 8 * 3600), ride("a", "b", 8 * 3600, TUESDAY)]
++        price = charged(None, rides)
++        self.assertEqual(str(price.total), "3.80 EUR")
++
++    def test_monday_monday_tuesday_comes_back_in_that_order(self):
++        rides = [
++            ride("a", "b", 8 * 3600),
++            ride("a", "b", 13 * 3600),
++            ride("a", "b", 8 * 3600, TUESDAY),
++        ]
++        price = charged(None, rides)
++        self.assertEqual([charge.day for charge in price.charges], [MONDAY, MONDAY, TUESDAY])
++
++
++class TicketsOverDaysTest(unittest.TestCase):
++    def test_a_change_inside_the_window_stays_on_one_ticket(self):
++        rides = [ride("a", "b", 8 * 3600), ride("b", "a", 8 * 3600 + 900)]
++        price = charged(None, rides)
++        self.assertEqual(len(price.charges), 1)
++        self.assertEqual(str(price.total), "1.90 EUR")
++
++    def test_a_boarding_at_0110_starts_a_new_ticket(self):
++        rides = [ride("a", "b", 25 * 3600), ride("a", "b", 3600 + 600, TUESDAY)]
++        price = charged(None, rides)
++        self.assertEqual(len(price.charges), 2)
++        self.assertEqual(str(price.total), "3.80 EUR")
++
++    def test_a_ride_at_2450_and_one_at_2510_share_monday(self):
++        rides = [ride("a", "b", 24 * 3600 + 3000), ride("b", "a", 25 * 3600 + 600)]
++        price = charged(None, rides)
++        self.assertEqual(len(price.charges), 1)
++        self.assertEqual(price.charges[0].day, MONDAY)
++
++    def test_a_ticket_after_midnight_caps_on_the_day_it_belongs_to(self):
++        rides = [ride("a", "b", 8 * 3600), ride("a", "b", 25 * 3600)]
++        price = charged("cap_id,price,period\nday,3.00,day\n", rides)
++        self.assertEqual(str(price.total), "3.00 EUR")
++
++    def test_a_wednesday_ride_counts_from_the_sixth(self):
++        price = charged(
++            "cap_id,price,period\nweek,9.00,week\n",
++            [ride("a", "b", 8 * 3600, date(2026, 7, 8))],
++        )
++        self.assertEqual(totals(price)[0][2], MONDAY)
++
++    def test_sunday_and_the_monday_after_it_are_different_weeks(self):
++        rides = [ride("a", "b", 8 * 3600, SUNDAY), ride("a", "b", 8 * 3600, NEXT_MONDAY)]
++        price = charged("cap_id,price,period\nweek,1.00,week\n", rides)
++        self.assertEqual(str(price.total), "2.00 EUR")
++        self.assertEqual([entry[2] for entry in totals(price)], [MONDAY, NEXT_MONDAY])
++
++
++class WhatIsChargedTest(unittest.TestCase):
++    def three(self):
++        """Two inner rides and a crossing one, each its own ticket."""
++        return [
++            ride("a", "b", 8 * 3600),
++            ride("a", "b", 12 * 3600),
++            ride("a", "c", 16 * 3600),
++        ]
++
++    def test_a_ticket_under_the_cap_is_charged_in_full(self):
++        price = charged("cap_id,price,period\nday,9.00,day\n", self.three())
++        self.assertEqual(
++            [str(charge.charged) for charge in price.charges],
++            ["1.90 EUR", "1.90 EUR", "2.40 EUR"],
++        )
++
++    def test_the_ticket_that_crosses_the_cap_pays_the_rest_of_it(self):
++        price = charged("cap_id,price,period\nday,5.00,day\n", self.three())
++        self.assertEqual(str(price.charges[2].charged), "1.20 EUR")
++        self.assertEqual(str(price.total), "5.00 EUR")
++
++    def test_a_ticket_after_the_cap_is_reached_is_free(self):
++        rides = self.three() + [ride("a", "b", 20 * 3600)]
++        price = charged("cap_id,price,period\nday,5.00,day\n", rides)
++        self.assertEqual(str(price.charges[3].charged), "0.00 EUR")
++
++    def test_a_cap_of_nothing_makes_everything_free(self):
++        price = charged("cap_id,price,period\nday,0.00,day\n", self.three())
++        self.assertEqual(str(price.total), "0.00 EUR")
++
++    def test_travel_with_no_cap_is_charged_in_full(self):
++        price = charged(None, self.three())
++        self.assertEqual(str(price.total), "6.20 EUR")
++
++    def test_five_euro_of_day_shows_as_five_euro_of_week(self):
++        caps = "cap_id,price,period\nday,5.00,day\nweek,6.00,week\n"
++        price = charged(caps, self.three())
++        self.assertEqual(
++            totals(price),
++            [
++                ("day", "day", MONDAY, "5.00 EUR", "5.00 EUR"),
++                ("week", "week", MONDAY, "5.00 EUR", "6.00 EUR"),
++            ],
++        )
++
++    def test_a_weekly_cap_can_bite_before_a_daily_one(self):
++        caps = "cap_id,price,period\nday,5.00,day\nweek,3.00,week\n"
++        price = charged(caps, self.three())
++        self.assertEqual(
++            [str(charge.charged) for charge in price.charges],
++            ["1.90 EUR", "1.10 EUR", "0.00 EUR"],
++        )
++
++    def test_a_weekly_cap_carries_over_to_the_next_day(self):
++        rides = self.three() + [ride("a", "b", 8 * 3600, TUESDAY)]
++        caps = "cap_id,price,period\nday,5.00,day\nweek,5.50,week\n"
++        price = charged(caps, rides)
++        self.assertEqual(str(price.charges[3].charged), "0.50 EUR")
++        self.assertEqual(str(price.total), "5.50 EUR")
++
++
++class WhatComesBackTest(unittest.TestCase):
++    def setUp(self):
++        self.price = charged(
++            "cap_id,price,period\nday,5.00,day\n",
++            [
++                ride("a", "b", 8 * 3600),
++                ride("a", "b", 12 * 3600),
++                ride("a", "c", 16 * 3600),
++            ],
++        )
++
++    def test_the_total_adds_the_charges_up(self):
++        self.assertEqual(str(self.price.total), "5.00 EUR")
++
++    def test_the_full_price_is_what_the_tickets_came_to(self):
++        self.assertEqual(str(self.price.full), "6.20 EUR")
++
++    def test_what_is_saved_is_the_difference(self):
++        self.assertEqual(str(self.price.saved), "1.20 EUR")
++
++    def test_there_is_one_charge_for_every_ticket(self):
++        self.assertEqual(len(self.price.charges), 3)
++
++    def test_a_charge_names_the_ticket_it_paid_for(self):
++        self.assertEqual(
++            [charge.ticket.product.fare_id for charge in self.price.charges],
++            ["inner", "inner", "cross"],
++        )
++
++    def test_a_charge_names_the_caps_that_applied(self):
++        self.assertEqual(sorted(self.price.charges[0].caps), ["day"])
++
++    def test_a_charge_names_no_cap_when_none_applied(self):
++        price = charged(None, [ride("a", "b", 8 * 3600)])
++        self.assertEqual(sorted(price.charges[0].caps), [])
++
++    def test_a_cap_total_carries_its_limit(self):
++        self.assertEqual(totals(self.price), [("day", "day", MONDAY, "5.00 EUR", "5.00 EUR")])
++
++    def test_two_weeks_of_travel_report_four_windows(self):
++        rides = [
++            ride("a", "b", 8 * 3600),
++            ride("a", "b", 8 * 3600, NEXT_MONDAY),
++        ]
++        caps = "cap_id,price,period\nday,5.00,day\nweek,9.00,week\n"
++        price = charged(caps, rides)
++        self.assertEqual(
++            [(entry[0], entry[2]) for entry in totals(price)],
++            [("day", MONDAY), ("day", NEXT_MONDAY), ("week", MONDAY), ("week", NEXT_MONDAY)],
++        )
++
++    def test_two_caps_of_different_reach_apply_to_different_tickets(self):
++        caps = "cap_id,price,period,zone\ninner,2.00,day,A\nall,6.00,week,\n"
++        rides = [ride("a", "b", 8 * 3600), ride("a", "c", 12 * 3600)]
++        price = charged(caps, rides)
++        self.assertEqual(sorted(price.charges[0].caps), ["all", "inner"])
++        self.assertEqual(sorted(price.charges[1].caps), ["all"])
++        self.assertEqual(str(price.total), "4.30 EUR")
++
++    def test_travel_under_no_cap_has_no_cap_totals(self):
++        price = charged(None, [ride("a", "b", 8 * 3600)])
++        self.assertEqual(len(price.cap_totals()), 0)
++
++
++if __name__ == "__main__":
++    unittest.main()

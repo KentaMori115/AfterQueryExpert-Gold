@@ -1,0 +1,26 @@
+[package]
+name = "tanager"
+version = "0.6.0"
+edition = "2021"
+rust-version = "1.92"
+description = "An embeddable in-memory analytical SQL query engine with a cost-light rule optimizer."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/redacted-owner/tanager"
+keywords = ["sql", "query-engine", "database", "analytics", "in-memory"]
+categories = ["database-implementations"]
+
+[lib]
+name = "tanager"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tanager"
+path = "src/bin/tanager.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+[profile.test]
+opt-level = 0

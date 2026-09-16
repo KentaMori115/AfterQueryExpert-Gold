@@ -1,0 +1,1279 @@
+diff --git a/src/core/io/bundle.ts b/src/core/io/bundle.ts
+new file mode 100644
+index 0000000..caf2fd3
+--- /dev/null
++++ b/src/core/io/bundle.ts
+@@ -0,0 +1,80 @@
++/**
++ * The shape a campaign export carries and the vocabulary the restore engine
++ * uses to talk about it. `buildExport` in the io feature writes bundles in this
++ * shape; nothing here imports a store or a component, so the engine stays
++ * usable from a plain script or a test.
++ */
++
++export const BUNDLE_MODULES = [
++  'characters',
++  'factions',
++  'locations',
++  'sessions',
++  'arcs',
++  'encounters',
++  'relationships',
++  'lore',
++  'items',
++  'quests',
++  'timeline',
++  'notes',
++  'tags',
++  'holidays',
++  'downtime',
++] as const
++
++export type BundleModule = (typeof BUNDLE_MODULES)[number]
++
++/** Modules a version 1 bundle never carries. */
++export const V2_MODULES: ReadonlyArray<BundleModule> = ['notes', 'tags', 'holidays', 'downtime']
++
++export interface CampaignBundle {
++  version: number
++  exportedAt?: string
++  campaignId: string
++  campaign: unknown
++  characters: unknown[]
++  factions: unknown[]
++  locations: unknown[]
++  sessions: unknown[]
++  arcs: unknown[]
++  encounters: unknown[]
++  relationships: unknown[]
++  lore: unknown[]
++  items: unknown[]
++  quests: unknown[]
++  timeline: unknown[]
++  notes?: unknown[]
++  tags?: unknown[]
++  holidays?: unknown[]
++  downtime?: unknown[]
++  treasury?: unknown
++}
++
++export type ModuleTally = Record<BundleModule, number>
++
++export function emptyTally(): ModuleTally {
++  const out = {} as ModuleTally
++  for (const m of BUNDLE_MODULES) out[m] = 0
++  return out
++}
++
++export function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value)
++}
++
++/**
++ * Rows a bundle carries for one module. A module the bundle leaves out reads
++ * as empty rather than as an error, which is what makes a version 1 bundle
++ * restorable without a special case per module.
++ */
++export function moduleRows(bundle: CampaignBundle, module: BundleModule): unknown[] {
++  const raw = (bundle as unknown as Record<string, unknown>)[module]
++  return Array.isArray(raw) ? raw : []
++}
++
++export function rowId(row: unknown): string | null {
++  if (!isRecord(row)) return null
++  const id = row.id
++  return typeof id === 'string' && id.length > 0 ? id : null
++}
+diff --git a/src/core/io/idmap.ts b/src/core/io/idmap.ts
+new file mode 100644
+index 0000000..027467f
+--- /dev/null
++++ b/src/core/io/idmap.ts
+@@ -0,0 +1,50 @@
++import type { BundleModule } from './bundle'
++
++/**
++ * What a reference in a bundle can point at: one of the modules, or the
++ * campaign the bundle was taken from.
++ */
++export type RefKind = BundleModule | 'campaign'
++
++/**
++ * Old id to new id, kept per kind so an id that appears in two modules cannot
++ * be confused for the other one. The map is filled before anything is written,
++ * so a reference pointing forward, or back around a cycle, resolves the same
++ * way as one pointing at a row that was already handled.
++ */
++export class IdMap {
++  private readonly byKind = new Map<RefKind, Map<string, string>>()
++
++  mint(kind: RefKind, oldId: string, newId: string): void {
++    let bucket = this.byKind.get(kind)
++    if (!bucket) {
++      bucket = new Map<string, string>()
++      this.byKind.set(kind, bucket)
++    }
++    bucket.set(oldId, newId)
++  }
++
++  lookup(kind: RefKind, oldId: unknown): string | null {
++    if (typeof oldId !== 'string' || oldId.length === 0) return null
++    return this.byKind.get(kind)?.get(oldId) ?? null
++  }
++
++  has(kind: RefKind, oldId: unknown): boolean {
++    return this.lookup(kind, oldId) !== null
++  }
++
++  /** Resolve every id in a list, dropping the ones the bundle never carried. */
++  lookupAll(kind: RefKind, oldIds: unknown): string[] {
++    if (!Array.isArray(oldIds)) return []
++    const out: string[] = []
++    for (const old of oldIds) {
++      const next = this.lookup(kind, old)
++      if (next !== null && !out.includes(next)) out.push(next)
++    }
++    return out
++  }
++
++  size(kind: RefKind): number {
++    return this.byKind.get(kind)?.size ?? 0
++  }
++}
+diff --git a/src/core/io/restore.ts b/src/core/io/restore.ts
+new file mode 100644
+index 0000000..50d28a7
+--- /dev/null
++++ b/src/core/io/restore.ts
+@@ -0,0 +1,446 @@
++import { generateId } from '../ids'
++import {
++  asCampaignId,
++  type CampaignId,
++} from '../ids/brand'
++import { DomainError } from '../lib/errors'
++import { arcDraftSchema } from '../models/arc'
++import { campaignDraftSchema } from '../models/campaign'
++import { characterDraftSchema } from '../models/character'
++import { downtimeDraftSchema } from '../models/downtime'
++import { encounterDraftSchema } from '../models/encounter'
++import { factionDraftSchema } from '../models/faction'
++import { holidayDraftSchema } from '../models/holiday'
++import { itemDraftSchema } from '../models/item'
++import { locationDraftSchema } from '../models/location'
++import { loreDraftSchema } from '../models/lore'
++import { noteDraftSchema } from '../models/note'
++import { questDraftSchema } from '../models/quest'
++import { relationshipDraftSchema } from '../models/relationship'
++import { sessionDraftSchema } from '../models/session'
++import { slugifyTagName, tagDraftSchema } from '../models/tag'
++import { timelineDraftSchema } from '../models/timeline'
++import { getStore, type KeyValueStore } from '../persistence/storage'
++import { ArcService } from '../services/arc-service'
++import { CampaignService } from '../services/campaign-service'
++import { CharacterService } from '../services/character-service'
++import { DowntimeService } from '../services/downtime-service'
++import { EncounterService } from '../services/encounter-service'
++import { FactionService } from '../services/faction-service'
++import { HolidayService } from '../services/holiday-service'
++import { ItemService } from '../services/item-service'
++import { LocationService } from '../services/location-service'
++import { LoreService } from '../services/lore-service'
++import { NoteService } from '../services/note-service'
++import { QuestService } from '../services/quest-service'
++import { RelationshipService } from '../services/relationship-service'
++import { SessionService } from '../services/session-service'
++import { TagService } from '../services/tag-service'
++import { TimelineService } from '../services/timeline-service'
++import { asTimestamp, now, type ISOTimestamp } from '../time/timestamps'
++
++import {
++  BUNDLE_MODULES,
++  type BundleModule,
++  type CampaignBundle,
++  emptyTally,
++  isRecord,
++  type ModuleTally,
++  moduleRows,
++  rowId,
++} from './bundle'
++import { IdMap, type RefKind } from './idmap'
++
++export interface RestoreResult {
++  campaignId: CampaignId | null
++  restored: ModuleTally
++  skipped: ModuleTally
++}
++
++interface Planned {
++  oldId: string
++  newId: string
++  row: Record<string, unknown>
++}
++
++/** Which module a note target or a tag mark points at. */
++const TARGET_KINDS: Record<string, RefKind> = {
++  campaign: 'campaign',
++  character: 'characters',
++  faction: 'factions',
++  location: 'locations',
++  session: 'sessions',
++  arc: 'arcs',
++  encounter: 'encounters',
++  lore: 'lore',
++  item: 'items',
++  quest: 'quests',
++}
++
++const ID_PREFIX: Record<BundleModule, string> = {
++  characters: 'char',
++  factions: 'fac',
++  locations: 'loc',
++  sessions: 'ses',
++  arcs: 'arc',
++  encounters: 'enc',
++  relationships: 'rel',
++  lore: 'lor',
++  items: 'itm',
++  quests: 'qst',
++  timeline: 'tle',
++  notes: 'not',
++  tags: 'tag',
++  holidays: 'hol',
++  downtime: 'dt',
++}
++
++interface RowSchema {
++  safeParse(value: unknown): { success: boolean }
++}
++
++const ROW_SCHEMA: Record<BundleModule, RowSchema> = {
++  characters: characterDraftSchema,
++  factions: factionDraftSchema,
++  locations: locationDraftSchema,
++  sessions: sessionDraftSchema,
++  arcs: arcDraftSchema,
++  encounters: encounterDraftSchema,
++  relationships: relationshipDraftSchema,
++  lore: loreDraftSchema,
++  items: itemDraftSchema,
++  quests: questDraftSchema,
++  timeline: timelineDraftSchema,
++  notes: noteDraftSchema,
++  tags: tagDraftSchema,
++  holidays: holidayDraftSchema,
++  downtime: downtimeDraftSchema,
++}
++
++/**
++ * Put a campaign bundle back into a store as a campaign of its own.
++ *
++ * Ids are handed out fresh, so a bundle restored twice lands twice and neither
++ * copy disturbs anything already stored. References travel with the rows: the
++ * whole map of old id to new id is built before a single row is written, which
++ * is what lets a location point at a parent further down its own list and a
++ * faction point at a leader who points back at the faction.
++ */
++export function restoreBundle(
++  bundle: CampaignBundle,
++  store: KeyValueStore = getStore(),
++): RestoreResult {
++  const restored = emptyTally()
++  const skipped = emptyTally()
++  const campaignRow = isRecord(bundle?.campaign) ? bundle.campaign : null
++
++  if (!campaignRow || !campaignDraftSchema.safeParse(campaignRow).success) {
++    return { campaignId: null, restored, skipped }
++  }
++
++  const sourceCampaignId = typeof bundle.campaignId === 'string' ? bundle.campaignId : ''
++  const newCampaignId = asCampaignId(generateId('camp'))
++  const ids = new IdMap()
++  ids.mint('campaign', sourceCampaignId, newCampaignId)
++
++  // First pass: decide what survives and hand out every new id.
++  const plan = {} as Record<BundleModule, Planned[]>
++  for (const module of BUNDLE_MODULES) {
++    plan[module] = planModule(bundle, module, sourceCampaignId, skipped, ids)
++  }
++
++  // Second pass: rewrite references and write the rows.
++  const services = makeServices(store)
++  for (const module of BUNDLE_MODULES) {
++    for (const planned of plan[module]) {
++      const row = resolveRow(module, planned, newCampaignId, ids)
++      if (row === null) {
++        skipped[module] += 1
++        continue
++      }
++      try {
++        writeRow(services, module, row)
++        restored[module] += 1
++      } catch (err) {
++        if (!(err instanceof DomainError)) throw err
++        skipped[module] += 1
++      }
++    }
++  }
++
++  services.campaigns.restore({
++    ...(campaignRow as Record<string, unknown>),
++    id: newCampaignId,
++    sessionCount: restored.sessions,
++    createdAt: stampOf(campaignRow.createdAt),
++    updatedAt: now(),
++  } as never)
++
++  return { campaignId: newCampaignId, restored, skipped }
++}
++
++function planModule(
++  bundle: CampaignBundle,
++  module: BundleModule,
++  sourceCampaignId: string,
++  skipped: ModuleTally,
++  ids: IdMap,
++): Planned[] {
++  const kept: Planned[] = []
++  const seen = new Set<string>()
++  const slugs = new Set<string>()
++
++  for (const raw of moduleRows(bundle, module)) {
++    const oldId = rowId(raw)
++    const row = isRecord(raw) ? raw : null
++    if (!row || oldId === null || seen.has(oldId)) {
++      skipped[module] += 1
++      continue
++    }
++    if (row.campaignId !== sourceCampaignId) {
++      skipped[module] += 1
++      continue
++    }
++    if (!ROW_SCHEMA[module].safeParse(row).success) {
++      skipped[module] += 1
++      continue
++    }
++    if (module === 'sessions' && !isOrdinal(row.number)) {
++      skipped[module] += 1
++      continue
++    }
++    if (module === 'tags') {
++      const slug = slugifyTagName(String(row.name ?? ''))
++      if (slugs.has(slug)) {
++        skipped[module] += 1
++        continue
++      }
++      slugs.add(slug)
++    }
++    seen.add(oldId)
++    const newId = generateId(ID_PREFIX[module])
++    ids.mint(module, oldId, newId)
++    kept.push({ oldId, newId, row })
++  }
++
++  return kept
++}
++
++/**
++ * Point a planned row at the ids it should have now. Null means the row cannot
++ * be written at all, because something it cannot do without stayed behind.
++ */
++function resolveRow(
++  module: BundleModule,
++  planned: Planned,
++  campaignId: CampaignId,
++  ids: IdMap,
++): Record<string, unknown> | null {
++  const row: Record<string, unknown> = {
++    ...planned.row,
++    id: planned.newId,
++    campaignId,
++    createdAt: stampOf(planned.row.createdAt),
++    updatedAt: now(),
++  }
++
++  switch (module) {
++    case 'characters':
++      row.factionId = ids.lookup('factions', planned.row.factionId)
++      row.homeId = ids.lookup('locations', planned.row.homeId)
++      return row
++    case 'factions':
++      row.leaderId = ids.lookup('characters', planned.row.leaderId)
++      row.seatId = ids.lookup('locations', planned.row.seatId)
++      return row
++    case 'locations':
++      row.parentId = ids.lookup('locations', planned.row.parentId)
++      return row
++    case 'sessions':
++      row.locationId = ids.lookup('locations', planned.row.locationId)
++      row.attendees = ids.lookupAll('characters', planned.row.attendees)
++      return row
++    case 'arcs':
++      row.primaryFactionId = ids.lookup('factions', planned.row.primaryFactionId)
++      row.rivalFactionId = ids.lookup('factions', planned.row.rivalFactionId)
++      return row
++    case 'encounters':
++      row.sessionId = ids.lookup('sessions', planned.row.sessionId)
++      row.locationId = ids.lookup('locations', planned.row.locationId)
++      row.initiative = resolveInitiative(planned.row.initiative, ids)
++      return row
++    case 'relationships': {
++      const from = resolveEndpoint(planned.row.from, ids)
++      const to = resolveEndpoint(planned.row.to, ids)
++      if (from === null || to === null) return null
++      row.from = from
++      row.to = to
++      return row
++    }
++    case 'items': {
++      const owner = ids.lookup('characters', planned.row.ownerId)
++      row.ownerId = owner
++      row.attuned = owner === null ? false : planned.row.attuned === true
++      return row
++    }
++    case 'quests':
++      row.giverId = ids.lookup('characters', planned.row.giverId)
++      row.arcId = ids.lookup('arcs', planned.row.arcId)
++      return row
++    case 'notes': {
++      const target = resolveTarget(planned.row.target, ids)
++      if (target === null) return null
++      row.target = target
++      return row
++    }
++    case 'tags':
++      row.appliedTo = resolveMarks(planned.row.appliedTo, ids)
++      return row
++    case 'downtime': {
++      const characterId = ids.lookup('characters', planned.row.characterId)
++      if (characterId === null) return null
++      row.characterId = characterId
++      return row
++    }
++    default:
++      return row
++  }
++}
++
++function resolveInitiative(raw: unknown, ids: IdMap): unknown[] {
++  if (!Array.isArray(raw)) return []
++  return raw.map((entry) =>
++    isRecord(entry) ? { ...entry, characterId: ids.lookup('characters', entry.characterId) } : entry,
++  )
++}
++
++function resolveEndpoint(raw: unknown, ids: IdMap): Record<string, unknown> | null {
++  if (!isRecord(raw)) return null
++  const kind = TARGET_KINDS[String(raw.kind)]
++  if (kind === undefined || kind === 'campaign') return null
++  const id = ids.lookup(kind, raw.id)
++  return id === null ? null : { kind: raw.kind, id }
++}
++
++function resolveTarget(raw: unknown, ids: IdMap): Record<string, unknown> | null {
++  if (!isRecord(raw)) return null
++  const kind = TARGET_KINDS[String(raw.kind)]
++  if (kind === undefined) return null
++  const id = ids.lookup(kind, raw.id)
++  return id === null ? null : { kind: raw.kind, id }
++}
++
++function resolveMarks(raw: unknown, ids: IdMap): Array<Record<string, unknown>> {
++  if (!Array.isArray(raw)) return []
++  const out: Array<Record<string, unknown>> = []
++  for (const mark of raw) {
++    if (!isRecord(mark)) continue
++    const kind = TARGET_KINDS[String(mark.kind)]
++    if (kind === undefined || kind === 'campaign') continue
++    const id = ids.lookup(kind, mark.id)
++    if (id === null) continue
++    out.push({ kind: mark.kind, id })
++  }
++  return out
++}
++
++interface Services {
++  campaigns: CampaignService
++  characters: CharacterService
++  factions: FactionService
++  locations: LocationService
++  sessions: SessionService
++  arcs: ArcService
++  encounters: EncounterService
++  relationships: RelationshipService
++  lore: LoreService
++  items: ItemService
++  quests: QuestService
++  timeline: TimelineService
++  notes: NoteService
++  tags: TagService
++  holidays: HolidayService
++  downtime: DowntimeService
++}
++
++function makeServices(store: KeyValueStore): Services {
++  return {
++    campaigns: new CampaignService(store),
++    characters: new CharacterService(store),
++    factions: new FactionService(store),
++    locations: new LocationService(store),
++    sessions: new SessionService(store),
++    arcs: new ArcService(store),
++    encounters: new EncounterService(store),
++    relationships: new RelationshipService(store),
++    lore: new LoreService(store),
++    items: new ItemService(store),
++    quests: new QuestService(store),
++    timeline: new TimelineService(store),
++    notes: new NoteService(store),
++    tags: new TagService(store),
++    holidays: new HolidayService(store),
++    downtime: new DowntimeService(store),
++  }
++}
++
++function writeRow(services: Services, module: BundleModule, row: Record<string, unknown>): void {
++  switch (module) {
++    case 'characters':
++      services.characters.restore(row as never)
++      return
++    case 'factions':
++      services.factions.restore(row as never)
++      return
++    case 'locations':
++      services.locations.restore(row as never)
++      return
++    case 'sessions':
++      services.sessions.restore(row as never)
++      return
++    case 'arcs':
++      services.arcs.restore(row as never)
++      return
++    case 'encounters':
++      services.encounters.restore(row as never)
++      return
++    case 'relationships':
++      services.relationships.restore(row as never)
++      return
++    case 'lore':
++      services.lore.restore(row as never)
++      return
++    case 'items':
++      services.items.restore(row as never)
++      return
++    case 'quests':
++      services.quests.restore(row as never)
++      return
++    case 'timeline':
++      services.timeline.restore(row as never)
++      return
++    case 'notes':
++      services.notes.restore(row as never)
++      return
++    case 'tags':
++      services.tags.restore(row as never)
++      return
++    case 'holidays':
++      services.holidays.restore(row as never)
++      return
++    case 'downtime':
++      services.downtime.restore(row as never)
++      return
++  }
++}
++
++function isOrdinal(value: unknown): boolean {
++  return typeof value === 'number' && Number.isInteger(value) && value >= 1
++}
++
++function stampOf(value: unknown): ISOTimestamp {
++  if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) {
++    return asTimestamp(value)
++  }
++  return now()
++}
+diff --git a/src/core/services/arc-service.ts b/src/core/services/arc-service.ts
+index 4e9af87..54dde3c 100644
+--- a/src/core/services/arc-service.ts
++++ b/src/core/services/arc-service.ts
+@@ -118,6 +118,28 @@ export class ArcService {
+     for (const a of targets) this.repo.remove(a.id)
+     return targets.length
+   }
++
++  /** Write an arc that came out of a bundle, id and created stamp kept. */
++  restore(row: Arc): Arc {
++    const parsed = arcDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const a: Arc = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      title: parsed.data.title,
++      synopsis: parsed.data.synopsis ?? '',
++      status: parsed.data.status ?? 'seeded',
++      tension: parsed.data.tension ?? 'low',
++      primaryFactionId: (parsed.data.primaryFactionId ?? null) as FactionId | null,
++      rivalFactionId: (parsed.data.rivalFactionId ?? null) as FactionId | null,
++      notes: parsed.data.notes ?? '',
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(a)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/campaign-service.ts b/src/core/services/campaign-service.ts
+index 04c0393..55baea8 100644
+--- a/src/core/services/campaign-service.ts
++++ b/src/core/services/campaign-service.ts
+@@ -104,6 +104,31 @@ export class CampaignService {
+   count(): number {
+     return this.repo.count()
+   }
++
++  /**
++   * Write a campaign that came out of a bundle. Unlike create() this keeps the
++   * id, the created stamp and the play counters it is handed; only the updated
++   * stamp moves, because the row really is being written now.
++   */
++  restore(row: Campaign): Campaign {
++    const parsed = campaignDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const campaign: Campaign = {
++      id: row.id,
++      name: parsed.data.name,
++      tagline: parsed.data.tagline ?? '',
++      system: parsed.data.system ?? 'custom',
++      status: parsed.data.status ?? 'planning',
++      startedAt: row.startedAt,
++      lastPlayedAt: row.lastPlayedAt,
++      sessionCount: Math.max(0, Math.floor(row.sessionCount || 0)),
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(campaign)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/character-service.ts b/src/core/services/character-service.ts
+index c07a2f5..02c1140 100644
+--- a/src/core/services/character-service.ts
++++ b/src/core/services/character-service.ts
+@@ -122,6 +122,32 @@ export class CharacterService {
+     for (const c of targets) this.repo.remove(c.id)
+     return targets.length
+   }
++
++  /** Write a character that came out of a bundle, id and created stamp kept. */
++  restore(row: Character): Character {
++    const parsed = characterDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const c: Character = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      kind: parsed.data.kind ?? 'npc',
++      name: parsed.data.name,
++      pronouns: parsed.data.pronouns ?? '',
++      ancestry: parsed.data.ancestry ?? '',
++      vocation: parsed.data.vocation ?? '',
++      level: parsed.data.level ?? 1,
++      disposition: parsed.data.disposition ?? 'unknown',
++      factionId: (parsed.data.factionId ?? null) as FactionId | null,
++      homeId: (parsed.data.homeId ?? null) as LocationId | null,
++      blurb: parsed.data.blurb ?? '',
++      alive: parsed.data.alive ?? true,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(c)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/downtime-service.ts b/src/core/services/downtime-service.ts
+index fb4668b..aae316e 100644
+--- a/src/core/services/downtime-service.ts
++++ b/src/core/services/downtime-service.ts
+@@ -117,6 +117,25 @@ export class DowntimeService {
+     for (const t of targets) this.repo.remove(t.id)
+     return targets.length
+   }
++
++  /** Write a downtime activity that came out of a bundle, outcome kept. */
++  restore(row: DowntimeActivity): DowntimeActivity {
++    const parsed = downtimeDraftSchema.safeParse(row)
++    if (!parsed.success) throw new ValidationError(formatZodIssues(parsed.error.issues))
++    const activity: DowntimeActivity = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      characterId: parsed.data.characterId as CharacterId,
++      kind: parsed.data.kind as DowntimeKind,
++      outcome: row.outcome,
++      weeks: parsed.data.weeks ?? 1,
++      description: (parsed.data.description ?? '').trim(),
++      reward: (parsed.data.reward ?? '').trim(),
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(activity)
++  }
+ }
+ 
+ function formatZodIssues(
+diff --git a/src/core/services/encounter-service.ts b/src/core/services/encounter-service.ts
+index de9e347..9543779 100644
+--- a/src/core/services/encounter-service.ts
++++ b/src/core/services/encounter-service.ts
+@@ -122,6 +122,29 @@ export class EncounterService {
+     for (const e of targets) this.repo.remove(e.id)
+     return targets.length
+   }
++
++  /** Write an encounter that came out of a bundle, initiative order included. */
++  restore(row: Encounter): Encounter {
++    const parsed = encounterDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const e: Encounter = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      sessionId: (parsed.data.sessionId ?? null) as SessionId | null,
++      locationId: (parsed.data.locationId ?? null) as LocationId | null,
++      title: parsed.data.title,
++      kind: parsed.data.kind ?? 'combat',
++      difficulty: parsed.data.difficulty ?? 'medium',
++      summary: parsed.data.summary ?? '',
++      initiative: (parsed.data.initiative ?? []) as ReadonlyArray<InitiativeEntry>,
++      resolved: parsed.data.resolved ?? false,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(e)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/faction-service.ts b/src/core/services/faction-service.ts
+index 6a65e26..1759cc3 100644
+--- a/src/core/services/faction-service.ts
++++ b/src/core/services/faction-service.ts
+@@ -126,6 +126,30 @@ export class FactionService {
+     for (const f of targets) this.repo.remove(f.id)
+     return targets.length
+   }
++
++  /** Write a faction that came out of a bundle, id and created stamp kept. */
++  restore(row: Faction): Faction {
++    const parsed = factionDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const f: Faction = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      name: parsed.data.name,
++      motto: parsed.data.motto ?? '',
++      description: parsed.data.description ?? '',
++      alignment: parsed.data.alignment ?? 'unknown',
++      scope: parsed.data.scope ?? 'regional',
++      influence: clamp(parsed.data.influence ?? 25, 0, 100),
++      leaderId: (parsed.data.leaderId ?? null) as CharacterId | null,
++      seatId: (parsed.data.seatId ?? null) as LocationId | null,
++      active: parsed.data.active ?? true,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(f)
++  }
+ }
+ 
+ function clamp(n: number, lo: number, hi: number): number {
+diff --git a/src/core/services/holiday-service.ts b/src/core/services/holiday-service.ts
+index d0c6e40..a97f1c0 100644
+--- a/src/core/services/holiday-service.ts
++++ b/src/core/services/holiday-service.ts
+@@ -86,6 +86,24 @@ export class HolidayService {
+     for (const h of targets) this.repo.remove(h.id)
+     return targets.length
+   }
++
++  /** Write a holiday that came out of a bundle. */
++  restore(row: Holiday): Holiday {
++    const parsed = holidayDraftSchema.safeParse(row)
++    if (!parsed.success) throw new ValidationError(formatZodIssues(parsed.error.issues))
++    const holiday: Holiday = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      name: parsed.data.name.trim(),
++      month: parsed.data.month,
++      day: parsed.data.day,
++      kind: (parsed.data.kind ?? 'civic') as HolidayKind,
++      observance: (parsed.data.observance ?? '').trim(),
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(holiday)
++  }
+ }
+ 
+ function formatZodIssues(
+diff --git a/src/core/services/item-service.ts b/src/core/services/item-service.ts
+index ecf51a7..4e66e38 100644
+--- a/src/core/services/item-service.ts
++++ b/src/core/services/item-service.ts
+@@ -130,6 +130,29 @@ export class ItemService {
+     for (const i of targets) this.repo.remove(i.id)
+     return targets.length
+   }
++
++  /** Write an item that came out of a bundle, id and created stamp kept. */
++  restore(row: Item): Item {
++    const parsed = itemDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const item: Item = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      name: parsed.data.name,
++      kind: parsed.data.kind ?? 'misc',
++      rarity: parsed.data.rarity ?? 'common',
++      magical: parsed.data.magical ?? false,
++      attuned: parsed.data.attuned ?? false,
++      ownerId: (parsed.data.ownerId ?? null) as CharacterId | null,
++      description: parsed.data.description ?? '',
++      valueGp: parsed.data.valueGp ?? 0,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(item)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/location-service.ts b/src/core/services/location-service.ts
+index 78fb46a..b24dfc3 100644
+--- a/src/core/services/location-service.ts
++++ b/src/core/services/location-service.ts
+@@ -149,6 +149,31 @@ export class LocationService {
+     for (const l of targets) this.repo.remove(l.id)
+     return targets.length
+   }
++
++  /**
++   * Write a location that came out of a bundle. The parent is trusted here:
++   * a restore fills the whole tree in one go, so a child can land before the
++   * parent it points at.
++   */
++  restore(row: Location): Location {
++    const parsed = locationDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const l: Location = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      parentId: (parsed.data.parentId ?? null) as LocationId | null,
++      name: parsed.data.name,
++      kind: parsed.data.kind ?? 'region',
++      shortDescription: parsed.data.shortDescription ?? '',
++      notes: parsed.data.notes ?? '',
++      visited: parsed.data.visited ?? false,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(l)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/lore-service.ts b/src/core/services/lore-service.ts
+index de93ce9..9bdaa6d 100644
+--- a/src/core/services/lore-service.ts
++++ b/src/core/services/lore-service.ts
+@@ -123,6 +123,27 @@ export class LoreService {
+     for (const e of targets) this.repo.remove(e.id)
+     return targets.length
+   }
++
++  /** Write a lore entry that came out of a bundle, id and created stamp kept. */
++  restore(row: LoreEntry): LoreEntry {
++    const parsed = loreDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const entry: LoreEntry = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      title: parsed.data.title,
++      body: parsed.data.body ?? '',
++      category: parsed.data.category ?? 'misc',
++      tags: normaliseTags(parsed.data.tags ?? []),
++      revealed: parsed.data.revealed ?? false,
++      pinned: parsed.data.pinned ?? false,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(entry)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/note-service.ts b/src/core/services/note-service.ts
+index 69adf90..ce2be10 100644
+--- a/src/core/services/note-service.ts
++++ b/src/core/services/note-service.ts
+@@ -148,6 +148,28 @@ export class NoteService {
+     for (const n of targets) this.repo.remove(n.id)
+     return targets.length
+   }
++
++  /** Write a note that came out of a bundle, target already resolved. */
++  restore(row: Note): Note {
++    const parsed = noteDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const note: Note = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      target: parsed.data.target as NoteTarget,
++      title: parsed.data.title ?? '',
++      body: parsed.data.body.trim(),
++      priority: parsed.data.priority ?? 'normal',
++      pinned: parsed.data.pinned ?? false,
++      remindAt: parsed.data.remindAt ? asTimestamp(parsed.data.remindAt) : null,
++      resolvedAt: row.resolvedAt,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(note)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/quest-service.ts b/src/core/services/quest-service.ts
+index 88b259e..5f033e5 100644
+--- a/src/core/services/quest-service.ts
++++ b/src/core/services/quest-service.ts
+@@ -148,6 +148,29 @@ export class QuestService {
+     for (const q of targets) this.repo.remove(q.id)
+     return targets.length
+   }
++
++  /** Write a quest that came out of a bundle, objectives and all. */
++  restore(row: Quest): Quest {
++    const parsed = questDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const q: Quest = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      title: parsed.data.title,
++      description: parsed.data.description ?? '',
++      status: parsed.data.status ?? 'available',
++      priority: parsed.data.priority ?? 'normal',
++      giverId: (parsed.data.giverId ?? null) as CharacterId | null,
++      arcId: (parsed.data.arcId ?? null) as ArcId | null,
++      reward: parsed.data.reward ?? '',
++      objectives: (parsed.data.objectives ?? []) as ReadonlyArray<QuestObjective>,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(q)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/relationship-service.ts b/src/core/services/relationship-service.ts
+index c67aef2..9bf5391 100644
+--- a/src/core/services/relationship-service.ts
++++ b/src/core/services/relationship-service.ts
+@@ -115,6 +115,27 @@ export class RelationshipService {
+     }
+     return out
+   }
++
++  /** Write a relationship that came out of a bundle, both ends already resolved. */
++  restore(row: Relationship): Relationship {
++    const parsed = relationshipDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const r: Relationship = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      from: parsed.data.from as RelationshipEndpoint,
++      to: parsed.data.to as RelationshipEndpoint,
++      kind: parsed.data.kind ?? 'unknown',
++      intensity: parsed.data.intensity ?? 3,
++      note: parsed.data.note ?? '',
++      reciprocal: parsed.data.reciprocal ?? true,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(r)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/session-service.ts b/src/core/services/session-service.ts
+index 06f230c..c6da4f5 100644
+--- a/src/core/services/session-service.ts
++++ b/src/core/services/session-service.ts
+@@ -133,6 +133,33 @@ export class SessionService {
+     for (const s of targets) this.repo.remove(s.id)
+     return targets.length
+   }
++
++  /**
++   * Write a session that came out of a bundle. The ordinal travels with the
++   * row rather than being handed out again, so a restored campaign reads in
++   * the order it was played.
++   */
++  restore(row: Session): Session {
++    const parsed = sessionDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const s: Session = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      number: row.number,
++      title: parsed.data.title,
++      playedAt: asTimestamp(parsed.data.playedAt),
++      durationMinutes: parsed.data.durationMinutes ?? 0,
++      locationId: (parsed.data.locationId ?? null) as LocationId | null,
++      attendees: (parsed.data.attendees ?? []) as ReadonlyArray<CharacterId>,
++      summary: parsed.data.summary ?? '',
++      log: parsed.data.log ?? '',
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(s)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/core/services/tag-service.ts b/src/core/services/tag-service.ts
+index ca9513b..cba3ede 100644
+--- a/src/core/services/tag-service.ts
++++ b/src/core/services/tag-service.ts
+@@ -151,6 +151,33 @@ export class TagService {
+     for (const t of targets) this.repo.remove(t.id)
+     return targets.length
+   }
++
++  /**
++   * Write a tag that came out of a bundle. The slug is derived again rather
++   * than trusted, and a name already spoken for in the campaign is refused the
++   * same way create() refuses one.
++   */
++  restore(row: Tag): Tag {
++    const parsed = tagDraftSchema.safeParse(row)
++    if (!parsed.success) throw new ValidationError(formatZodIssues(parsed.error.issues))
++    const slug = slugifyTagName(parsed.data.name)
++    const existing = this.listForCampaign(parsed.data.campaignId as CampaignId)
++    if (isDuplicateSlug(slug, existing)) {
++      throw new ConflictError(`tag "${slug}" already exists in this campaign`)
++    }
++    const tag: Tag = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      name: parsed.data.name.trim(),
++      slug,
++      tone: parsed.data.tone ?? pickDefaultTone(existing.length),
++      description: (parsed.data.description ?? '').trim(),
++      appliedTo: row.appliedTo,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(tag)
++  }
+ }
+ 
+ function pickDefaultTone(seed: number): TagTone {
+diff --git a/src/core/services/timeline-service.ts b/src/core/services/timeline-service.ts
+index d805bdc..a4f6c13 100644
+--- a/src/core/services/timeline-service.ts
++++ b/src/core/services/timeline-service.ts
+@@ -109,6 +109,27 @@ export class TimelineService {
+     for (const t of targets) this.repo.remove(t.id)
+     return targets.length
+   }
++
++  /** Write a timeline event that came out of a bundle. */
++  restore(row: TimelineEvent): TimelineEvent {
++    const parsed = timelineDraftSchema.safeParse(row)
++    if (!parsed.success) {
++      throw new ValidationError(formatZodIssues(parsed.error.issues))
++    }
++    const event: TimelineEvent = {
++      id: row.id,
++      campaignId: parsed.data.campaignId as CampaignId,
++      title: parsed.data.title,
++      description: parsed.data.description ?? '',
++      date: parsed.data.date as InWorldDate,
++      era: parsed.data.era ?? 'present',
++      significance: (parsed.data.significance ?? 'notable') as TimelineSignificance,
++      revealed: parsed.data.revealed ?? false,
++      createdAt: row.createdAt,
++      updatedAt: now(),
++    }
++    return this.repo.put(event)
++  }
+ }
+ 
+ function formatZodIssues(issues: ReadonlyArray<{ path: (string | number)[]; message: string }>): Record<string, string> {
+diff --git a/src/features/io/pages/BackupPage.vue b/src/features/io/pages/BackupPage.vue
+index 09a7987..3560532 100644
+--- a/src/features/io/pages/BackupPage.vue
++++ b/src/features/io/pages/BackupPage.vue
+@@ -14,6 +14,7 @@ import SurfaceCard from '@ui/primitives/SurfaceCard.vue'
+ 
+ import { exportAsJson, fileNameFor } from '../useExport'
+ import { ImportParseError, previewImport } from '../useImport'
++import { restoreFromJson, summarise } from '../useRestore'
+ import { parseCharactersCsv } from '../csvImport'
+ 
+ const route = useRoute()
+@@ -29,6 +30,8 @@ const importStatus = ref<{ ok: boolean; imported: number; errors: number } | nul
+ const previewText = ref('')
+ const previewReport = ref<string>('')
+ const previewError = ref<string>('')
++const restoreReport = ref<string>('')
++const restoreError = ref<string>('')
+ 
+ const crumbs = computed(() => [
+   { to: '/', label: 'Home' },
+@@ -75,6 +78,29 @@ function inspectBundle(): void {
+   }
+ }
+ 
++function restoreBundleFromPaste(): void {
++  restoreReport.value = ''
++  restoreError.value = ''
++  try {
++    const outcome = restoreFromJson(previewText.value)
++    if (outcome.result.campaignId === null) {
++      restoreError.value = 'that bundle has no campaign to restore'
++      return
++    }
++    restoreReport.value = summarise(outcome)
++  } catch (err) {
++    if (err instanceof ImportParseError) {
++      restoreError.value = err.message
++    } else {
++      restoreError.value = 'unexpected error restoring the bundle'
++    }
++  }
++}
++
++function reloadApp(): void {
++  window.location.reload()
++}
++
+ function importCsv(): void {
+   if (!campaign.value) return
+   const result = parseCharactersCsv(csvText.value, campaign.value.id as CampaignId)
+@@ -126,14 +152,23 @@ function importCsv(): void {
+           placeholder='{ "version": 2, "campaignId": "..." }'
+           class="w-full text-xs font-mono border border-parchment-300 rounded-soft px-2 py-2 bg-white"
+         />
+-        <div class="flex justify-end mt-2">
++        <div class="flex justify-end gap-2 mt-2">
+           <BaseButton :disabled="!previewText.trim()" @click="inspectBundle">Inspect</BaseButton>
++          <BaseButton tone="primary" :disabled="!previewText.trim()" @click="restoreBundleFromPaste">
++            Restore into this install
++          </BaseButton>
+         </div>
+         <pre
+           v-if="previewReport"
+           class="mt-2 text-xs whitespace-pre-line bg-parchment-50 p-2 rounded-soft"
+         >{{ previewReport }}</pre>
+         <p v-if="previewError" class="mt-2 text-sm text-crimson-600">{{ previewError }}</p>
++        <div v-if="restoreReport" class="mt-3 border-t border-parchment-300 pt-3">
++          <p class="text-sm text-ink-700">Restored as a new campaign.</p>
++          <pre class="mt-1 text-xs whitespace-pre-line bg-parchment-50 p-2 rounded-soft">{{ restoreReport }}</pre>
++          <BaseButton class="mt-2" @click="reloadApp">Reload to see it</BaseButton>
++        </div>
++        <p v-if="restoreError" class="mt-2 text-sm text-crimson-600">{{ restoreError }}</p>
+       </SurfaceCard>
+ 
+       <SurfaceCard title="Import characters from CSV" hint='First row is the header, "name" required'>
+diff --git a/src/features/io/useRestore.ts b/src/features/io/useRestore.ts
+new file mode 100644
+index 0000000..8181455
+--- /dev/null
++++ b/src/features/io/useRestore.ts
+@@ -0,0 +1,60 @@
++import { getStore } from '@core/persistence/storage'
++import { restoreBundle, type RestoreResult } from '@core/io/restore'
++import type { CampaignBundle } from '@core/io/bundle'
++import { type CoinPurse, emptyPurse, purseSchema } from '@core/rules/coin'
++import type { CampaignId } from '@core/ids'
++
++import { useTreasuryStore } from '@features/treasury/store'
++
++import { parseImport } from './useImport'
++
++export interface RestoreOutcome {
++  result: RestoreResult
++  totalRestored: number
++  totalSkipped: number
++}
++
++/**
++ * Put a pasted bundle back into this install. The entity graph goes through the
++ * core engine; the purse is a store of its own and rides along here so the page
++ * only has to call one thing.
++ */
++export function restoreFromJson(raw: string): RestoreOutcome {
++  const bundle = parseImport(raw) as unknown as CampaignBundle
++  const result = restoreBundle(bundle, getStore())
++
++  if (result.campaignId !== null) {
++    const purse = purseFromBundle(bundle)
++    if (purse !== null) {
++      useTreasuryStore().setPurse(result.campaignId as CampaignId, purse)
++    }
++  }
++
++  return {
++    result,
++    totalRestored: sum(result.restored),
++    totalSkipped: sum(result.skipped),
++  }
++}
++
++export function summarise(outcome: RestoreOutcome): string {
++  const lines = Object.entries(outcome.result.restored)
++    .filter(([, n]) => n > 0)
++    .map(([module, n]) => `${module}: ${n}`)
++  if (outcome.totalSkipped > 0) {
++    lines.push(`skipped: ${outcome.totalSkipped}`)
++  }
++  return lines.length > 0 ? lines.join('\n') : 'nothing in that bundle to restore'
++}
++
++function purseFromBundle(bundle: CampaignBundle): CoinPurse | null {
++  const treasury = bundle.treasury
++  if (treasury === null || typeof treasury !== 'object') return null
++  const raw = (treasury as Record<string, unknown>).purse
++  const parsed = purseSchema.safeParse(raw)
++  return parsed.success ? { ...emptyPurse(), ...parsed.data } : null
++}
++
++function sum(tally: Record<string, number>): number {
++  return Object.values(tally).reduce((total, n) => total + n, 0)
++}

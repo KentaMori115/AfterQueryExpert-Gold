@@ -1,0 +1,14 @@
+REWARD {"reward": 0, "f2p_total": 55, "f2p_passed": 50, "p2p_total": 410, "p2p_passed": 408, "f2p": 0.9090909090909091, "p2p": 0.9951219512195122, "partial": 0.9849462365591398}
+[verifier] published p2p=410 f2p=55 stream=465 undeclared=0
+[verifier] published p2p=410 f2p=55 stream=465 undeclared=0
+[verifier] ===== FAILURES (7) =====
+[verifier] ✗ [p2p] src/modules/discipline/discipline.routes.test.ts > taking a card off the record > reworks the cards that came after, undoing a ban they had already earned
+[verifier] ✗ [p2p] src/modules/discipline/discipline.routes.test.ts > what a player record adds up to > moves a player from clear to warned to suspended
+[verifier] ✗ [f2p] tests/ban-serving.test.ts > which games serve a ban > leaves a walkover out of the serving while the table still takes it
+[verifier] ✗ [f2p] tests/matchday-eligibility.test.ts > reading who may not play > leaves the player barred when the game in between was awarded
+[verifier] ✗ [f2p] tests/matchday-eligibility.test.ts > the standing a record reads > answers the standing for the day asked about
+[verifier] ✗ [f2p] tests/matchday-eligibility.test.ts > the standing a record reads > drops back once the ban has been served, with the ban still counted
+[verifier] ✗ [f2p] tests/matchday-eligibility.test.ts > the standing a record reads > is not moved by an awarded game, only by a played one
+P2P 408/410 pass 2 fail; F2P 50/55 pass 5 fail; PARTIAL 0.9849462365591398; BINARY 0
+[verifier] reward.json={"reward": 0, "f2p_total": 55, "f2p_passed": 50, "p2p_total": 410, "p2p_passed": 408, "f2p": 0.9090909090909091, "p2p": 0.9951219512195122, "partial": 0.9849462365591398}
+/logs/verifier: ctrf.json reports reward.json run.log test-stdout.txt  /logs/verifier/reports: base_ctrf.json new_ctrf.json 

@@ -1,0 +1,900 @@
+diff --git a/docs/disturbances.md b/docs/disturbances.md
+new file mode 100644
+index 0000000..e37a48f
+--- /dev/null
++++ b/docs/disturbances.md
+@@ -0,0 +1,32 @@
++# Disturbances
++
++A scenario hook opens an authored event on one tick. Each effect on that event
++runs from the hook's tick for `forTicks` ticks, one by default. Hooks are read
++in tick order and then by event id, and an event's own effects in the order the
++file lists them.
++
++An effect carries either a `resource` with a `quantity` or a `modifier` with a
++`factor`. A `region` narrows it to one place; without one it reaches the whole
++biome.
++
++## Quantity effects
++
++The quantity is divided across the pools the effect reaches, in proportion to
++what each pool holds when the effect runs. Division floors, and the units left
++over walk those pools in region id order, one each. Pools that hold nothing
++between them share the quantity evenly instead.
++
++A withdrawal never takes more than a pool holds, and the part it could not take
++is not passed to another pool.
++
++Each pool that moved publishes its own flow, carrying that pool's region and
++the quantity that pool really gave up or took on, cause `fixed-event` and rule
++`events.<event id>`.
++
++## Modifier effects
++
++A modifier effect scales the habitat modifier its key names for as long as its
++window runs. Two windows over one key and region multiply, in the order their
++events fire, rounding half-even at each step. Renewal reads the scaled factor;
++the effect publishes no flow of its own, because the renewal flow already
++carries the difference it made.
+diff --git a/packages/biome-model/src/compile.ts b/packages/biome-model/src/compile.ts
+index 0ef9318..1c572c4 100644
+--- a/packages/biome-model/src/compile.ts
++++ b/packages/biome-model/src/compile.ts
+@@ -145,6 +145,30 @@ export function compileCapsule(capsule: Capsule): CompileResult {
+       }
+     }
+   }
++  for (const event of Object.values(events)) {
++    for (const effect of event.effects) {
++      if (effect.resource !== undefined && !resources[effect.resource]) {
++        diagnostics.push(
++          diagnostic(
++            "BW-ID-006",
++            "error",
++            `event ${event.id} names unknown resource ${effect.resource}`,
++            event.location,
++          ),
++        );
++      }
++      if (effect.region !== undefined && !regions[effect.region]) {
++        diagnostics.push(
++          diagnostic(
++            "BW-ID-006",
++            "error",
++            `event ${event.id} names unknown region ${effect.region}`,
++            event.location,
++          ),
++        );
++      }
++    }
++  }
+   for (const scenario of Object.values(scenarios)) {
+     for (const population of scenario.initialPopulations) {
+       if (!species[population.species] || !regions[population.region]) {
+diff --git a/packages/biome-model/src/decode.ts b/packages/biome-model/src/decode.ts
+index ccf9806..80100d5 100644
+--- a/packages/biome-model/src/decode.ts
++++ b/packages/biome-model/src/decode.ts
+@@ -1,6 +1,7 @@
+ import { diagnostic, sourceLocation, type Diagnostic } from "@biomeweaver/capsule-source";
+ import { parseFixed, type Fixed } from "@biomeweaver/fixed-point";
+ import { requireIdentifier } from "./identifiers.js";
++import { DEFAULT_EFFECT_TICKS, isModifierEffect, isQuantityEffect } from "./records.js";
+ import type {
+   CalendarRecord,
+   EventEffect,
+@@ -447,39 +448,113 @@ export function decodeEvent(
+   if (!requireIdentifier(id, "event id", path, diagnostics)) {
+     return undefined;
+   }
+-  const effects = (Array.isArray(record["effects"]) ? record["effects"] : []).flatMap((item) => {
+-    const row = asRecord(item);
+-    if (!row) {
+-      return [];
+-    }
+-    const built: {
+-      resource?: string;
+-      modifier?: string;
+-      quantity?: Fixed;
+-      factor?: Fixed;
+-    } = {};
+-    const resource = asString(row["resource"]);
+-    const modifier = asString(row["modifier"]);
+-    if (resource !== undefined) {
+-      built.resource = resource;
+-    }
+-    if (modifier !== undefined) {
+-      built.modifier = modifier;
++  const effects = (Array.isArray(record["effects"]) ? record["effects"] : []).flatMap((item) =>
++    decodeEffect(item, path, scale, diagnostics),
++  );
++  return { kind: "event", id, effects, location: sourceLocation(path) };
++}
++
++function decodeEffectWindow(
++  row: Record<string, unknown>,
++  path: string,
++  diagnostics: Diagnostic[],
++): number | undefined {
++  if (row["forTicks"] === undefined) {
++    return DEFAULT_EFFECT_TICKS;
++  }
++  const raw = asNumber(row["forTicks"]);
++  if (raw === undefined || !Number.isInteger(raw)) {
++    diagnostics.push(
++      diagnostic(
++        "BW-ID-002",
++        "error",
++        "effects.forTicks must be a whole number of ticks",
++        sourceLocation(path),
++      ),
++    );
++    return undefined;
++  }
++  if (raw < 1) {
++    diagnostics.push(
++      diagnostic(
++        "BW-ID-004",
++        "error",
++        "effects.forTicks must run for at least one tick",
++        sourceLocation(path),
++      ),
++    );
++    return undefined;
++  }
++  return raw;
++}
++
++function decodeEffect(
++  item: unknown,
++  path: string,
++  scale: bigint,
++  diagnostics: Diagnostic[],
++): EventEffect[] {
++  const row = asRecord(item);
++  if (!row) {
++    diagnostics.push(
++      diagnostic("BW-ID-003", "error", "an event effect must be a record", sourceLocation(path)),
++    );
++    return [];
++  }
++  const forTicks = decodeEffectWindow(row, path, diagnostics);
++  if (forTicks === undefined) {
++    return [];
++  }
++  const built: {
++    resource?: string;
++    modifier?: string;
++    region?: string;
++    quantity?: Fixed;
++    factor?: Fixed;
++    forTicks: number;
++  } = { forTicks };
++  const resource = asString(row["resource"]);
++  const modifier = asString(row["modifier"]);
++  const region = asString(row["region"]);
++  if (resource !== undefined) {
++    built.resource = resource;
++  }
++  if (modifier !== undefined) {
++    built.modifier = modifier;
++  }
++  if (region !== undefined) {
++    built.region = region;
++  }
++  if (row["quantity"] !== undefined) {
++    const quantity = parseQuantity(row["quantity"], scale, "effects.quantity", path, diagnostics);
++    if (quantity !== undefined) {
++      built.quantity = quantity;
+     }
+-    if (row["quantity"] !== undefined) {
+-      const quantity = parseQuantity(row["quantity"], scale, "effects.quantity", path, diagnostics);
+-      if (quantity !== undefined) {
+-        built.quantity = quantity;
+-      }
++  }
++  if (row["factor"] !== undefined) {
++    const factor = parseQuantity(row["factor"], scale, "effects.factor", path, diagnostics);
++    if (factor === undefined) {
++      return [];
+     }
+-    if (row["factor"] !== undefined) {
+-      const factor = parseQuantity(row["factor"], scale, "effects.factor", path, diagnostics);
+-      if (factor !== undefined) {
+-        built.factor = factor;
+-      }
++    if (factor < 0n) {
++      diagnostics.push(
++        diagnostic("BW-ID-004", "error", "effects.factor cannot be negative", sourceLocation(path)),
++      );
++      return [];
+     }
+-    const effect: EventEffect = built;
+-    return [effect];
+-  });
+-  return { kind: "event", id, effects, location: sourceLocation(path) };
++    built.factor = factor;
++  }
++  const effect: EventEffect = built;
++  if (!isQuantityEffect(effect) && !isModifierEffect(effect)) {
++    diagnostics.push(
++      diagnostic(
++        "BW-ID-003",
++        "error",
++        "an event effect needs a resource with a quantity or a modifier with a factor",
++        sourceLocation(path),
++      ),
++    );
++    return [];
++  }
++  return [effect];
+ }
+diff --git a/packages/biome-model/src/index.ts b/packages/biome-model/src/index.ts
+index bd78af9..9eb6644 100644
+--- a/packages/biome-model/src/index.ts
++++ b/packages/biome-model/src/index.ts
+@@ -9,6 +9,7 @@ export {
+   decodeSpecies,
+ } from "./decode.js";
+ export { cohortKey, isIdentifier, poolKey, requireIdentifier } from "./identifiers.js";
++export { DEFAULT_EFFECT_TICKS, coversTick, isModifierEffect, isQuantityEffect } from "./records.js";
+ export type {
+   CalendarRecord,
+   CompiledBiome,
+diff --git a/packages/biome-model/src/records.ts b/packages/biome-model/src/records.ts
+index 7a3bb33..ffe9b8d 100644
+--- a/packages/biome-model/src/records.ts
++++ b/packages/biome-model/src/records.ts
+@@ -109,10 +109,30 @@ export type ScenarioRecord = {
+ export type EventEffect = {
+   readonly resource?: string;
+   readonly modifier?: string;
++  readonly region?: string;
+   readonly quantity?: Fixed;
+   readonly factor?: Fixed;
++  readonly forTicks: number;
+ };
+ 
++export const DEFAULT_EFFECT_TICKS = 1;
++
++export function isQuantityEffect(
++  effect: EventEffect,
++): effect is EventEffect & { readonly resource: string; readonly quantity: Fixed } {
++  return effect.resource !== undefined && effect.quantity !== undefined;
++}
++
++export function isModifierEffect(
++  effect: EventEffect,
++): effect is EventEffect & { readonly modifier: string; readonly factor: Fixed } {
++  return effect.modifier !== undefined && effect.factor !== undefined;
++}
++
++export function coversTick(atTick: number, effect: EventEffect, tick: number): boolean {
++  return tick >= atTick && tick < atTick + effect.forTicks;
++}
++
+ export type EventRecord = {
+   readonly kind: "event";
+   readonly id: string;
+diff --git a/packages/biomeweaver-cli/src/router.ts b/packages/biomeweaver-cli/src/router.ts
+index dc9027c..8bb02c3 100644
+--- a/packages/biomeweaver-cli/src/router.ts
++++ b/packages/biomeweaver-cli/src/router.ts
+@@ -1,7 +1,11 @@
+ import { hasErrorDiagnostics } from "@biomeweaver/capsule-source";
+ import {
++  DEFAULT_SCALE,
+   describeBiome,
+   explainFlows,
++  formatFixed,
++  isModifierEffect,
++  isQuantityEffect,
+   loadBiome,
+   populationSeries,
+   renderCsvReport,
+@@ -10,6 +14,7 @@ import {
+   resourceSeries,
+   runScenario,
+   verifyRun,
++  type EventEffect,
+ } from "biomeweaver";
+ import { ExitCode } from "./exit-codes.js";
+ import { parseArgs, UsageError, type GlobalOptions } from "./options.js";
+@@ -36,6 +41,8 @@ function usage(): string {
+     "  species list",
+     "  species show <id>",
+     "  scenario list",
++    "  event list",
++    "  event show <id>",
+     "  simulate <scenario> [--ticks n]",
+     "  run show <run-id>",
+     "  population <run-id> <species>",
+@@ -61,6 +68,18 @@ function requireModel(options: GlobalOptions) {
+   return { compiled };
+ }
+ 
++function effectLine(effect: EventEffect, scale: bigint): string {
++  const where = effect.region ?? "everywhere";
++  const window = `${effect.forTicks} tick${effect.forTicks === 1 ? "" : "s"}`;
++  if (isQuantityEffect(effect)) {
++    return `resource ${effect.resource} ${formatFixed(effect.quantity, scale)} in ${where} for ${window}`;
++  }
++  if (isModifierEffect(effect)) {
++    return `modifier ${effect.modifier} x${formatFixed(effect.factor, scale)} in ${where} for ${window}`;
++  }
++  return `effect in ${where} for ${window}`;
++}
++
+ const cache = new Map<string, ReturnType<typeof runScenario>>();
+ 
+ function cachedRun(options: GlobalOptions, runId: string) {
+@@ -143,6 +162,33 @@ export function runCommand(argv: readonly string[]): CommandResult {
+           .join("\n")}\n`,
+       );
+     }
++    if (head === "event" && rest[0] === "list") {
++      const loaded = requireModel(parsed.options);
++      if (loaded.error) {
++        return loaded.error;
++      }
++      return result(
++        ExitCode.OK,
++        `${Object.keys(loaded.compiled.model?.events ?? {})
++          .sort()
++          .join("\n")}\n`,
++      );
++    }
++    if (head === "event" && rest[0] === "show" && rest[1]) {
++      const loaded = requireModel(parsed.options);
++      if (loaded.error) {
++        return loaded.error;
++      }
++      const event = loaded.compiled.model?.events[rest[1]];
++      if (!event) {
++        return result(ExitCode.INVALID_INPUT, "", `unknown event ${rest[1]}\n`);
++      }
++      const scale = loaded.compiled.model?.precision.scale ?? DEFAULT_SCALE;
++      return result(
++        ExitCode.OK,
++        `${event.effects.map((effect) => effectLine(effect, scale)).join("\n")}\n`,
++      );
++    }
+     if (head === "simulate" && rest[0]) {
+       const ticksFlag = rest.indexOf("--ticks");
+       const ticks = ticksFlag >= 0 ? Number(rest[ticksFlag + 1]) : undefined;
+diff --git a/packages/biomeweaver/src/index.ts b/packages/biomeweaver/src/index.ts
+index f661b5a..a8f623a 100644
+--- a/packages/biomeweaver/src/index.ts
++++ b/packages/biomeweaver/src/index.ts
+@@ -11,6 +11,12 @@ export {
+   verifyRun,
+   type SimulationOutcome,
+ } from "./api.js";
+-export { compileCapsule } from "@biomeweaver/biome-model";
++export {
++  compileCapsule,
++  isModifierEffect,
++  isQuantityEffect,
++  type EventEffect,
++} from "@biomeweaver/biome-model";
++export { DEFAULT_SCALE, formatFixed } from "@biomeweaver/fixed-point";
+ export { gatherCapsule } from "@biomeweaver/capsule-source";
+ export { PHASES, simulate } from "@biomeweaver/tick-runtime";
+diff --git a/packages/resource-engine/src/index.ts b/packages/resource-engine/src/index.ts
+index 4e4d80b..faad5c8 100644
+--- a/packages/resource-engine/src/index.ts
++++ b/packages/resource-engine/src/index.ts
+@@ -4,4 +4,10 @@ export {
+   type AllocationRow,
+   type DemandRow,
+ } from "./allocate.js";
++export {
++  overrideApplies,
++  overridesFor,
++  scaleModifier,
++  type ModifierOverride,
++} from "./modifiers.js";
+ export { habitatModifier, renewPool } from "./renew.js";
+diff --git a/packages/resource-engine/src/modifiers.test.ts b/packages/resource-engine/src/modifiers.test.ts
+new file mode 100644
+index 0000000..829040d
+--- /dev/null
++++ b/packages/resource-engine/src/modifiers.test.ts
+@@ -0,0 +1,46 @@
++import { describe, expect, it } from "vitest";
++import { DEFAULT_SCALE } from "@biomeweaver/fixed-point";
++import { overrideApplies, overridesFor, scaleModifier } from "./modifiers.js";
++
++const half = { key: "fresh-water-growth", factor: 500_000n };
++const third = {
++  key: "fresh-water-growth",
++  factor: 333_333n,
++  region: "northern-basin",
++};
++
++describe("modifier overrides", () => {
++  it("covers every region when it names none", () => {
++    expect(overrideApplies(half, "ice-river", "fresh-water-growth")).toBe(true);
++  });
++
++  it("stays out of a region it does not name", () => {
++    expect(overrideApplies(third, "ice-river", "fresh-water-growth")).toBe(false);
++  });
++
++  it("ignores a key it does not name", () => {
++    expect(overrideApplies(half, "northern-basin", "mineral-salt-growth")).toBe(false);
++  });
++
++  it("selects the overrides covering one region and key", () => {
++    expect(overridesFor([half, third], "northern-basin", "fresh-water-growth")).toHaveLength(2);
++  });
++
++  it("leaves a base factor alone when nothing covers it", () => {
++    expect(
++      scaleModifier(1_400_000n, [third], "ice-river", "fresh-water-growth", DEFAULT_SCALE),
++    ).toBe(1_400_000n);
++  });
++
++  it("multiplies two overlapping windows in order", () => {
++    expect(
++      scaleModifier(
++        1_400_000n,
++        [half, third],
++        "northern-basin",
++        "fresh-water-growth",
++        DEFAULT_SCALE,
++      ),
++    ).toBe(233_333n);
++  });
++});
+diff --git a/packages/resource-engine/src/modifiers.ts b/packages/resource-engine/src/modifiers.ts
+new file mode 100644
+index 0000000..88c330c
+--- /dev/null
++++ b/packages/resource-engine/src/modifiers.ts
+@@ -0,0 +1,53 @@
++import { mul, type Fixed } from "@biomeweaver/fixed-point";
++
++/**
++ * A live scaling of one authored modifier key.
++ *
++ * Habitats author a seasonal factor per modifier key, for example
++ * `fresh-water-growth`. A disturbance that is running on the current
++ * tick can scale that factor while it lasts. An override without a region
++ * covers every region in the biome.
++ */
++export type ModifierOverride = {
++  readonly key: string;
++  readonly factor: Fixed;
++  readonly region?: string;
++};
++
++export function overrideApplies(override: ModifierOverride, region: string, key: string): boolean {
++  if (override.key !== key) {
++    return false;
++  }
++  return override.region === undefined || override.region === region;
++}
++
++export function overridesFor(
++  overrides: readonly ModifierOverride[],
++  region: string,
++  key: string,
++): readonly ModifierOverride[] {
++  return overrides.filter((override) => overrideApplies(override, region, key));
++}
++
++/**
++ * Fold every override that covers `region` and `key` into `base`, in the order
++ * the overrides were collected. Each step rounds half-even at `scale`, so the
++ * result of two overlapping windows depends on that order and not on which of
++ * them happens to be larger.
++ */
++export function scaleModifier(
++  base: Fixed,
++  overrides: readonly ModifierOverride[],
++  region: string,
++  key: string,
++  scale: bigint,
++): Fixed {
++  let factor = base;
++  for (const override of overrides) {
++    if (!overrideApplies(override, region, key)) {
++      continue;
++    }
++    factor = mul(factor, override.factor, scale, "half-even");
++  }
++  return factor;
++}
+diff --git a/packages/resource-engine/src/renew.ts b/packages/resource-engine/src/renew.ts
+index 5f0d121..04540ac 100644
+--- a/packages/resource-engine/src/renew.ts
++++ b/packages/resource-engine/src/renew.ts
+@@ -1,5 +1,6 @@
+ import type { CompiledBiome, HabitatRecord } from "@biomeweaver/biome-model";
+ import { mul, type Fixed } from "@biomeweaver/fixed-point";
++import { scaleModifier, type ModifierOverride } from "./modifiers.js";
+ 
+ export function habitatModifier(
+   habitats: readonly HabitatRecord[],
+@@ -7,6 +8,7 @@ export function habitatModifier(
+   season: string,
+   key: string,
+   scale: bigint,
++  overrides: readonly ModifierOverride[] = [],
+ ): Fixed {
+   let factor = scale;
+   for (const habitat of habitats) {
+@@ -19,7 +21,7 @@ export function habitatModifier(
+       factor = value;
+     }
+   }
+-  return factor;
++  return scaleModifier(factor, overrides, region, key, scale);
+ }
+ 
+ export function renewPool(
+@@ -28,6 +30,7 @@ export function renewPool(
+   region: string,
+   current: Fixed,
+   season: string,
++  overrides: readonly ModifierOverride[] = [],
+ ): Fixed {
+   const record = model.resources[resource];
+   if (!record || !record.renewable) {
+@@ -39,6 +42,7 @@ export function renewPool(
+     season,
+     `${resource}-growth`,
+     model.precision.scale,
++    overrides,
+   );
+   const growth = mul(
+     record.renewalPerTick,
+diff --git a/packages/tick-runtime/src/advance.ts b/packages/tick-runtime/src/advance.ts
+index 27159bf..df68a0d 100644
+--- a/packages/tick-runtime/src/advance.ts
++++ b/packages/tick-runtime/src/advance.ts
+@@ -17,6 +17,7 @@ import {
+   type AllocationRow,
+ } from "@biomeweaver/resource-engine";
+ import { clampNonNegative } from "@biomeweaver/fixed-point";
++import { applyFixedEvents } from "./events.js";
+ import { initialState, type PoolState, type TickState } from "./state.js";
+ 
+ export const PHASES = [
+@@ -46,36 +47,19 @@ export function advanceTick(
+   let pools: PoolState[] = input.pools.map((pool) => ({ ...pool }));
+   let cohorts: CohortState[] = input.cohorts.map((cohort) => ({ ...cohort }));
+ 
+-  for (const hook of scenario.events.filter((item) => item.atTick === tick)) {
+-    const event = model.events[hook.event];
+-    if (!event) {
+-      continue;
+-    }
+-    for (const effect of event.effects) {
+-      if (effect.resource && effect.quantity !== undefined) {
+-        pools = pools.map((pool) =>
+-          pool.resource === effect.resource
+-            ? { ...pool, quantity: clampNonNegative(pool.quantity + effect.quantity!) }
+-            : pool,
+-        );
+-        flows.push(
+-          resourceFlow(
+-            tick,
+-            effect.quantity >= 0n ? "resource-increase" : "resource-decrease",
+-            effect.resource,
+-            pools[0]?.region ?? "unknown",
+-            effect.quantity,
+-            scale,
+-            "fixed-event",
+-            `events.${event.id}`,
+-          ),
+-        );
+-      }
+-    }
+-  }
++  const disturbance = applyFixedEvents(model, scenario, tick, pools);
++  pools = disturbance.pools.map((pool) => ({ ...pool }));
++  flows.push(...disturbance.flows);
+ 
+   pools = pools.map((pool) => {
+-    const next = renewPool(model, pool.resource, pool.region, pool.quantity, season);
++    const next = renewPool(
++      model,
++      pool.resource,
++      pool.region,
++      pool.quantity,
++      season,
++      disturbance.overrides,
++    );
+     const delta = next - pool.quantity;
+     if (delta !== 0n) {
+       flows.push(
+diff --git a/packages/tick-runtime/src/events.test.ts b/packages/tick-runtime/src/events.test.ts
+new file mode 100644
+index 0000000..12526f2
+--- /dev/null
++++ b/packages/tick-runtime/src/events.test.ts
+@@ -0,0 +1,61 @@
++import { describe, expect, it } from "vitest";
++import { compileCapsule } from "@biomeweaver/biome-model";
++import { completeBiome } from "../../../ecosystem-lab/helpers/paths.js";
++import { firingEffects, spreadQuantity, targetPools } from "./events.js";
++import { initialPools } from "./state.js";
++
++const compiled = compileCapsule({ root: completeBiome("crystal-tundra") });
++const model = compiled.model!;
++
++describe("fixed events", () => {
++  it("fires a hook on its own tick", () => {
++    const scenario = model.scenarios["long-winter"]!;
++    expect(firingEffects(model, scenario, 30)).toHaveLength(1);
++  });
++
++  it("leaves a one tick window closed on the tick after", () => {
++    const scenario = model.scenarios["long-winter"]!;
++    expect(firingEffects(model, scenario, 31)).toEqual([]);
++  });
++
++  it("reaches every pool of a resource when no region is named", () => {
++    const pools = [
++      { resource: "fresh-water", region: "ice-river", quantity: 1n },
++      { resource: "fresh-water", region: "northern-basin", quantity: 1n },
++      { resource: "mineral-salt", region: "southern-ridge", quantity: 1n },
++    ];
++    const effect = { resource: "fresh-water", quantity: -1n, forTicks: 1 };
++    expect(targetPools(pools, effect)).toHaveLength(2);
++  });
++
++  it("narrows to the region an effect names", () => {
++    const pools = initialPools(model.scenarios["baseline"]!);
++    const effect = {
++      resource: "fresh-water",
++      region: "ice-river",
++      quantity: -1n,
++      forTicks: 1,
++    };
++    const indices = targetPools(pools, effect);
++    expect(indices.map((index) => pools[index]?.region)).toEqual(["ice-river"]);
++  });
++
++  it("splits a quantity in proportion to what each pool holds", () => {
++    const pools = [
++      { resource: "fresh-water", region: "ice-river", quantity: 3_000_000n },
++      { resource: "fresh-water", region: "northern-basin", quantity: 9_000_000n },
++    ];
++    const shares = spreadQuantity(pools, [0, 1], 400_000_000n);
++    expect(shares.get(0)).toBe(100_000_000n);
++    expect(shares.get(1)).toBe(300_000_000n);
++  });
++
++  it("splits evenly when the pools hold nothing", () => {
++    const pools = [
++      { resource: "fresh-water", region: "ice-river", quantity: 0n },
++      { resource: "fresh-water", region: "northern-basin", quantity: 0n },
++    ];
++    const shares = spreadQuantity(pools, [0, 1], 7n);
++    expect([shares.get(0), shares.get(1)]).toEqual([4n, 3n]);
++  });
++});
+diff --git a/packages/tick-runtime/src/events.ts b/packages/tick-runtime/src/events.ts
+new file mode 100644
+index 0000000..380b06e
+--- /dev/null
++++ b/packages/tick-runtime/src/events.ts
+@@ -0,0 +1,200 @@
++import {
++  coversTick,
++  isModifierEffect,
++  isQuantityEffect,
++  type CompiledBiome,
++  type EventEffect,
++  type ScenarioRecord,
++} from "@biomeweaver/biome-model";
++import {
++  assignRemainders,
++  min,
++  proportionalShares,
++  type Fixed,
++  type RemainderShare,
++} from "@biomeweaver/fixed-point";
++import { resourceFlow, type AttributedFlow } from "@biomeweaver/flow-explanations";
++import type { ModifierOverride } from "@biomeweaver/resource-engine";
++import type { PoolState } from "./state.js";
++
++/** One authored effect, together with the event that carries it. */
++export type FiringEffect = {
++  readonly event: string;
++  readonly effect: EventEffect;
++};
++
++export type DisturbanceResult = {
++  readonly pools: readonly PoolState[];
++  readonly flows: readonly AttributedFlow[];
++  readonly overrides: readonly ModifierOverride[];
++};
++
++/**
++ * Every effect that is running on `tick`.
++ *
++ * A scenario hook opens each of its event's effects on the hook's own tick and
++ * holds it open for that effect's window. Hooks are read in tick order and then
++ * by event id, so two disturbances that open on one tick always fire in the
++ * same order whatever order the scenario file listed them in.
++ */
++export function firingEffects(
++  model: CompiledBiome,
++  scenario: ScenarioRecord,
++  tick: number,
++): FiringEffect[] {
++  const hooks = [...scenario.events].sort(
++    (left, right) => left.atTick - right.atTick || left.event.localeCompare(right.event),
++  );
++  const firing: FiringEffect[] = [];
++  for (const hook of hooks) {
++    const event = model.events[hook.event];
++    if (!event) {
++      continue;
++    }
++    for (const effect of event.effects) {
++      if (coversTick(hook.atTick, effect, tick)) {
++        firing.push({ event: event.id, effect });
++      }
++    }
++  }
++  return firing;
++}
++
++/**
++ * Indices of the pools an effect reaches, in region id order. An effect that
++ * names a region reaches that region alone; one that names none reaches every
++ * pool of the resource.
++ */
++export function targetPools(pools: readonly PoolState[], effect: EventEffect): number[] {
++  const indices: number[] = [];
++  for (const [index, pool] of pools.entries()) {
++    if (pool.resource !== effect.resource) {
++      continue;
++    }
++    if (effect.region !== undefined && pool.region !== effect.region) {
++      continue;
++    }
++    indices.push(index);
++  }
++  return indices.sort((left, right) => {
++    const leftPool = pools[left];
++    const rightPool = pools[right];
++    const byRegion = (leftPool?.region ?? "").localeCompare(rightPool?.region ?? "");
++    return byRegion !== 0 ? byRegion : left - right;
++  });
++}
++
++/**
++ * Split `magnitude` over the targeted pools in proportion to what each one
++ * holds. Floor division leaves a remainder below the number of targets, and
++ * that remainder walks the targets in region id order, one unit each. Targets
++ * that hold nothing between them split the magnitude evenly instead, so an
++ * addition into an empty biome still lands somewhere.
++ */
++export function spreadQuantity(
++  pools: readonly PoolState[],
++  indices: readonly number[],
++  magnitude: Fixed,
++): Map<number, Fixed> {
++  const holdings = indices.map((index) => pools[index]?.quantity ?? 0n);
++  const held = holdings.reduce((sum, quantity) => sum + quantity, 0n);
++  const weights: RemainderShare[] = indices.map((index, position) => ({
++    key: String(index),
++    amount: held === 0n ? 1n : (holdings[position] ?? 0n),
++  }));
++  const shares = proportionalShares(weights, magnitude);
++  const order = indices.map((index) => String(index));
++  const assigned = assignRemainders(shares.assigned, shares.remainder, order);
++  const byIndex = new Map<number, Fixed>();
++  for (const share of assigned) {
++    byIndex.set(Number(share.key), share.amount);
++  }
++  return byIndex;
++}
++
++function quantityEffect(
++  pools: readonly PoolState[],
++  firing: FiringEffect,
++  tick: number,
++  scale: bigint,
++): { readonly pools: readonly PoolState[]; readonly flows: readonly AttributedFlow[] } {
++  const effect = firing.effect;
++  if (!isQuantityEffect(effect)) {
++    return { pools, flows: [] };
++  }
++  const indices = targetPools(pools, effect);
++  if (indices.length === 0) {
++    return { pools, flows: [] };
++  }
++  const adding = effect.quantity >= 0n;
++  const magnitude = adding ? effect.quantity : -effect.quantity;
++  const shares = spreadQuantity(pools, indices, magnitude);
++  const next = pools.map((pool) => ({ ...pool }));
++  const flows: AttributedFlow[] = [];
++  for (const index of indices) {
++    const pool = next[index];
++    const share = shares.get(index) ?? 0n;
++    if (!pool || share === 0n) {
++      continue;
++    }
++    const moved = adding ? share : min(share, pool.quantity);
++    if (moved === 0n) {
++      continue;
++    }
++    next[index] = { ...pool, quantity: adding ? pool.quantity + moved : pool.quantity - moved };
++    flows.push(
++      resourceFlow(
++        tick,
++        adding ? "resource-increase" : "resource-decrease",
++        effect.resource,
++        pool.region,
++        moved,
++        scale,
++        "fixed-event",
++        `events.${firing.event}`,
++      ),
++    );
++  }
++  return { pools: next, flows };
++}
++
++function modifierOverride(firing: FiringEffect): ModifierOverride | undefined {
++  const effect = firing.effect;
++  if (!isModifierEffect(effect)) {
++    return undefined;
++  }
++  return effect.region === undefined
++    ? { key: effect.modifier, factor: effect.factor }
++    : { key: effect.modifier, factor: effect.factor, region: effect.region };
++}
++
++/**
++ * Phase one of a tick: run every disturbance that covers this tick.
++ *
++ * Quantity effects move resource pools straight away and publish one flow per
++ * pool that actually moved, carrying that pool's own region and the amount the
++ * pool really gave up or took on. Modifier effects publish nothing of their
++ * own; they hand back a scaling that renewal applies later in the same tick,
++ * and the renewal flow reports the difference they made.
++ */
++export function applyFixedEvents(
++  model: CompiledBiome,
++  scenario: ScenarioRecord,
++  tick: number,
++  pools: readonly PoolState[],
++): DisturbanceResult {
++  const scale = model.precision.scale;
++  let current: readonly PoolState[] = pools.map((pool) => ({ ...pool }));
++  const flows: AttributedFlow[] = [];
++  const overrides: ModifierOverride[] = [];
++  for (const firing of firingEffects(model, scenario, tick)) {
++    const moved = quantityEffect(current, firing, tick, scale);
++    current = moved.pools;
++    flows.push(...moved.flows);
++    const override = modifierOverride(firing);
++    if (override) {
++      overrides.push(override);
++    }
++  }
++  return { pools: current, flows, overrides };
++}
+diff --git a/packages/tick-runtime/src/index.ts b/packages/tick-runtime/src/index.ts
+index 27d02bb..556c158 100644
+--- a/packages/tick-runtime/src/index.ts
++++ b/packages/tick-runtime/src/index.ts
+@@ -1,2 +1,10 @@
+ export { PHASES, advanceTick, initialState, simulate } from "./advance.js";
++export {
++  applyFixedEvents,
++  firingEffects,
++  spreadQuantity,
++  targetPools,
++  type DisturbanceResult,
++  type FiringEffect,
++} from "./events.js";
+ export { initialPools, type PoolState, type TickState } from "./state.js";

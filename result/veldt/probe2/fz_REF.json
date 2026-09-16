@@ -1,0 +1,1973 @@
+{
+"SELECT DISTINCT v FROM b EXCEPT ALL SELECT count(*) AS v FROM a INTERSECT SELECT v FROM b UNION SELECT v FROM b ORDER BY v ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT DISTINCT v FROM b EXCEPT ALL SELECT count(*) AS v FROM a UNION ALL SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT v FROM c": {
+"est0": 1,
+"est1": 1,
+"explain": "Except: all\n  Union: all\n    Except: all\n      Distinct\n        Project: v\n          Scan: b\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n  Project: v\n    Scan: c",
+"plan_opt": "Except(left=Union(left=Except(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[2.0, None, 3.0, 2.0]",
+"rows1024": "[2.0, None, 3.0, 2.0]",
+"rows3": "[2.0, None, 3.0, 2.0]"
+},
+"SELECT DISTINCT v FROM b EXCEPT ALL SELECT v FROM a LIMIT 2 ORDER BY v DESC": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT DISTINCT v FROM b EXCEPT ALL SELECT v FROM a LIMIT 2 UNION ALL SELECT v FROM c UNION SELECT v FROM c ORDER BY v": {
+"est0": 5,
+"est1": 5,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Union: all\n        Except: all\n          Distinct\n            Project: v\n              Scan: b\n          Limit: count=2 offset=0\n            Project: v\n              Scan: a\n        Project: v\n          Scan: c\n      Project: v\n        Scan: c",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Union(left=Except(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 1.0, 2.0, 2, 3, 3.5, 5.0]",
+"rows1024": "[None, 1.0, 2.0, 2, 3, 3.5, 5.0]",
+"rows3": "[None, 1.0, 2.0, 2, 3, 3.5, 5.0]"
+},
+"SELECT DISTINCT v FROM b EXCEPT ALL SELECT v FROM f INTERSECT ALL SELECT v FROM b ORDER BY v ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT DISTINCT v FROM b EXCEPT SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM b": {
+"est0": 0,
+"est1": 0,
+"explain": "Except: distinct\n  Distinct\n    Project: v\n      Scan: b\n  Intersect: all\n    Distinct\n      Project: v\n        Scan: b\n    Project: v\n      Scan: b",
+"plan_opt": "Except(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), all=False)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT DISTINCT v FROM b EXCEPT SELECT DISTINCT v FROM b UNION ALL SELECT v FROM a ORDER BY v DESC": {
+"est0": 5,
+"est1": 5,
+"explain": "Sort: v DESC NULLS LAST\n  Union: all\n    Except: distinct\n      Distinct\n        Project: v\n          Scan: b\n      Distinct\n        Project: v\n          Scan: b\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Union(left=Except(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3, 2, 1, 1, None]",
+"rows1024": "[3, 2, 1, 1, None]",
+"rows3": "[3, 2, 1, 1, None]"
+},
+"SELECT DISTINCT v FROM b EXCEPT SELECT v FROM a": {
+"est0": 0,
+"est1": 0,
+"explain": "Except: distinct\n  Distinct\n    Project: v\n      Scan: b\n  Project: v\n    Scan: a",
+"plan_opt": "Except(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT DISTINCT v FROM b EXCEPT SELECT v FROM b ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Except: distinct\n    Distinct\n      Project: v\n        Scan: b\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Except(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT DISTINCT v FROM b INTERSECT ALL SELECT DISTINCT v FROM b ORDER BY v DESC": {
+"est0": 4,
+"est1": 4,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: all\n    Distinct\n      Project: v\n        Scan: b\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[5, 2, None]",
+"rows1024": "[5, 2, None]",
+"rows3": "[5, 2, None]"
+},
+"SELECT DISTINCT v FROM b INTERSECT ALL SELECT count(*) AS v FROM a INTERSECT SELECT v FROM a WHERE v > 1 UNION ALL SELECT v FROM c ORDER BY v NULLS FIRST": {
+"est0": 4,
+"est1": 4,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Intersect: distinct\n      Intersect: all\n        Distinct\n          Project: v\n            Scan: b\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n    Project: v\n      Scan: c",
+"plan_opt": "Sort(input=Union(left=Intersect(left=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[1.0, 2, 3, 3.5]",
+"rows1024": "[1.0, 2, 3, 3.5]",
+"rows3": "[1.0, 2, 3, 3.5]"
+},
+"SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM a LIMIT 2 UNION ALL SELECT v FROM b ORDER BY v UNION ALL SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM b ORDER BY v INTERSECT ALL SELECT v FROM c UNION SELECT v FROM a LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Distinct\n    Union: distinct\n      Intersect: all\n        Intersect: all\n          Distinct\n            Project: v\n              Scan: b\n          Project: v\n            Sort: v ASC NULLS FIRST\n              Scan: b\n        Project: v\n          Scan: c\n      Project: v\n        Scan: a",
+"plan_opt": "Limit(input=Distinct(input=Union(left=Intersect(left=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), count=2, offset=1)",
+"rows1": "[1.0, 2.0]",
+"rows1024": "[1.0, 2.0]",
+"rows3": "[1.0, 2.0]"
+},
+"SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM b ORDER BY v LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Sort: v ASC NULLS FIRST\n    Intersect: all\n      Distinct\n        Project: v\n          Scan: b\n      Project: v\n        Scan: b",
+"plan_opt": "Limit(input=Sort(input=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=1)",
+"rows1": "[2, 5]",
+"rows1024": "[2, 5]",
+"rows3": "[2, 5]"
+},
+"SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM c INTERSECT SELECT v FROM b LIMIT 2 OFFSET 1": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=1\n  Intersect: distinct\n    Intersect: all\n      Distinct\n        Project: v\n          Scan: b\n      Project: v\n        Scan: c\n    Project: v\n      Scan: b",
+"plan_opt": "Limit(input=Intersect(left=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), count=2, offset=1)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT DISTINCT v FROM b INTERSECT SELECT count(*) AS v FROM a ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: distinct\n    Distinct\n      Project: v\n        Scan: b\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT DISTINCT v FROM b INTERSECT SELECT v FROM a WHERE v > 1 ORDER BY v DESC": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: distinct\n    Distinct\n      Project: v\n        Scan: b\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[2]",
+"rows1024": "[2]",
+"rows3": "[2]"
+},
+"SELECT DISTINCT v FROM b INTERSECT SELECT v FROM a WHERE v > 1 UNION ALL SELECT count(*) AS v FROM a ORDER BY v": {
+"est0": 2,
+"est1": 2,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Intersect: distinct\n      Distinct\n        Project: v\n          Scan: b\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Union(left=Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[2, 5]",
+"rows1024": "[2, 5]",
+"rows3": "[2, 5]"
+},
+"SELECT DISTINCT v FROM b INTERSECT SELECT v FROM c": {
+"est0": 2,
+"est1": 2,
+"explain": "Intersect: distinct\n  Distinct\n    Project: v\n      Scan: b\n  Project: v\n    Scan: c",
+"plan_opt": "Intersect(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT DISTINCT v FROM b INTERSECT SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT DISTINCT v FROM b UNION ALL SELECT count(*) AS v FROM a LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Union: all\n    Distinct\n      Project: v\n        Scan: b\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Limit(input=Union(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), count=2, offset=1)",
+"rows1": "[5, None]",
+"rows1024": "[5, None]",
+"rows3": "[5, None]"
+},
+"SELECT DISTINCT v FROM b UNION ALL SELECT count(*) AS v FROM a ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Union: all\n      Distinct\n        Project: v\n          Scan: b\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a",
+"plan_opt": "Limit(input=Sort(input=Union(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 2]",
+"rows1024": "[None, 2]",
+"rows3": "[None, 2]"
+},
+"SELECT DISTINCT v FROM b UNION ALL SELECT v FROM a ORDER BY v DESC": {
+"est0": 9,
+"est1": 9,
+"explain": "Sort: v DESC NULLS LAST\n  Union: all\n    Distinct\n      Project: v\n        Scan: b\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Union(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[5, 3, 2, 2, 1, 1, None, None]",
+"rows1024": "[5, 3, 2, 2, 1, 1, None, None]",
+"rows3": "[5, 3, 2, 2, 1, 1, None, None]"
+},
+"SELECT DISTINCT v FROM b UNION ALL SELECT v FROM a WHERE v > 1 ORDER BY v": {
+"est0": 6,
+"est1": 6,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Distinct\n      Project: v\n        Scan: b\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Sort(input=Union(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 2, 2, 3, 5]",
+"rows1024": "[None, 2, 2, 3, 5]",
+"rows3": "[None, 2, 2, 3, 5]"
+},
+"SELECT DISTINCT v FROM b UNION ALL SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM c UNION SELECT v FROM a ORDER BY v NULLS FIRST": {
+"est0": 4,
+"est1": 4,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Except: distinct\n        Union: all\n          Distinct\n            Project: v\n              Scan: b\n          Project: v\n            Sort: v ASC NULLS FIRST\n              Scan: b\n        Project: v\n          Scan: c\n      Project: v\n        Scan: a",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Except(left=Union(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, 1.0, 2.0, 3.0, 5.0]",
+"rows1024": "[None, 1.0, 2.0, 3.0, 5.0]",
+"rows3": "[None, 1.0, 2.0, 3.0, 5.0]"
+},
+"SELECT DISTINCT v FROM b UNION ALL SELECT v FROM b ORDER BY v INTERSECT SELECT v FROM b ORDER BY v NULLS FIRST": {
+"est0": 7,
+"est1": 7,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Distinct\n      Project: v\n        Scan: b\n    Intersect: distinct\n      Project: v\n        Sort: v ASC NULLS FIRST\n          Scan: b\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Union(left=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), right=Intersect(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, None, 2, 2, 5, 5]",
+"rows1024": "[None, None, 2, 2, 5, 5]",
+"rows3": "[None, None, 2, 2, 5, 5]"
+},
+"SELECT DISTINCT v FROM b UNION SELECT v FROM a LIMIT 2 LIMIT 2 OFFSET 1": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col"
+},
+"SELECT DISTINCT v FROM b UNION SELECT v FROM a LIMIT 2 ORDER BY v DESC": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT DISTINCT v FROM b UNION SELECT v FROM b ORDER BY v ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT DISTINCT v FROM b UNION SELECT v FROM f UNION ALL SELECT v FROM a LIMIT 2 ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT count(*) AS v FROM a EXCEPT ALL SELECT DISTINCT v FROM b ORDER BY v NULLS FIRST": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: all\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT count(*) AS v FROM a EXCEPT ALL SELECT count(*) AS v FROM a ORDER BY v LIMIT 2": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: all\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a",
+"plan_opt": "Limit(input=Sort(input=Except(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT count(*) AS v FROM a EXCEPT ALL SELECT v FROM c LIMIT 2 OFFSET 1": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=1\n  Except: all\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a\n    Project: v\n      Scan: c",
+"plan_opt": "Limit(input=Except(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), count=2, offset=1)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT count(*) AS v FROM a EXCEPT SELECT count(*) AS v FROM a UNION SELECT v FROM b ORDER BY v DESC": {
+"est0": 2,
+"est1": 2,
+"explain": "Sort: v DESC NULLS LAST\n  Distinct\n    Union: distinct\n      Except: distinct\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Except(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[5, 2, None]",
+"rows1024": "[5, 2, None]",
+"rows3": "[5, 2, None]"
+},
+"SELECT count(*) AS v FROM a EXCEPT SELECT v FROM a EXCEPT ALL SELECT v FROM a EXCEPT ALL SELECT v FROM b ORDER BY v ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT count(*) AS v FROM a EXCEPT SELECT v FROM a WHERE v > 1 ORDER BY v NULLS FIRST": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: distinct\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Sort(input=Except(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT count(*) AS v FROM a INTERSECT ALL SELECT count(*) AS v FROM a INTERSECT SELECT v FROM b UNION ALL SELECT v FROM b ORDER BY v NULLS FIRST": {
+"est0": 5,
+"est1": 5,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Intersect: distinct\n      Intersect: all\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n      Project: v\n        Scan: b\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Union(left=Intersect(left=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, None, 2, 2, 5, 5]",
+"rows1024": "[None, None, 2, 2, 5, 5]",
+"rows3": "[None, None, 2, 2, 5, 5]"
+},
+"SELECT count(*) AS v FROM a INTERSECT ALL SELECT count(*) AS v FROM a UNION SELECT v FROM b ORDER BY v ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT count(*) AS v FROM a INTERSECT ALL SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT count(*) AS v FROM a UNION ALL SELECT count(*) AS v FROM a ORDER BY v": {
+"est0": 2,
+"est1": 2,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Intersect: all\n      Intersect: all\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n        Project: v\n          Filter: (v > 1)\n            Scan: a\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Union(left=Intersect(left=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT count(*) AS v FROM a INTERSECT ALL SELECT v FROM b EXCEPT ALL SELECT v FROM c UNION ALL SELECT v FROM c": {
+"est0": 4,
+"est1": 4,
+"explain": "Union: all\n  Except: all\n    Intersect: all\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a\n      Project: v\n        Scan: b\n    Project: v\n      Scan: c\n  Project: v\n    Scan: c",
+"plan_opt": "Union(left=Except(left=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[5.0, 1.0, 2, 3.5, 3]",
+"rows1024": "[5.0, 1.0, 2, 3.5, 3]",
+"rows3": "[5.0, 1.0, 2, 3.5, 3]"
+},
+"SELECT count(*) AS v FROM a INTERSECT ALL SELECT v FROM b ORDER BY v ORDER BY v DESC": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT count(*) AS v FROM a INTERSECT SELECT v FROM a ORDER BY v LIMIT 2": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Intersect: distinct\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a\n      Project: v\n        Scan: a",
+"plan_opt": "Limit(input=Sort(input=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT count(*) AS v FROM a INTERSECT SELECT v FROM b ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: distinct\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT count(*) AS v FROM a INTERSECT SELECT v FROM b ORDER BY v LIMIT 2 OFFSET 1": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=1\n  Sort: v ASC NULLS FIRST\n    Intersect: distinct\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Limit(input=Sort(input=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=1)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT count(*) AS v FROM a INTERSECT SELECT v FROM c ORDER BY v NULLS FIRST": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Intersect: distinct\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a\n    Project: v\n      Scan: c",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT count(*) AS v FROM a UNION ALL SELECT DISTINCT v FROM b LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Union: all\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Limit(input=Union(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), count=2, offset=1)",
+"rows1": "[2, 5]",
+"rows1024": "[2, 5]",
+"rows3": "[2, 5]"
+},
+"SELECT count(*) AS v FROM a UNION ALL SELECT count(*) AS v FROM a EXCEPT SELECT count(*) AS v FROM a UNION ALL SELECT count(*) AS v FROM a ORDER BY v LIMIT 2": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Union: all\n      Except: distinct\n        Union: all\n          Project: \"count(*)\" AS v\n            Aggregate: groupBy=() aggregates=count(*)\n              Scan: a\n          Project: \"count(*)\" AS v\n            Aggregate: groupBy=() aggregates=count(*)\n              Scan: a\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a",
+"plan_opt": "Limit(input=Sort(input=Union(left=Except(left=Union(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT count(*) AS v FROM a UNION ALL SELECT v FROM c UNION SELECT v FROM a LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Distinct\n    Union: distinct\n      Union: all\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n        Project: v\n          Scan: c\n      Project: v\n        Scan: a",
+"plan_opt": "Limit(input=Distinct(input=Union(left=Union(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), count=2, offset=1)",
+"rows1": "[1.0, 2]",
+"rows1024": "[1.0, 2]",
+"rows3": "[1.0, 2]"
+},
+"SELECT count(*) AS v FROM a UNION SELECT v FROM b": {
+"est0": 3,
+"est1": 3,
+"explain": "Distinct\n  Union: distinct\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a\n    Project: v\n      Scan: b",
+"plan_opt": "Distinct(input=Union(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False))",
+"rows1": "[5, 2, None]",
+"rows1024": "[5, 2, None]",
+"rows3": "[5, 2, None]"
+},
+"SELECT count(*) AS v FROM a UNION SELECT v FROM b ORDER BY v": {
+"est0": 3,
+"est1": 3,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 2, 5]",
+"rows1024": "[None, 2, 5]",
+"rows3": "[None, 2, 5]"
+},
+"SELECT v FROM a EXCEPT ALL SELECT DISTINCT v FROM b ORDER BY v LIMIT 2": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: all\n      Project: v\n        Scan: a\n      Distinct\n        Project: v\n          Scan: b",
+"plan_opt": "Limit(input=Sort(input=Except(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[1, 1]",
+"rows1024": "[1, 1]",
+"rows3": "[1, 1]"
+},
+"SELECT v FROM a EXCEPT ALL SELECT v FROM a WHERE v > 1 ORDER BY v NULLS FIRST": {
+"est0": 3,
+"est1": 3,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: all\n    Project: v\n      Scan: a\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Sort(input=Except(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, 1, 1]",
+"rows1024": "[None, 1, 1]",
+"rows3": "[None, 1, 1]"
+},
+"SELECT v FROM a EXCEPT ALL SELECT v FROM b UNION SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a EXCEPT SELECT v FROM a LIMIT 2 ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a EXCEPT SELECT v FROM a LIMIT 2 UNION SELECT v FROM c ORDER BY v NULLS FIRST": {
+"est0": 3,
+"est1": 3,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Except: distinct\n        Project: v\n          Scan: a\n        Limit: count=2 offset=0\n          Project: v\n            Scan: a\n      Project: v\n        Scan: c",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Except(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), all=False), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, 1.0, 2.0, 2, 3, 3.5]",
+"rows1024": "[None, 1.0, 2.0, 2, 3, 3.5]",
+"rows3": "[None, 1.0, 2.0, 2, 3, 3.5]"
+},
+"SELECT v FROM a EXCEPT SELECT v FROM a WHERE v > 1 ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: distinct\n      Project: v\n        Scan: a\n      Project: v\n        Filter: (v > 1)\n          Scan: a",
+"plan_opt": "Limit(input=Sort(input=Except(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 1]",
+"rows1024": "[None, 1]",
+"rows3": "[None, 1]"
+},
+"SELECT v FROM a EXCEPT SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a EXCEPT SELECT v FROM f UNION SELECT v FROM b ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a INTERSECT ALL SELECT DISTINCT v FROM b UNION ALL SELECT v FROM b ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Union: all\n      Intersect: all\n        Project: v\n          Scan: a\n        Distinct\n          Project: v\n            Scan: b\n      Project: v\n        Scan: b",
+"plan_opt": "Limit(input=Sort(input=Union(left=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, None]",
+"rows1024": "[None, None]",
+"rows3": "[None, None]"
+},
+"SELECT v FROM a INTERSECT ALL SELECT v FROM a INTERSECT ALL SELECT v FROM b UNION SELECT v FROM a WHERE v > 1 ORDER BY v": {
+"est0": 3,
+"est1": 3,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Intersect: all\n        Intersect: all\n          Project: v\n            Scan: a\n          Project: v\n            Scan: a\n        Project: v\n          Scan: b\n      Project: v\n        Filter: (v > 1)\n          Scan: a",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 2, 3]",
+"rows1024": "[None, 2, 3]",
+"rows3": "[None, 2, 3]"
+},
+"SELECT v FROM a INTERSECT ALL SELECT v FROM a WHERE v > 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Intersect: all\n  Project: v\n    Scan: a\n  Project: v\n    Filter: (v > 1)\n      Scan: a",
+"plan_opt": "Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[3, 2]",
+"rows1024": "[3, 2]",
+"rows3": "[3, 2]"
+},
+"SELECT v FROM a INTERSECT ALL SELECT v FROM b ORDER BY v ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a INTERSECT SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM b ORDER BY v": {
+"est0": 2,
+"est1": 2,
+"explain": "Sort: v ASC NULLS FIRST\n  Intersect: all\n    Intersect: distinct\n      Project: v\n        Scan: a\n      Distinct\n        Project: v\n          Scan: b\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 2]",
+"rows1024": "[None, 2]",
+"rows3": "[None, 2]"
+},
+"SELECT v FROM a INTERSECT SELECT count(*) AS v FROM a ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: distinct\n    Project: v\n      Scan: a\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a INTERSECT SELECT v FROM a LIMIT 2 INTERSECT SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM c": {
+"est0": 0,
+"est1": 0,
+"explain": "Intersect: all\n  Intersect: distinct\n    Intersect: distinct\n      Project: v\n        Scan: a\n      Limit: count=2 offset=0\n        Project: v\n          Scan: a\n    Distinct\n      Project: v\n        Scan: b\n  Project: v\n    Scan: c",
+"plan_opt": "Intersect(left=Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), all=False), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a INTERSECT SELECT v FROM b ORDER BY v INTERSECT ALL SELECT count(*) AS v FROM a ORDER BY v NULLS FIRST": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v ASC NULLS FIRST\n  Intersect: all\n    Intersect: distinct\n      Project: v\n        Scan: a\n      Project: v\n        Sort: v ASC NULLS FIRST\n          Scan: b\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a INTERSECT SELECT v FROM b ORDER BY v INTERSECT ALL SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM c": {
+"est0": 0,
+"est1": 0,
+"explain": "Except: distinct\n  Intersect: all\n    Intersect: distinct\n      Project: v\n        Scan: a\n      Project: v\n        Sort: v ASC NULLS FIRST\n          Scan: b\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n  Project: v\n    Scan: c",
+"plan_opt": "Except(left=Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)",
+"rows1": "[2.0]",
+"rows1024": "[2.0]",
+"rows3": "[2.0]"
+},
+"SELECT v FROM a LIMIT 2 EXCEPT ALL SELECT DISTINCT v FROM b": {
+"est0": 0,
+"est1": 0,
+"explain": "Except: all\n  Limit: count=2 offset=0\n    Project: v\n      Scan: a\n  Distinct\n    Project: v\n      Scan: b",
+"plan_opt": "Except(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True)",
+"rows1": "[3, 1]",
+"rows1024": "[3, 1]",
+"rows3": "[3, 1]"
+},
+"SELECT v FROM a LIMIT 2 EXCEPT ALL SELECT DISTINCT v FROM b UNION ALL SELECT v FROM a WHERE v > 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Union: all\n  Except: all\n    Limit: count=2 offset=0\n      Project: v\n        Scan: a\n    Distinct\n      Project: v\n        Scan: b\n  Project: v\n    Filter: (v > 1)\n      Scan: a",
+"plan_opt": "Union(left=Except(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[3, 1, 3, 2]",
+"rows1024": "[3, 1, 3, 2]",
+"rows3": "[3, 1, 3, 2]"
+},
+"SELECT v FROM a LIMIT 2 EXCEPT ALL SELECT count(*) AS v FROM a LIMIT 2 OFFSET 1": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=1\n  Except: all\n    Limit: count=2 offset=0\n      Project: v\n        Scan: a\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Limit(input=Except(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), count=2, offset=1)",
+"rows1": "[1]",
+"rows1024": "[1]",
+"rows3": "[1]"
+},
+"SELECT v FROM a LIMIT 2 EXCEPT SELECT DISTINCT v FROM b UNION SELECT v FROM c INTERSECT ALL SELECT v FROM f LIMIT 2 OFFSET 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a LIMIT 2 EXCEPT SELECT v FROM a WHERE v > 1 ORDER BY v NULLS FIRST": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: distinct\n    Limit: count=2 offset=0\n      Project: v\n        Scan: a\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Sort(input=Except(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[1]",
+"rows1024": "[1]",
+"rows3": "[1]"
+},
+"SELECT v FROM a LIMIT 2 EXCEPT SELECT v FROM b INTERSECT SELECT v FROM a LIMIT 2 INTERSECT SELECT v FROM a ORDER BY v DESC": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v DESC NULLS LAST\n  Except: distinct\n    Limit: count=2 offset=0\n      Project: v\n        Scan: a\n    Intersect: distinct\n      Intersect: distinct\n        Project: v\n          Scan: b\n        Limit: count=2 offset=0\n          Project: v\n            Scan: a\n      Project: v\n        Scan: a",
+"plan_opt": "Sort(input=Except(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), all=False), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3, 1]",
+"rows1024": "[3, 1]",
+"rows3": "[3, 1]"
+},
+"SELECT v FROM a LIMIT 2 EXCEPT SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT ALL SELECT count(*) AS v FROM a": {
+"est0": 1,
+"est1": 1,
+"explain": "Intersect: all\n  Limit: count=2 offset=0\n    Project: v\n      Scan: a\n  Project: \"count(*)\" AS v\n    Aggregate: groupBy=() aggregates=count(*)\n      Scan: a",
+"plan_opt": "Intersect(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT ALL SELECT v FROM a INTERSECT SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT ALL SELECT v FROM a LIMIT 2 UNION SELECT count(*) AS v FROM a EXCEPT ALL SELECT v FROM a LIMIT 2": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=0\n  Except: all\n    Distinct\n      Union: distinct\n        Intersect: all\n          Limit: count=2 offset=0\n            Project: v\n              Scan: a\n          Limit: count=2 offset=0\n            Project: v\n              Scan: a\n        Project: \"count(*)\" AS v\n          Aggregate: groupBy=() aggregates=count(*)\n            Scan: a\n    Project: v\n      Scan: a",
+"plan_opt": "Limit(input=Except(left=Distinct(input=Union(left=Intersect(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), count=2, offset=0)",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT ALL SELECT v FROM b ORDER BY v UNION ALL SELECT v FROM a LIMIT 2 INTERSECT SELECT DISTINCT v FROM b": {
+"est0": 3,
+"est1": 3,
+"explain": "Union: all\n  Intersect: all\n    Limit: count=2 offset=0\n      Project: v\n        Scan: a\n    Project: v\n      Sort: v ASC NULLS FIRST\n        Scan: b\n  Intersect: distinct\n    Limit: count=2 offset=0\n      Project: v\n        Scan: a\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Union(left=Intersect(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Intersect(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False), all=True)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM a ORDER BY v DESC": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: all\n    Intersect: distinct\n      Limit: count=2 offset=0\n        Project: v\n          Scan: a\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Intersect(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3]",
+"rows1024": "[3]",
+"rows3": "[3]"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT SELECT v FROM b ORDER BY v": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v ASC NULLS FIRST\n  Intersect: distinct\n    Limit: count=2 offset=0\n      Project: v\n        Scan: a\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Intersect(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT SELECT v FROM b ORDER BY v LIMIT 2 OFFSET 1": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=1\n  Sort: v ASC NULLS FIRST\n    Intersect: distinct\n      Limit: count=2 offset=0\n        Project: v\n          Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Limit(input=Sort(input=Intersect(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=1)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a LIMIT 2 INTERSECT SELECT v FROM f LIMIT 2 OFFSET 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a LIMIT 2 UNION ALL SELECT v FROM b ORDER BY v EXCEPT SELECT count(*) AS v FROM a ORDER BY v NULLS FIRST": {
+"est0": 4,
+"est1": 4,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: distinct\n    Union: all\n      Limit: count=2 offset=0\n        Project: v\n          Scan: a\n      Project: v\n        Sort: v ASC NULLS FIRST\n          Scan: b\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Except(left=Union(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, 1, 2, 3]",
+"rows1024": "[None, 1, 2, 3]",
+"rows3": "[None, 1, 2, 3]"
+},
+"SELECT v FROM a LIMIT 2 UNION SELECT DISTINCT v FROM b ORDER BY v NULLS FIRST": {
+"est0": 3,
+"est1": 3,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Limit: count=2 offset=0\n        Project: v\n          Scan: a\n      Distinct\n        Project: v\n          Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, 1, 2, 3, 5]",
+"rows1024": "[None, 1, 2, 3, 5]",
+"rows3": "[None, 1, 2, 3, 5]"
+},
+"SELECT v FROM a LIMIT 2 UNION SELECT v FROM a LIMIT 2 ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a LIMIT 2 UNION SELECT v FROM a ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Distinct\n      Union: distinct\n        Limit: count=2 offset=0\n          Project: v\n            Scan: a\n        Project: v\n          Scan: a",
+"plan_opt": "Limit(input=Sort(input=Distinct(input=Union(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 1]",
+"rows1024": "[None, 1]",
+"rows3": "[None, 1]"
+},
+"SELECT v FROM a LIMIT 2 UNION SELECT v FROM a WHERE v > 1 ORDER BY v DESC": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v DESC NULLS LAST\n  Distinct\n    Union: distinct\n      Limit: count=2 offset=0\n        Project: v\n          Scan: a\n      Project: v\n        Filter: (v > 1)\n          Scan: a",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3, 2, 1]",
+"rows1024": "[3, 2, 1]",
+"rows3": "[3, 2, 1]"
+},
+"SELECT v FROM a LIMIT 2 UNION SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a UNION ALL SELECT DISTINCT v FROM b": {
+"est0": 9,
+"est1": 9,
+"explain": "Union: all\n  Project: v\n    Scan: a\n  Distinct\n    Project: v\n      Scan: b",
+"plan_opt": "Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True)",
+"rows1": "[3, 1, 2, 1, None, 2, 5, None]",
+"rows1024": "[3, 1, 2, 1, None, 2, 5, None]",
+"rows3": "[3, 1, 2, 1, None, 2, 5, None]"
+},
+"SELECT v FROM a UNION ALL SELECT v FROM a INTERSECT ALL SELECT count(*) AS v FROM a LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Union: all\n    Project: v\n      Scan: a\n    Intersect: all\n      Project: v\n        Scan: a\n      Project: \"count(*)\" AS v\n        Aggregate: groupBy=() aggregates=count(*)\n          Scan: a",
+"plan_opt": "Limit(input=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Intersect(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), all=True), count=2, offset=1)",
+"rows1": "[1, 2]",
+"rows1024": "[1, 2]",
+"rows3": "[1, 2]"
+},
+"SELECT v FROM a UNION ALL SELECT v FROM a LIMIT 2 ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a UNION ALL SELECT v FROM a UNION SELECT v FROM a WHERE v > 1 ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Distinct\n      Union: distinct\n        Union: all\n          Project: v\n            Scan: a\n          Project: v\n            Scan: a\n        Project: v\n          Filter: (v > 1)\n            Scan: a",
+"plan_opt": "Limit(input=Sort(input=Distinct(input=Union(left=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 1]",
+"rows1024": "[None, 1]",
+"rows3": "[None, 1]"
+},
+"SELECT v FROM a UNION ALL SELECT v FROM c ORDER BY v": {
+"est0": 9,
+"est1": 9,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Project: v\n      Scan: a\n    Project: v\n      Scan: c",
+"plan_opt": "Sort(input=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 1.0, 1.0, 1.0, 2.0, 2, 3.0, 3, 3.5]",
+"rows1024": "[None, 1.0, 1.0, 1.0, 2.0, 2, 3.0, 3, 3.5]",
+"rows3": "[None, 1.0, 1.0, 1.0, 2.0, 2, 3.0, 3, 3.5]"
+},
+"SELECT v FROM a UNION ALL SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Union: all\n      Project: v\n        Scan: a\n      Project: v\n        Scan: c",
+"plan_opt": "Limit(input=Sort(input=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 1.0]",
+"rows1024": "[None, 1.0]",
+"rows3": "[None, 1.0]"
+},
+"SELECT v FROM a UNION SELECT v FROM a LIMIT 2 EXCEPT SELECT count(*) AS v FROM a INTERSECT ALL SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a UNION SELECT v FROM a LIMIT 2 LIMIT 2 OFFSET 1": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a UNION SELECT v FROM a LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Distinct\n    Union: distinct\n      Project: v\n        Scan: a\n      Project: v\n        Scan: a",
+"plan_opt": "Limit(input=Distinct(input=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), count=2, offset=1)",
+"rows1": "[1, 2]",
+"rows1024": "[1, 2]",
+"rows3": "[1, 2]"
+},
+"SELECT v FROM a UNION SELECT v FROM b ORDER BY v": {
+"est0": 5,
+"est1": 5,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Project: v\n        Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 1, 2, 3, 5]",
+"rows1024": "[None, 1, 2, 3, 5]",
+"rows3": "[None, 1, 2, 3, 5]"
+},
+"SELECT v FROM a UNION SELECT v FROM b ORDER BY v INTERSECT ALL SELECT v FROM b ORDER BY v": {
+"est0": 5,
+"est1": 5,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Project: v\n        Scan: a\n      Intersect: all\n        Project: v\n          Sort: v ASC NULLS FIRST\n            Scan: b\n        Project: v\n          Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Intersect(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 1, 2, 3, 5]",
+"rows1024": "[None, 1, 2, 3, 5]",
+"rows3": "[None, 1, 2, 3, 5]"
+},
+"SELECT v FROM a UNION SELECT v FROM b ORDER BY v LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Sort: v ASC NULLS FIRST\n    Distinct\n      Union: distinct\n        Project: v\n          Scan: a\n        Project: v\n          Scan: b",
+"plan_opt": "Limit(input=Sort(input=Distinct(input=Union(left=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=1)",
+"rows1": "[1, 2]",
+"rows1024": "[1, 2]",
+"rows3": "[1, 2]"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT DISTINCT v FROM b EXCEPT ALL SELECT v FROM a ORDER BY v NULLS FIRST": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: all\n    Except: all\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n      Distinct\n        Project: v\n          Scan: b\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Except(left=Except(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT DISTINCT v FROM b ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Except: all\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3]",
+"rows1024": "[3]",
+"rows3": "[3]"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT v FROM b EXCEPT ALL SELECT v FROM f EXCEPT ALL SELECT count(*) AS v FROM a ORDER BY v DESC": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT v FROM c LIMIT 2 OFFSET 1": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=1\n  Except: all\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Scan: c",
+"plan_opt": "Limit(input=Except(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), count=2, offset=1)",
+"rows1": "[2.0]",
+"rows1024": "[2.0]",
+"rows3": "[2.0]"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT SELECT DISTINCT v FROM b ORDER BY v": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: distinct\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[3]",
+"rows1024": "[3]",
+"rows3": "[3]"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT SELECT DISTINCT v FROM b UNION ALL SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM a LIMIT 2 ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM b ORDER BY v ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM c": {
+"est0": 0,
+"est1": 0,
+"explain": "Except: distinct\n  Project: v\n    Filter: (v > 1)\n      Scan: a\n  Project: v\n    Scan: c",
+"plan_opt": "Except(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)",
+"rows1": "[3.0, 2.0]",
+"rows1024": "[3.0, 2.0]",
+"rows3": "[3.0, 2.0]"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM c UNION ALL SELECT DISTINCT v FROM b EXCEPT SELECT count(*) AS v FROM a ORDER BY v": {
+"est0": 2,
+"est1": 2,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: distinct\n    Union: all\n      Except: distinct\n        Project: v\n          Filter: (v > 1)\n            Scan: a\n        Project: v\n          Scan: c\n      Distinct\n        Project: v\n          Scan: b\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Except(left=Union(left=Except(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 2.0, 3.0]",
+"rows1024": "[None, 2.0, 3.0]",
+"rows3": "[None, 2.0, 3.0]"
+},
+"SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM c UNION SELECT count(*) AS v FROM a": {
+"est0": 1,
+"est1": 1,
+"explain": "Distinct\n  Union: distinct\n    Except: distinct\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n      Project: v\n        Scan: c\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Distinct(input=Union(left=Except(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False))",
+"rows1": "[3.0, 2.0, 5.0]",
+"rows1024": "[3.0, 2.0, 5.0]",
+"rows3": "[3.0, 2.0, 5.0]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT DISTINCT v FROM b EXCEPT SELECT v FROM c ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Except: distinct\n    Intersect: all\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n      Distinct\n        Project: v\n          Scan: b\n    Project: v\n      Scan: c",
+"plan_opt": "Sort(input=Except(left=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[2.0]",
+"rows1024": "[2.0]",
+"rows3": "[2.0]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM a LIMIT 2 OFFSET 1": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=1\n  Intersect: all\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Scan: a",
+"plan_opt": "Limit(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), count=2, offset=1)",
+"rows1": "[2]",
+"rows1024": "[2]",
+"rows3": "[2]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM a ORDER BY v DESC": {
+"est0": 2,
+"est1": 2,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: all\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3, 2]",
+"rows1024": "[3, 2]",
+"rows3": "[3, 2]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM b ORDER BY v LIMIT 2 OFFSET 1": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=1\n  Sort: v ASC NULLS FIRST\n    Intersect: all\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Limit(input=Sort(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=1)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM b ORDER BY v ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM c EXCEPT SELECT v FROM a ORDER BY v": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: distinct\n    Intersect: all\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n      Project: v\n        Scan: c\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Except(left=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM c INTERSECT SELECT v FROM b ORDER BY v ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM c LIMIT 2 OFFSET 1": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=1\n  Intersect: all\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Scan: c",
+"plan_opt": "Limit(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), count=2, offset=1)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM f UNION ALL SELECT v FROM b EXCEPT SELECT v FROM b ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT SELECT DISTINCT v FROM b": {
+"est0": 1,
+"est1": 1,
+"explain": "Intersect: distinct\n  Project: v\n    Filter: (v > 1)\n      Scan: a\n  Distinct\n    Project: v\n      Scan: b",
+"plan_opt": "Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False)",
+"rows1": "[2]",
+"rows1024": "[2]",
+"rows3": "[2]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT SELECT v FROM a ORDER BY v": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v ASC NULLS FIRST\n  Intersect: distinct\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[2, 3]",
+"rows1024": "[2, 3]",
+"rows3": "[2, 3]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT SELECT v FROM a ORDER BY v DESC": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: distinct\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3, 2]",
+"rows1024": "[3, 2]",
+"rows3": "[3, 2]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT SELECT v FROM a WHERE v > 1 INTERSECT ALL SELECT v FROM f ORDER BY v DESC": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT SELECT v FROM a WHERE v > 1 LIMIT 2 OFFSET 1": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=1\n  Intersect: distinct\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Limit(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), count=2, offset=1)",
+"rows1": "[2]",
+"rows1024": "[2]",
+"rows3": "[2]"
+},
+"SELECT v FROM a WHERE v > 1 INTERSECT SELECT v FROM b LIMIT 2 OFFSET 1": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=1\n  Intersect: distinct\n    Project: v\n      Filter: (v > 1)\n        Scan: a\n    Project: v\n      Scan: b",
+"plan_opt": "Limit(input=Intersect(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), count=2, offset=1)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM a WHERE v > 1 UNION ALL SELECT v FROM a ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Union: all\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n      Project: v\n        Scan: a",
+"plan_opt": "Limit(input=Sort(input=Union(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 1]",
+"rows1024": "[None, 1]",
+"rows3": "[None, 1]"
+},
+"SELECT v FROM a WHERE v > 1 UNION ALL SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM a WHERE v > 1 UNION SELECT v FROM b ORDER BY v DESC": {
+"est0": 3,
+"est1": 3,
+"explain": "Sort: v DESC NULLS LAST\n  Distinct\n    Union: distinct\n      Project: v\n        Filter: (v > 1)\n          Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[5, 3, 2, None]",
+"rows1024": "[5, 3, 2, None]",
+"rows3": "[5, 3, 2, None]"
+},
+"SELECT v FROM a WHERE v > 1 UNION SELECT v FROM b ORDER BY v INTERSECT SELECT v FROM b ORDER BY v ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM a WHERE v > 1 UNION SELECT v FROM c INTERSECT SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Distinct\n      Union: distinct\n        Project: v\n          Filter: (v > 1)\n            Scan: a\n        Intersect: distinct\n          Project: v\n            Scan: c\n          Project: v\n            Scan: c",
+"plan_opt": "Limit(input=Sort(input=Distinct(input=Union(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Intersect(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[1.0, 2.0]",
+"rows1024": "[1.0, 2.0]",
+"rows3": "[1.0, 2.0]"
+},
+"SELECT v FROM a WHERE v > 1 UNION SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Distinct\n      Union: distinct\n        Project: v\n          Filter: (v > 1)\n            Scan: a\n        Project: v\n          Scan: c",
+"plan_opt": "Limit(input=Sort(input=Distinct(input=Union(left=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[1.0, 2.0]",
+"rows1024": "[1.0, 2.0]",
+"rows3": "[1.0, 2.0]"
+},
+"SELECT v FROM a WHERE v > 1 UNION SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b EXCEPT ALL SELECT DISTINCT v FROM b ORDER BY v": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: all\n    Project: v\n      Scan: b\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 2]",
+"rows1024": "[None, 2]",
+"rows3": "[None, 2]"
+},
+"SELECT v FROM b EXCEPT ALL SELECT DISTINCT v FROM b ORDER BY v NULLS FIRST": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: all\n    Project: v\n      Scan: b\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, 2]",
+"rows1024": "[None, 2]",
+"rows3": "[None, 2]"
+},
+"SELECT v FROM b EXCEPT SELECT DISTINCT v FROM b ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Except: distinct\n    Project: v\n      Scan: b\n    Distinct\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM b EXCEPT SELECT v FROM a INTERSECT SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM b ORDER BY v ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b EXCEPT SELECT v FROM a WHERE v > 1 LIMIT 2 OFFSET 1": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=1\n  Except: distinct\n    Project: v\n      Scan: b\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Limit(input=Except(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), count=2, offset=1)",
+"rows1": "[None]",
+"rows1024": "[None]",
+"rows3": "[None]"
+},
+"SELECT v FROM b EXCEPT SELECT v FROM b ORDER BY v ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b EXCEPT SELECT v FROM f INTERSECT ALL SELECT DISTINCT v FROM b INTERSECT SELECT v FROM a LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b INTERSECT ALL SELECT count(*) AS v FROM a INTERSECT SELECT v FROM b EXCEPT ALL SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b INTERSECT ALL SELECT v FROM a INTERSECT SELECT count(*) AS v FROM a": {
+"est0": 0,
+"est1": 0,
+"explain": "Intersect: distinct\n  Intersect: all\n    Project: v\n      Scan: b\n    Project: v\n      Scan: a\n  Project: \"count(*)\" AS v\n    Aggregate: groupBy=() aggregates=count(*)\n      Scan: a",
+"plan_opt": "Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=False)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM b INTERSECT ALL SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM f UNION ALL SELECT v FROM b ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b INTERSECT ALL SELECT v FROM a WHERE v > 1 UNION SELECT v FROM f UNION SELECT v FROM c ORDER BY v DESC": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b INTERSECT ALL SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM a": {
+"est0": 0,
+"est1": 0,
+"explain": "Except: distinct\n  Intersect: all\n    Project: v\n      Scan: b\n    Project: v\n      Sort: v ASC NULLS FIRST\n        Scan: b\n  Project: v\n    Scan: a",
+"plan_opt": "Except(left=Intersect(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT v FROM b INTERSECT ALL SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b INTERSECT ALL SELECT v FROM f UNION ALL SELECT v FROM a ORDER BY v DESC": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b INTERSECT SELECT v FROM a EXCEPT ALL SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: all\n      Intersect: distinct\n        Project: v\n          Scan: b\n        Project: v\n          Scan: a\n      Project: v\n        Scan: c",
+"plan_opt": "Limit(input=Sort(input=Except(left=Intersect(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 2.0]",
+"rows1024": "[None, 2.0]",
+"rows3": "[None, 2.0]"
+},
+"SELECT v FROM b INTERSECT SELECT v FROM a WHERE v > 1 ORDER BY v": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v ASC NULLS FIRST\n  Intersect: distinct\n    Project: v\n      Scan: b\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[2]",
+"rows1024": "[2]",
+"rows3": "[2]"
+},
+"SELECT v FROM b INTERSECT SELECT v FROM b ORDER BY v DESC": {
+"est0": 3,
+"est1": 3,
+"explain": "Sort: v DESC NULLS LAST\n  Intersect: distinct\n    Project: v\n      Scan: b\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[5, 2, None]",
+"rows1024": "[5, 2, None]",
+"rows3": "[5, 2, None]"
+},
+"SELECT v FROM b ORDER BY v EXCEPT ALL SELECT v FROM a LIMIT 2 UNION SELECT v FROM c EXCEPT ALL SELECT v FROM c": {
+"est0": 0,
+"est1": 0,
+"explain": "Except: all\n  Distinct\n    Union: distinct\n      Except: all\n        Project: v\n          Sort: v ASC NULLS FIRST\n            Scan: b\n        Limit: count=2 offset=0\n          Project: v\n            Scan: a\n      Project: v\n        Scan: c\n  Project: v\n    Scan: c",
+"plan_opt": "Except(left=Distinct(input=Union(left=Except(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[None, 2.0, 5.0]",
+"rows1024": "[None, 2.0, 5.0]",
+"rows3": "[None, 2.0, 5.0]"
+},
+"SELECT v FROM b ORDER BY v EXCEPT ALL SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT v FROM a LIMIT 2 INTERSECT SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b ORDER BY v EXCEPT ALL SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: all\n      Project: v\n        Sort: v ASC NULLS FIRST\n          Scan: b\n      Project: v\n        Scan: c",
+"plan_opt": "Limit(input=Sort(input=Except(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, None]",
+"rows1024": "[None, None]",
+"rows3": "[None, None]"
+},
+"SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM b ORDER BY v NULLS FIRST": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v ASC NULLS FIRST\n  Except: distinct\n    Project: v\n      Sort: v ASC NULLS FIRST\n        Scan: b\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM f ORDER BY v NULLS FIRST": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b ORDER BY v INTERSECT ALL SELECT DISTINCT v FROM b INTERSECT ALL SELECT v FROM f INTERSECT SELECT DISTINCT v FROM b": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b ORDER BY v INTERSECT ALL SELECT v FROM b ORDER BY v ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b ORDER BY v INTERSECT ALL SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b ORDER BY v INTERSECT SELECT DISTINCT v FROM b UNION ALL SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM a ORDER BY v LIMIT 2": {
+"est0": 1,
+"est1": 1,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: distinct\n      Union: all\n        Intersect: distinct\n          Project: v\n            Sort: v ASC NULLS FIRST\n              Scan: b\n          Distinct\n            Project: v\n              Scan: b\n        Project: v\n          Sort: v ASC NULLS FIRST\n            Scan: b\n      Project: v\n        Scan: a",
+"plan_opt": "Limit(input=Sort(input=Except(left=Union(left=Intersect(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=False), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT v FROM b ORDER BY v INTERSECT SELECT v FROM f UNION ALL SELECT DISTINCT v FROM b UNION ALL SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b ORDER BY v UNION ALL SELECT DISTINCT v FROM b INTERSECT SELECT v FROM b ORDER BY v ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b ORDER BY v UNION ALL SELECT v FROM a LIMIT 2 ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b ORDER BY v UNION ALL SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM a EXCEPT ALL SELECT v FROM f": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b ORDER BY v UNION ALL SELECT v FROM b ORDER BY v INTERSECT SELECT v FROM b ORDER BY v UNION ALL SELECT count(*) AS v FROM a ORDER BY v": {
+"est0": 9,
+"est1": 9,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Union: all\n      Project: v\n        Sort: v ASC NULLS FIRST\n          Scan: b\n      Intersect: distinct\n        Project: v\n          Sort: v ASC NULLS FIRST\n            Scan: b\n        Project: v\n          Sort: v ASC NULLS FIRST\n            Scan: b\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Union(left=Union(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Intersect(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=False), all=True), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, None, None, 2, 2, 2, 5, 5, 5]",
+"rows1024": "[None, None, None, 2, 2, 2, 5, 5, 5]",
+"rows3": "[None, None, None, 2, 2, 2, 5, 5, 5]"
+},
+"SELECT v FROM b ORDER BY v UNION ALL SELECT v FROM b ORDER BY v UNION ALL SELECT v FROM b ORDER BY v EXCEPT SELECT v FROM a ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: distinct\n      Union: all\n        Union: all\n          Project: v\n            Sort: v ASC NULLS FIRST\n              Scan: b\n          Project: v\n            Sort: v ASC NULLS FIRST\n              Scan: b\n        Project: v\n          Sort: v ASC NULLS FIRST\n            Scan: b\n      Project: v\n        Scan: a",
+"plan_opt": "Limit(input=Sort(input=Except(left=Union(left=Union(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[5]",
+"rows1024": "[5]",
+"rows3": "[5]"
+},
+"SELECT v FROM b ORDER BY v UNION SELECT v FROM b UNION ALL SELECT v FROM b": {
+"est0": 10,
+"est1": 10,
+"explain": "Union: all\n  Distinct\n    Union: distinct\n      Project: v\n        Sort: v ASC NULLS FIRST\n          Scan: b\n      Project: v\n        Scan: b\n  Project: v\n    Scan: b",
+"plan_opt": "Union(left=Distinct(input=Union(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[None, 2, 5, 2, 5, 2, None, None]",
+"rows1024": "[None, 2, 5, 2, 5, 2, None, None]",
+"rows3": "[None, 2, 5, 2, 5, 2, None, None]"
+},
+"SELECT v FROM b ORDER BY v UNION SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Distinct\n      Union: distinct\n        Project: v\n          Sort: v ASC NULLS FIRST\n            Scan: b\n        Project: v\n          Scan: c",
+"plan_opt": "Limit(input=Sort(input=Distinct(input=Union(left=Project(input=Sort(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, 1.0]",
+"rows1024": "[None, 1.0]",
+"rows3": "[None, 1.0]"
+},
+"SELECT v FROM b ORDER BY v UNION SELECT v FROM f ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM b UNION ALL SELECT DISTINCT v FROM b ORDER BY v LIMIT 2": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Union: all\n      Project: v\n        Scan: b\n      Distinct\n        Project: v\n          Scan: b",
+"plan_opt": "Limit(input=Sort(input=Union(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[None, None]",
+"rows1024": "[None, None]",
+"rows3": "[None, None]"
+},
+"SELECT v FROM b UNION ALL SELECT count(*) AS v FROM a ORDER BY v": {
+"est0": 6,
+"est1": 6,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Project: v\n      Scan: b\n    Project: \"count(*)\" AS v\n      Aggregate: groupBy=() aggregates=count(*)\n        Scan: a",
+"plan_opt": "Sort(input=Union(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, None, 2, 2, 5, 5]",
+"rows1024": "[None, None, 2, 2, 5, 5]",
+"rows3": "[None, None, 2, 2, 5, 5]"
+},
+"SELECT v FROM b UNION ALL SELECT v FROM a LIMIT 2 ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b UNION ALL SELECT v FROM a WHERE v > 1": {
+"est0": 7,
+"est1": 7,
+"explain": "Union: all\n  Project: v\n    Scan: b\n  Project: v\n    Filter: (v > 1)\n      Scan: a",
+"plan_opt": "Union(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=True)",
+"rows1": "[2, 5, 2, None, None, 3, 2]",
+"rows1024": "[2, 5, 2, None, None, 3, 2]",
+"rows3": "[2, 5, 2, None, None, 3, 2]"
+},
+"SELECT v FROM b UNION ALL SELECT v FROM b EXCEPT SELECT v FROM a LIMIT 2 UNION SELECT v FROM b ORDER BY v": {
+"est0": 5,
+"est1": 5,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Except: distinct\n        Union: all\n          Project: v\n            Scan: b\n          Project: v\n            Scan: b\n        Limit: count=2 offset=0\n          Project: v\n            Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Except(left=Union(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Limit(input=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), count=2, offset=0), all=False), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 2, 5]",
+"rows1024": "[None, 2, 5]",
+"rows3": "[None, 2, 5]"
+},
+"SELECT v FROM b UNION SELECT v FROM a LIMIT 2 ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b UNION SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT count(*) AS v FROM a INTERSECT SELECT v FROM a LIMIT 2 ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM b UNION SELECT v FROM a WHERE v > 1 LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Distinct\n    Union: distinct\n      Project: v\n        Scan: b\n      Project: v\n        Filter: (v > 1)\n          Scan: a",
+"plan_opt": "Limit(input=Distinct(input=Union(left=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), count=2, offset=1)",
+"rows1": "[5, None]",
+"rows1024": "[5, None]",
+"rows3": "[5, None]"
+},
+"SELECT v FROM b UNION SELECT v FROM c INTERSECT SELECT v FROM f ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM c EXCEPT ALL SELECT v FROM a WHERE v > 1 EXCEPT SELECT v FROM a LIMIT 2 ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM c EXCEPT ALL SELECT v FROM b ORDER BY v UNION SELECT v FROM b ORDER BY v ORDER BY v DESC": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM c EXCEPT SELECT v FROM b ORDER BY v DESC": {
+"est0": 0,
+"est1": 0,
+"explain": "Sort: v DESC NULLS LAST\n  Except: distinct\n    Project: v\n      Scan: c\n    Project: v\n      Scan: b",
+"plan_opt": "Sort(input=Except(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=False, nulls_first=None),))",
+"rows1": "[3.5, 3, 2, 1.0]",
+"rows1024": "[3.5, 3, 2, 1.0]",
+"rows3": "[3.5, 3, 2, 1.0]"
+},
+"SELECT v FROM c INTERSECT ALL SELECT DISTINCT v FROM b INTERSECT ALL SELECT DISTINCT v FROM b": {
+"est0": 4,
+"est1": 4,
+"explain": "Intersect: all\n  Intersect: all\n    Project: v\n      Scan: c\n    Distinct\n      Project: v\n        Scan: b\n  Distinct\n    Project: v\n      Scan: b",
+"plan_opt": "Intersect(left=Intersect(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True), right=Distinct(input=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),))), all=True)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM c INTERSECT ALL SELECT v FROM a LIMIT 2 ORDER BY v DESC": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM c INTERSECT ALL SELECT v FROM a UNION SELECT v FROM b ORDER BY v": {
+"est0": 4,
+"est1": 4,
+"explain": "Sort: v ASC NULLS FIRST\n  Distinct\n    Union: distinct\n      Intersect: all\n        Project: v\n          Scan: c\n        Project: v\n          Scan: a\n      Project: v\n        Scan: b",
+"plan_opt": "Sort(input=Distinct(input=Union(left=Intersect(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[None, 1.0, 2.0, 5.0]",
+"rows1024": "[None, 1.0, 2.0, 5.0]",
+"rows3": "[None, 1.0, 2.0, 5.0]"
+},
+"SELECT v FROM c INTERSECT ALL SELECT v FROM b UNION SELECT v FROM a WHERE v > 1 LIMIT 2 OFFSET 1": {
+"est0": 2,
+"est1": 2,
+"explain": "Limit: count=2 offset=1\n  Distinct\n    Union: distinct\n      Intersect: all\n        Project: v\n          Scan: c\n        Project: v\n          Scan: b\n      Project: v\n        Filter: (v > 1)\n          Scan: a",
+"plan_opt": "Limit(input=Distinct(input=Union(left=Intersect(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('b', 1 columns), alias='b', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False)), count=2, offset=1)",
+"rows1": "[2.0]",
+"rows1024": "[2.0]",
+"rows3": "[2.0]"
+},
+"SELECT v FROM c INTERSECT SELECT v FROM a WHERE v > 1 ORDER BY v": {
+"est0": 1,
+"est1": 1,
+"explain": "Sort: v ASC NULLS FIRST\n  Intersect: distinct\n    Project: v\n      Scan: c\n    Project: v\n      Filter: (v > 1)\n        Scan: a",
+"plan_opt": "Sort(input=Intersect(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Filter(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), predicate=BinaryOp(operator='>', left=ColumnRef(name='v', qualifier=None), right=Literal(value=1, dtype=DataType.INT64))), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),))",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM c UNION ALL SELECT count(*) AS v FROM a INTERSECT ALL SELECT v FROM a EXCEPT SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": 0,
+"est1": 0,
+"explain": "Limit: count=2 offset=0\n  Sort: v ASC NULLS FIRST\n    Except: distinct\n      Union: all\n        Project: v\n          Scan: c\n        Intersect: all\n          Project: \"count(*)\" AS v\n            Aggregate: groupBy=() aggregates=count(*)\n              Scan: a\n          Project: v\n            Scan: a\n      Project: v\n        Scan: c",
+"plan_opt": "Limit(input=Sort(input=Except(left=Union(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Intersect(left=Project(input=Aggregate(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), group_by=(), aggregates=(AggregateCall(name='count', args=(), distinct=False),)), projections=(Alias(child=ColumnRef(name='count(*)', qualifier=None), name='v'),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), all=True), right=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=False), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=None),)), count=2, offset=0)",
+"rows1": "[]",
+"rows1024": "[]",
+"rows3": "[]"
+},
+"SELECT v FROM c UNION ALL SELECT v FROM a ORDER BY v NULLS FIRST": {
+"est0": 9,
+"est1": 9,
+"explain": "Sort: v ASC NULLS FIRST\n  Union: all\n    Project: v\n      Scan: c\n    Project: v\n      Scan: a",
+"plan_opt": "Sort(input=Union(left=Project(input=Scan(source=MemorySource('c', 1 columns), alias='c', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), right=Project(input=Scan(source=MemorySource('a', 1 columns), alias='a', projection=None, filters=()), projections=(ColumnRef(name='v', qualifier=None),)), all=True), keys=(SortKey(expression=ColumnRef(name='v', qualifier=None), ascending=True, nulls_first=True),))",
+"rows1": "[None, 1.0, 1.0, 1.0, 2, 2.0, 3, 3.0, 3.5]",
+"rows1024": "[None, 1.0, 1.0, 1.0, 2, 2.0, 3, 3.0, 3.5]",
+"rows3": "[None, 1.0, 1.0, 1.0, 2, 2.0, 3, 3.0, 3.5]"
+},
+"SELECT v FROM c UNION ALL SELECT v FROM b ORDER BY v ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM c UNION ALL SELECT v FROM c INTERSECT ALL SELECT count(*) AS v FROM a EXCEPT SELECT v FROM f ORDER BY v NULLS FIRST": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f EXCEPT ALL SELECT v FROM a LIMIT 2 INTERSECT SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f EXCEPT ALL SELECT v FROM a WHERE v > 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f EXCEPT ALL SELECT v FROM a WHERE v > 1 UNION SELECT count(*) AS v FROM a ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f EXCEPT ALL SELECT v FROM b INTERSECT ALL SELECT count(*) AS v FROM a UNION ALL SELECT v FROM f ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f EXCEPT SELECT count(*) AS v FROM a ORDER BY v DESC": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f EXCEPT SELECT v FROM b ORDER BY v EXCEPT SELECT DISTINCT v FROM b ORDER BY v NULLS FIRST": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f INTERSECT ALL SELECT DISTINCT v FROM b UNION SELECT v FROM a WHERE v > 1 UNION ALL SELECT v FROM b": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f INTERSECT ALL SELECT count(*) AS v FROM a INTERSECT ALL SELECT v FROM a ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f INTERSECT ALL SELECT v FROM a LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f INTERSECT ALL SELECT v FROM a LIMIT 2 EXCEPT ALL SELECT count(*) AS v FROM a ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f INTERSECT SELECT DISTINCT v FROM b EXCEPT ALL SELECT count(*) AS v FROM a UNION SELECT v FROM a LIMIT 2 ORDER BY v": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM f INTERSECT SELECT v FROM a LIMIT 2 LIMIT 2 OFFSET 1": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM f INTERSECT SELECT v FROM a LIMIT 2 UNION SELECT v FROM a LIMIT 2 LIMIT 2 OFFSET 1": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM f INTERSECT SELECT v FROM a WHERE v > 1 LIMIT 2 OFFSET 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f INTERSECT SELECT v FROM c ORDER BY v NULLS FIRST": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION ALL SELECT count(*) AS v FROM a ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION ALL SELECT v FROM a LIMIT 2 ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM f UNION ALL SELECT v FROM a WHERE v > 1 LIMIT 2 OFFSET 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION ALL SELECT v FROM c ORDER BY v DESC": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT DISTINCT v FROM b LIMIT 2 OFFSET 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT count(*) AS v FROM a LIMIT 2 OFFSET 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT v FROM a LIMIT 2 LIMIT 2 OFFSET 1": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'LIMIT', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM f UNION SELECT v FROM a LIMIT 2 ORDER BY v LIMIT 2": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM f UNION SELECT v FROM a LIMIT 2 UNION ALL SELECT v FROM a LIMIT 2 UNION SELECT v FROM b ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT v FROM a WHERE v > 1": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT v FROM a WHERE v > 1 EXCEPT ALL SELECT v FROM b ORDER BY v UNION SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT v FROM a WHERE v > 1 ORDER BY v": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT v FROM b ORDER BY v ORDER BY v NULLS FIRST": {
+"est0": "EXC UnexpectedTokenError",
+"est1": "EXC UnexpectedTokenError",
+"explain": "EXC UnexpectedTokenError",
+"plan_opt": "EXC UnexpectedTokenError",
+"rows1": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows1024": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col",
+"rows3": "EXC UnexpectedTokenError: unexpected 'ORDER', expected 'end of statement' (line 1, col"
+},
+"SELECT v FROM f UNION SELECT v FROM c ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+},
+"SELECT v FROM f UNION SELECT v FROM f ORDER BY v LIMIT 2": {
+"est0": "EXC ColumnNotFoundError",
+"est1": "EXC ColumnNotFoundError",
+"explain": "EXC ColumnNotFoundError",
+"plan_opt": "EXC ColumnNotFoundError",
+"rows1": "EXC ColumnNotFoundError: column 'v' not found",
+"rows1024": "EXC ColumnNotFoundError: column 'v' not found",
+"rows3": "EXC ColumnNotFoundError: column 'v' not found"
+}
+}

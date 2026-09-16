@@ -1,0 +1,146 @@
+"""Cross-reference checks for authored productions."""
+
+from __future__ import annotations
+
+from cueforge.codes import CF1001_DUPLICATE_ID, CF1002_MISSING_REF, CF4004_UNKNOWN_RESOURCE
+from cueforge.findings import Finding, Severity
+from cueforge.identifiers import identifier_finding, is_valid_identifier
+from cueforge.production.models import Production
+
+
+def collect_reference_findings(production: Production) -> list[Finding]:
+    findings: list[Finding] = []
+    seen_cues: dict[str, int] = {}
+
+    for name in production.resources:
+        if not is_valid_identifier(name):
+            findings.append(identifier_finding("resource", name, production.source_path))
+    for name in production.performers:
+        if not is_valid_identifier(name):
+            findings.append(identifier_finding("performer", name, production.source_path))
+    for name in production.locations:
+        if not is_valid_identifier(name):
+            findings.append(identifier_finding("location", name, production.source_path))
+    for name in production.events:
+        if not is_valid_identifier(name):
+            findings.append(identifier_finding("event", name, production.source_path))
+
+    for index, cue in enumerate(production.cues):
+        if not is_valid_identifier(cue.id):
+            findings.append(identifier_finding("cue", cue.id, production.source_path))
+        if cue.id in seen_cues:
+            findings.append(
+                Finding(
+                    code=CF1001_DUPLICATE_ID,
+                    severity=Severity.ERROR,
+                    message=f"duplicate cue id {cue.id!r}",
+                    subject_kind="cue",
+                    subject_id=cue.id,
+                    witness={"first_index": seen_cues[cue.id], "second_index": index},
+                )
+            )
+        else:
+            seen_cues[cue.id] = index
+
+        if cue.trigger.after is not None and cue.trigger.after not in seen_cues and not any(
+            other.id == cue.trigger.after for other in production.cues
+        ):
+            findings.append(
+                Finding(
+                    code=CF1002_MISSING_REF,
+                    severity=Severity.ERROR,
+                    message=f"cue {cue.id!r} refers to missing cue {cue.trigger.after!r}",
+                    subject_kind="cue",
+                    subject_id=cue.id,
+                    witness={"missing": cue.trigger.after, "field": "after"},
+                )
+            )
+        if cue.trigger.on is not None and cue.trigger.on not in production.events:
+            findings.append(
+                Finding(
+                    code=CF1002_MISSING_REF,
+                    severity=Severity.ERROR,
+                    message=f"cue {cue.id!r} refers to missing event {cue.trigger.on!r}",
+                    subject_kind="cue",
+                    subject_id=cue.id,
+                    witness={"missing": cue.trigger.on, "field": "on"},
+                )
+            )
+        for resource_id in cue.uses:
+            if resource_id not in production.resources:
+                findings.append(
+                    Finding(
+                        code=CF4004_UNKNOWN_RESOURCE,
+                        severity=Severity.ERROR,
+                        message=f"cue {cue.id!r} uses unknown resource {resource_id!r}",
+                        subject_kind="cue",
+                        subject_id=cue.id,
+                        witness={"resource": resource_id},
+                    )
+                )
+        for req in cue.requires:
+            if req.resource not in production.resources:
+                findings.append(
+                    Finding(
+                        code=CF4004_UNKNOWN_RESOURCE,
+                        severity=Severity.ERROR,
+                        message=f"cue {cue.id!r} requires unknown resource {req.resource!r}",
+                        subject_kind="cue",
+                        subject_id=cue.id,
+                        witness={"resource": req.resource},
+                    )
+                )
+        action = cue.action
+        if action is not None:
+            if action.resource is not None and action.resource not in production.resources:
+                findings.append(
+                    Finding(
+                        code=CF4004_UNKNOWN_RESOURCE,
+                        severity=Severity.ERROR,
+                        message=f"cue {cue.id!r} action refers to unknown resource {action.resource!r}",
+                        subject_kind="cue",
+                        subject_id=cue.id,
+                        witness={"resource": action.resource},
+                    )
+                )
+            if action.move is not None and action.move not in production.performers:
+                findings.append(
+                    Finding(
+                        code="CF5003",
+                        severity=Severity.ERROR,
+                        message=f"cue {cue.id!r} moves unknown performer {action.move!r}",
+                        subject_kind="cue",
+                        subject_id=cue.id,
+                        witness={"performer": action.move},
+                    )
+                )
+            for mark in (action.from_mark, action.to):
+                if mark is not None and mark not in production.locations:
+                    findings.append(
+                        Finding(
+                            code="CF5002",
+                            severity=Severity.ERROR,
+                            message=f"cue {cue.id!r} refers to unknown location {mark!r}",
+                            subject_kind="cue",
+                            subject_id=cue.id,
+                            witness={"location": mark},
+                        )
+                    )
+            if action.from_mark is not None and action.move is not None:
+                performer = production.performers.get(action.move)
+                if performer is not None and performer.initial_mark not in production.locations:
+                    findings.append(
+                        Finding(
+                            code="CF5002",
+                            severity=Severity.ERROR,
+                            message=(
+                                f"performer {action.move!r} initial_mark "
+                                f"{performer.initial_mark!r} is unknown"
+                            ),
+                            subject_kind="performer",
+                            subject_id=action.move,
+                            witness={"location": performer.initial_mark},
+                        )
+                    )
+
+    return findings

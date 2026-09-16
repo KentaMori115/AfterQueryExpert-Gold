@@ -1,0 +1,221 @@
+import crypto from "crypto"
+import bcrypt from "bcrypt"
+import { getFirestore, FieldValue } from "firebase-admin/firestore"
+
+function getAdminDb() {
+    return getFirestore()
+}
+
+export interface ShareConfig {
+    id: string
+    userId: string
+    fileId: string
+    token: string
+    passwordHash?: string
+    maxDownloads?: number
+    downloadsCount: number
+    expiresAt?: Date
+    isActive: boolean
+    createdAt: Date
+}
+
+export interface ShareAccessAudit {
+    id: string
+    shareId: string
+    fileId: string
+    ip: string
+    userAgent: string
+    timestamp: Date
+}
+
+/**
+ * Creates an advanced share configuration with optional password, download limit, and expiration.
+ */
+export async function createShareLink(
+    userId: string,
+    fileId: string,
+    options: {
+        password?: string
+        maxDownloads?: number
+        expiresInHours?: number
+    } = {}
+): Promise<ShareConfig> {
+    const token = crypto.randomBytes(24).toString("base64url")
+    let passwordHash: string | undefined
+
+    if (options.password && options.password.trim() !== "") {
+        passwordHash = await bcrypt.hash(options.password.trim(), 10)
+    }
+
+    let expiresAt: Date | undefined
+    if (options.expiresInHours && options.expiresInHours > 0) {
+        expiresAt = new Date(Date.now() + options.expiresInHours * 3600 * 1000)
+    }
+
+    const data = {
+        userId,
+        fileId,
+        token,
+        passwordHash: passwordHash || null,
+        maxDownloads: options.maxDownloads || null,
+        downloadsCount: 0,
+        expiresAt: expiresAt ? expiresAt : null,
+        isActive: true,
+        createdAt: FieldValue.serverTimestamp(),
+    }
+
+    const docRef = await getAdminDb().collection("shares").add(data)
+
+    return {
+        id: docRef.id,
+        userId,
+        fileId,
+        token,
+        passwordHash,
+        maxDownloads: options.maxDownloads,
+        downloadsCount: 0,
+        expiresAt,
+        isActive: true,
+        createdAt: new Date(),
+    }
+}
+
+/**
+ * Validates a share token and optional password.
+ */
+export async function validateShareToken(
+    token: string,
+    providedPassword?: string
+): Promise<{ valid: boolean; reason?: string; share?: ShareConfig }> {
+    try {
+        const snap = await getAdminDb()
+            .collection("shares")
+            .where("token", "==", token)
+            .limit(1)
+            .get()
+
+        if (snap.empty) {
+            return { valid: false, reason: "Share link not found" }
+        }
+
+        const doc = snap.docs[0]
+        const data = doc.data() as any
+
+        if (!data.isActive) {
+            return { valid: false, reason: "This share link has been revoked" }
+        }
+
+        if (data.expiresAt) {
+            const expiryDate = data.expiresAt.toDate ? data.expiresAt.toDate() : new Date(data.expiresAt)
+            if (new Date() > expiryDate) {
+                return { valid: false, reason: "This share link has expired" }
+            }
+        }
+
+        if (data.maxDownloads && data.downloadsCount >= data.maxDownloads) {
+            return { valid: false, reason: "Maximum download limit reached for this share link" }
+        }
+
+        if (data.passwordHash) {
+            if (!providedPassword) {
+                return { valid: false, reason: "Password required" }
+            }
+            const match = await bcrypt.compare(providedPassword, data.passwordHash)
+            if (!match) {
+                return { valid: false, reason: "Invalid password" }
+            }
+        }
+
+        const share: ShareConfig = {
+            id: doc.id,
+            userId: data.userId,
+            fileId: data.fileId,
+            token: data.token,
+            passwordHash: data.passwordHash || undefined,
+            maxDownloads: data.maxDownloads || undefined,
+            downloadsCount: data.downloadsCount || 0,
+            expiresAt: data.expiresAt?.toDate?.() || undefined,
+            isActive: data.isActive,
+            createdAt: data.createdAt?.toDate?.() || new Date(),
+        }
+
+        return { valid: true, share }
+    } catch (err) {
+        console.error("Failed to validate share token:", err)
+        return { valid: false, reason: "Internal server error" }
+    }
+}
+
+/**
+ * Records a download access event and increments download count.
+ */
+export async function recordShareAccess(shareId: string, fileId: string, ip: string, userAgent: string) {
+    try {
+        const shareRef = getAdminDb().collection("shares").doc(shareId)
+        await shareRef.update({
+            downloadsCount: FieldValue.increment(1),
+        })
+
+        await getAdminDb().collection("share_audits").add({
+            shareId,
+            fileId,
+            ip,
+            userAgent,
+            timestamp: FieldValue.serverTimestamp(),
+        })
+    } catch (err) {
+        console.error("Failed to record share access audit:", err)
+    }
+}
+
+/**
+ * Retrieves all share links generated by a user.
+ */
+export async function getUserShareLinks(userId: string): Promise<ShareConfig[]> {
+    try {
+        const snap = await getAdminDb()
+            .collection("shares")
+            .where("userId", "==", userId)
+            .get()
+
+        const shares = snap.docs.map((doc) => {
+            const data = doc.data() as any
+            return {
+                id: doc.id,
+                userId: data.userId,
+                fileId: data.fileId,
+                token: data.token,
+                passwordHash: data.passwordHash || undefined,
+                maxDownloads: data.maxDownloads || undefined,
+                downloadsCount: data.downloadsCount || 0,
+                expiresAt: data.expiresAt?.toDate?.() || undefined,
+                isActive: data.isActive ?? true,
+                createdAt: data.createdAt?.toDate?.() || new Date(),
+            }
+        })
+
+        shares.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        return shares
+    } catch (err) {
+        console.error("Failed to get user share links:", err)
+        return []
+    }
+}
+
+/**
+ * Revokes a share link.
+ */
+export async function revokeShareLink(userId: string, shareId: string): Promise<boolean> {
+    try {
+        const docRef = getAdminDb().collection("shares").doc(shareId)
+        const snap = await docRef.get()
+        if (snap.exists && snap.data()?.userId === userId) {
+            await docRef.update({ isActive: false })
+            return true
+        }
+        return false
+    } catch (err) {
+        console.error("Failed to revoke share link:", err)
+        return false
+    }
+}

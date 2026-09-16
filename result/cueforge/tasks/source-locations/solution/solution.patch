@@ -1,0 +1,1508 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1bbc530..b4542d3 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,16 @@
+ # Changelog
+ 
++## Unreleased
++
++- Findings from loading and compiling carry a `source`: file, line and column
++  of the authored node they are about, for YAML and JSON productions and
++  through multi-file workspaces (`docs/source-locations.md`).
++- The JSON loader tracks positions itself; numeric tokens still stay text.
++- Assertions are parsed and their subjects checked while compiling (CF6002,
++  CF6003), instead of first failing during a rehearsal.
++- `cueforge compile --format json` prints `source` on every finding, the same
++  object rehearsal JSON already carries.
++
+ ## 0.1.0 — Paper Tech
+ 
+ - Load YAML and JSON productions, including multi-file workspaces.
+diff --git a/README.md b/README.md
+index 5eaada3..fe8f693 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,8 @@ cue sheets, resource conflicts, and virtual-time traces.
+ CueForge loads a YAML or JSON production, validates references, resolves a
+ trigger graph, reserves exclusive equipment, and rehearses the plan on an
+ integer virtual clock. When a plan cannot work it returns a stable finding
+-with the smallest useful witness.
++with the smallest useful witness, and says which file, line and column it
++came from.
+ 
+ ## Install
+ 
+@@ -51,4 +52,5 @@ state, delay and fail injection, master and departmental sheets, and
+ canonical JSON. Compound triggers, timing-window solvers, recovery branches,
+ and live operator protocols are intentionally absent.
+ 
+-See `docs/determinism.md`, `docs/production-format.md`, and `docs/timing-contract.md`.
++See `docs/determinism.md`, `docs/production-format.md`, `docs/timing-contract.md`,
++and `docs/source-locations.md` for where a finding points.
+diff --git a/docs/findings.md b/docs/findings.md
+index fdfc255..226a966 100644
+--- a/docs/findings.md
++++ b/docs/findings.md
+@@ -15,3 +15,14 @@ A finding is a structured diagnostic. Codes are public.
+ 
+ Human messages may become clearer. Codes, severity, subjects, and witness
+ keys are versioned public behavior.
++
++## Source
++
++Findings raised while loading or compiling a production carry `source`, a
++`SourceRef` naming the file, the 1-based line and the 1-based column of the
++first character of the authored node the finding is about. Findings about
++nothing authored, and every finding a rehearsal raises, carry `None`. The
++rules for which node a finding points at are in `docs/source-locations.md`.
++
++Findings are sorted by severity, then by source path, line and column, then
++by code, so a finding without a source comes before those with one.
+diff --git a/docs/source-locations.md b/docs/source-locations.md
+new file mode 100644
+index 0000000..f1e013f
+--- /dev/null
++++ b/docs/source-locations.md
+@@ -0,0 +1,172 @@
++# Source locations
++
++Every finding raised while loading or compiling a production says where in
++the authored text the problem sits. `Finding.source` is a `SourceRef` with
++`path`, `line` and `column`; it is `None` for findings that are not about an
++authored node.
++
++## Path
++
++| Production given as | `path` |
++|---|---|
++| one file | the path as given, `\` turned into `/`, any leading `./` dropped |
++| a workspace directory | the file's path relative to the workspace root, `/` separated |
++
++The manifest itself is `cueforge.yaml` (or `.yml`, `.json`); a source file
++listed as `cues/lighting.yaml` keeps that name.
++
++## Line and column
++
++Both are 1-based. They mark the first character of the node as it is written:
++
++| Node | Points at |
++|---|---|
++| JSON object or array | the `{` or `[` |
++| YAML block mapping | its first key |
++| YAML block sequence | the first `-` |
++| YAML flow mapping or sequence | the `{` or `[` |
++| quoted scalar | the opening quote |
++| plain scalar or JSON token | its first character |
++| anchored node (`&name` in front) | its content: the anchor names the node, the node opens after it |
++
++Line endings are normalised before parsing, so `\r\n` files count the same
++lines and columns as `\n` files. Columns count characters, not bytes, and a
++JSON escape such as `é` occupies the six characters it is written with.
++
++## Anchors and aliases
++
++An anchor is a name, not text: `&lead` on a line of its own leaves the cue
++mapping opening at its first key, `&t {at: 0}` opens at the `{`, and
++`&ref "ghost"` opens at the quote.
++
++A node reached through an alias points at the `*alias`, and so does
++everything inside it: keys, values, the lot. The finding names the place the
++author wrote the reuse, because the anchored text is right where it was
++written and the reuse is what put it here. When an alias sits inside another
++alias, the outermost one is the place the author wrote, so that is where the
++finding points. Every reuse gets its own finding, each at its own alias.
++
++A worked example, with the finding each line draws when `at` must be a
++whole number of milliseconds:
++
++```yaml
++cues:
++  - id: a
++    department: lx
++    trigger: {at: &x 1.5}      # a.at points at "1.5", line 4 column 22
++  - id: b
++    department: lx
++    trigger: &tr {at: *x}      # b.at points at "*x", line 7 column 23
++  - id: c
++    department: lx
++    trigger: *tr               # c.at points at "*tr", line 10 column 14
++```
++
++The first cue wrote the value, so its finding points at the value; the
++anchor `&x` in front of it is not part of the node. The second cue reused
++the value by alias, and its finding points at that alias rather than back at
++line 4. The third cue reused a mapping that itself holds an alias, and its
++finding points at `*tr`, the outermost reuse, not at the `*x` inside it.
++
++Keys are treated the same way. An unknown field inside an aliased mapping
++points at the alias, because the key is not written where the alias is.
++
++```yaml
++cues:
++  - &lead
++    id: lead
++    department: lx
++    trigger: &t {at: 0, bogus: 1}   # cues.0.trigger.bogus: the "bogus" key
++  - *lead                           # cues.1.trigger.bogus: the "*lead"
++```
++
++The anchored cue opens at `id`, its first key, not at `&lead`; the second
++cue is a duplicate of the first and its `CF1001` points at `*lead` too, the
++second `id` value having been reached through that alias.
++
++## Which node
++
++A finding about a **value** points at that value: `duration`, `offset`, `at`,
++event times, location coordinates, `capacity`, `maximum_speed`, `version`,
++`time_unit`, `after`, `on`, each `uses` entry, the `resource` of a `requires`
++entry, the `resource`, `move`, `from` and `to` of an `action`, and
++`initial_state` (both for a resource whose initial state is undeclared and
++for a performer whose `initial_mark` is unknown).
++
++| Finding | Points at |
++|---|---|
++| unknown field (CF1009) | the key that names it |
++| missing field (CF1010) | the mapping that lacks it |
++| duplicate cue id (CF1001) | the second cue's `id` value |
++| duplicate map entry across files (CF1001) | the key in the later file |
++| conflicting top-level field across files (CF1001) | the key in the later file |
++| invalid identifier (CF1007) | the key of the entry, or the value of a cue's `id` |
++| trigger with two kinds, or none (CF1005) | the `trigger` mapping |
++| trigger cycle (CF3002) | the `after` of the smallest cue id in the witness |
++| self dependency (CF3003), missing dependency (CF3001) | the `after` |
++| invalid trigger (CF3004) | the `trigger` mapping |
++| reservation conflict (CF4001, CF4002) | the resource's key |
++| no cues (CF3006) | the `cues` value; `None` when the file has no `cues` key |
++| move without `from`/`to`/`maximum_speed` (CF5004) | the `action` mapping |
++| move longer than `duration` (CF5001) | the `duration` |
++| assertion problems (CF6002, CF6003) | the `expression` |
++| `sources` entry escaping the root, missing, or not a string | that entry in the manifest |
++| parse error (CF1005) | where the parser stopped |
++
++Findings about the workspace as a whole (no sources found, an empty
++document), about interventions, about the run store, and every finding a
++rehearsal raises keep `source` as `None`.
++
++## Assertions are checked when compiling
++
++`compile_production` parses every assertion and checks its subjects. A
++syntax error is CF6002; a cue, attribute (`started`, `visible`, `completed`,
++`failed`), resource or state the production does not declare is CF6003. Both
++are errors, so the compile fails and the finding points at the `expression`.
++
++## Nothing enters a digest
++
++Positions describe the text, not the show. They never take part in the
++compiled digest, the rehearsal digest or any canonical rehearsal report, so a
++comment line added above a cue moves every `line` and changes no digest.
++`docs/determinism.md` still holds: comments and key order are not semantic.
++
++## Sorting
++
++`sort_findings` already orders by severity, then source path, line and
++column, then code. A finding with a source therefore sorts after a finding
++without one of the same severity, and two findings in one file come out in
++text order.
++
++## Multi-file workspaces
++
++Positions follow the node into the file that holds it. Lists concatenate the
++manifest's own entries first, then each source in `sources` order, so the
++merged `cues[3]` may live in the second source file. Map entries keep the
++position they had in their file.
++
++## Worked example
++
++```yaml
++version: 1
++production: harbor
++time_unit: ms
++resources:
++  lamp: {kind: light}
++cues:
++  - id: lx_1
++    department: lighting
++    trigger: {after: lx_0, offset: 2.5}
++    uses: [lamp, haze]
++```
++
++`compile_production` returns three findings, in text order:
++
++| Finding | `source` |
++|---|---|
++| CF2007, `lx_1.offset` is not an integer | line 9, column 36, the `2` of `2.5` |
++| CF1002, `lx_1` refers to missing cue `lx_0` | line 9, column 22, the `l` of `lx_0` |
++| CF4004, `lx_1` uses unknown resource `haze` | line 10, column 18, the `h` of `haze` |
++
++Write the same production as JSON and the findings keep their codes and
++messages; only `path`, `line` and `column` follow the JSON text.
+diff --git a/src/cueforge/api.py b/src/cueforge/api.py
+index d12efc1..383cc56 100644
+--- a/src/cueforge/api.py
++++ b/src/cueforge/api.py
+@@ -6,7 +6,8 @@ from pathlib import Path
+ 
+ from cueforge.compiler.plan import CompiledShow, compile_production_document
+ from cueforge.production.build import production_from_mapping
+-from cueforge.production.discovery import load_merged_mapping
++from cueforge.production.discovery import load_source
++from cueforge.production.locate import locate_findings
+ from cueforge.production.models import Production
+ from cueforge.reports.canonical_json import canonical_dumps
+ from cueforge.reports.sheets import CueSheet, render_sheet
+@@ -17,10 +18,13 @@ from cueforge.simulation.scheduler import RehearsalResult, run_rehearsal
+ 
+ def load_production(source: str | Path) -> Result[Production]:
+     path = Path(source)
+-    data, findings, source_path = load_merged_mapping(path)
+-    if data is None:
++    loaded = load_source(path)
++    findings = list(loaded.findings)
++    if loaded.data is None:
+         return Result.fail(findings)
+-    production, build_findings = production_from_mapping(data, source_path)
++    production, build_findings = production_from_mapping(
++        loaded.data, loaded.source_path, loaded.positions
++    )
+     findings.extend(build_findings)
+     if production is None:
+         return Result.fail(findings)
+@@ -28,7 +32,8 @@ def load_production(source: str | Path) -> Result[Production]:
+ 
+ 
+ def compile_production(production: Production) -> Result[CompiledShow]:
+-    show, findings = compile_production_document(production)
++    show, raw_findings = compile_production_document(production)
++    findings = locate_findings(raw_findings, production)
+     if show is None:
+         return Result.fail(findings)
+     return Result.ok(show, findings)
+diff --git a/src/cueforge/assertions/check.py b/src/cueforge/assertions/check.py
+new file mode 100644
+index 0000000..2ba5cad
+--- /dev/null
++++ b/src/cueforge/assertions/check.py
+@@ -0,0 +1,83 @@
++"""Static checks on authored assertions, run while compiling."""
++
++from __future__ import annotations
++
++from cueforge.assertions.grammar import AfterExpr, BeforeExpr, CueAttr, StateAtExpr, parse_assertion
++from cueforge.codes import CF6003_ASSERTION_SUBJECT
++from cueforge.findings import Finding, Severity
++from cueforge.production.models import Production
++
++# The instants a rehearsal records for every cue, and so the attributes an
++# assertion may name.
++CUE_ATTRIBUTES = frozenset({"completed", "failed", "started", "visible"})
++
++
++def _subject_finding(message: str, subject_id: str) -> Finding:
++    return Finding(
++        code=CF6003_ASSERTION_SUBJECT,
++        severity=Severity.ERROR,
++        message=message,
++        subject_kind="assertion",
++        subject_id=subject_id,
++    )
++
++
++def _check_attr(attr: CueAttr, cue_ids: frozenset[str]) -> list[Finding]:
++    if attr.cue_id not in cue_ids:
++        return [_subject_finding(f"assertion refers to unknown cue {attr.cue_id!r}", attr.cue_id)]
++    if attr.attr not in CUE_ATTRIBUTES:
++        return [
++            _subject_finding(
++                f"assertion refers to unknown attribute {attr.cue_id}.{attr.attr}",
++                f"{attr.cue_id}.{attr.attr}",
++            )
++        ]
++    return []
++
++
++def allowed_states(production: Production, resource_id: str) -> tuple[str, ...]:
++    """The states a resource can be in, the way a rehearsal sees them."""
++    resource = production.resources[resource_id]
++    if resource.states:
++        return tuple(resource.states)
++    if resource.initial_state:
++        return (resource.initial_state,)
++    return ("idle",)
++
++
++def check_assertions(production: Production) -> list[tuple[int, Finding]]:
++    """Return ``(index, finding)`` for every assertion that cannot be evaluated.
++
++    Syntax errors come back as CF6002; a cue, attribute, resource or state
++    the production does not declare as CF6003.  The index says which
++    ``assertions`` entry the finding is about.
++    """
++    cue_ids = frozenset(production.cue_ids())
++    out: list[tuple[int, Finding]] = []
++    for index, item in enumerate(production.assertions):
++        expr, parse_finding = parse_assertion(item.expression)
++        if parse_finding is not None:
++            out.append((index, parse_finding))
++            continue
++        findings: list[Finding] = []
++        if isinstance(expr, (BeforeExpr, AfterExpr)):
++            findings.extend(_check_attr(expr.left, cue_ids))
++            findings.extend(_check_attr(expr.right, cue_ids))
++        elif isinstance(expr, StateAtExpr):
++            findings.extend(_check_attr(expr.at, cue_ids))
++            if expr.resource_id not in production.resources:
++                findings.append(
++                    _subject_finding(
++                        f"assertion refers to unknown resource {expr.resource_id!r}",
++                        expr.resource_id,
++                    )
++                )
++            elif expr.expected not in allowed_states(production, expr.resource_id):
++                findings.append(
++                    _subject_finding(
++                        f"resource {expr.resource_id!r} has no state {expr.expected!r}",
++                        f"{expr.resource_id}.{expr.expected}",
++                    )
++                )
++        out.extend((index, finding) for finding in findings)
++    return out
+diff --git a/src/cueforge/cli/commands.py b/src/cueforge/cli/commands.py
+index 89ee096..13c31fd 100644
+--- a/src/cueforge/cli/commands.py
++++ b/src/cueforge/cli/commands.py
+@@ -2,6 +2,8 @@
+ 
+ from __future__ import annotations
+ 
++from typing import Any
++
+ from pathlib import Path
+ 
+ from cueforge.api import compile_production, load_production, rehearse, sheet_for
+@@ -24,6 +26,26 @@ def _exit_from_findings(findings: tuple[object, ...]) -> int:
+     return 0
+ 
+ 
++def _finding_payload(item: Any) -> dict[str, object]:
++    """One finding as compile JSON prints it.
++
++    ``source`` is the object rehearsal JSON prints, and like there it appears
++    only when the finding is about an authored node.
++    """
++    payload: dict[str, object] = {
++        "code": item.code,
++        "message": item.message,
++        "severity": str(item.severity),
++        "subject_id": item.subject_id,
++        "subject_kind": item.subject_kind,
++        "witness": dict(item.witness),
++    }
++    source = getattr(item, "source", None)
++    if source is not None:
++        payload["source"] = {"column": source.column, "line": source.line, "path": source.path}
++    return payload
++
++
+ def cmd_compile(path: Path, fmt: str) -> tuple[str, int]:
+     loaded = load_production(path)
+     if not loaded.is_ok or loaded.value is None:
+@@ -31,14 +53,7 @@ def cmd_compile(path: Path, fmt: str) -> tuple[str, int]:
+             text = canonical_dumps(
+                 {
+                     "findings": [
+-                        {
+-                            "code": item.code,
+-                            "message": item.message,
+-                            "severity": str(item.severity),
+-                            "subject_id": item.subject_id,
+-                            "subject_kind": item.subject_kind,
+-                            "witness": dict(item.witness),
+-                        }
++                        _finding_payload(item)
+                         for item in loaded.findings
+                     ],
+                     "ok": False,
+@@ -51,14 +66,7 @@ def cmd_compile(path: Path, fmt: str) -> tuple[str, int]:
+     if fmt == "json":
+         payload = {
+             "findings": [
+-                {
+-                    "code": item.code,
+-                    "message": item.message,
+-                    "severity": str(item.severity),
+-                    "subject_id": item.subject_id,
+-                    "subject_kind": item.subject_kind,
+-                    "witness": dict(item.witness),
+-                }
++                _finding_payload(item)
+                 for item in compiled.findings
+             ],
+             "ok": compiled.is_ok,
+diff --git a/src/cueforge/production/build.py b/src/cueforge/production/build.py
+index 7ccca61..619e6a1 100644
+--- a/src/cueforge/production/build.py
++++ b/src/cueforge/production/build.py
+@@ -7,11 +7,34 @@ from typing import Any
+ from pydantic import ValidationError
+ 
+ from cueforge.codes import CF1004_SCHEMA_VERSION, CF1005_PARSE_ERROR, CF1009_UNKNOWN_FIELD, CF1010_TYPE_ERROR
+-from cueforge.findings import Finding, Severity
++from cueforge.findings import Finding, Severity, SourceRef
+ from cueforge.production.models import Production, SUPPORTED_SCHEMA_VERSIONS
++from cueforge.production.source_map import SourceMap
+ 
+ 
+-def production_from_mapping(data: dict[str, Any], source_path: str) -> tuple[Production | None, list[Finding]]:
++def _error_ref(positions: SourceMap | None, loc: tuple[Any, ...], kind: str) -> SourceRef | None:
++    """Which authored node a validation error is about.
++
++    An unknown field is the key that named it, a missing field is the
++    mapping that lacks it, and anything else is the value that was rejected
++    (or, when the value sits deeper than the document does, the closest
++    enclosing node).
++    """
++    if positions is None:
++        return None
++    path = tuple(loc)
++    if "extra" in kind:
++        return positions.key(path) or positions.nearest(path[:-1])
++    if kind == "missing":
++        return positions.nearest(path[:-1])
++    return positions.nearest(path)
++
++
++def production_from_mapping(
++    data: dict[str, Any],
++    source_path: str,
++    positions: SourceMap | None = None,
++) -> tuple[Production | None, list[Finding]]:
+     findings: list[Finding] = []
+     version = data.get("version")
+     if version is not None:
+@@ -28,15 +51,18 @@ def production_from_mapping(data: dict[str, Any], source_path: str) -> tuple[Pro
+                     subject_kind="production",
+                     subject_id=str(data.get("production", source_path)),
+                     witness={"version": str(version)},
++                    source=positions.value(("version",)) if positions is not None else None,
+                 )
+             )
+             return None, findings
+     try:
+-        production = Production.model_validate({**data, "source_path": source_path})
++        production = Production.model_validate(
++            {**data, "source_path": source_path, "source_map": positions}
++        )
+     except ValidationError as exc:
+         for error in exc.errors():
+-            loc = ".".join(str(part) for part in error.get("loc", ()))
+-            kind = error.get("type", "")
++            loc = tuple(error.get("loc", ()))
++            kind = str(error.get("type", ""))
+             code = CF1009_UNKNOWN_FIELD if "extra" in kind else CF1010_TYPE_ERROR
+             if "value_error" in kind:
+                 code = CF1005_PARSE_ERROR
+@@ -44,10 +70,11 @@ def production_from_mapping(data: dict[str, Any], source_path: str) -> tuple[Pro
+                 Finding(
+                     code=code,
+                     severity=Severity.ERROR,
+-                    message=f"{loc}: {error.get('msg', 'invalid value')}",
++                    message=f"{'.'.join(map(str, loc))}: {error.get('msg', 'invalid value')}",
+                     subject_kind="document",
+-                    subject_id=loc or source_path,
++                    subject_id=".".join(map(str, loc)) or source_path,
+                     witness={"path": source_path},
++                    source=_error_ref(positions, loc, kind),
+                 )
+             )
+         return None, findings
+diff --git a/src/cueforge/production/discovery.py b/src/cueforge/production/discovery.py
+index d698bf4..7ad0623 100644
+--- a/src/cueforge/production/discovery.py
++++ b/src/cueforge/production/discovery.py
+@@ -1,16 +1,25 @@
+-"""Discover production sources from a file or workspace directory."""
++"""Discover production sources from a file or workspace directory, with positions."""
+ 
+ from __future__ import annotations
+ 
++import json
++from dataclasses import dataclass, field
+ from pathlib import Path
+ from typing import Any
+ 
+-from cueforge.codes import CF1003_PATH_ESCAPE, CF1005_PARSE_ERROR, CF1008_EMPTY_DOCUMENT
+-from cueforge.findings import Finding, Severity
+-from cueforge.production.json_loader import parse_json_text
++import yaml
++
++from cueforge.codes import (
++    CF1001_DUPLICATE_ID,
++    CF1003_PATH_ESCAPE,
++    CF1005_PARSE_ERROR,
++    CF1008_EMPTY_DOCUMENT,
++)
++from cueforge.findings import Finding, Severity, SourceRef
++from cueforge.production.json_loader import parse_json_text, parse_json_with_positions
+ from cueforge.production.merge import merge_documents
+-from cueforge.production.source_map import is_path_escape, posix_relpath
+-from cueforge.production.yaml_loader import parse_yaml_text
++from cueforge.production.source_map import SourceMap, is_path_escape, located, posix_relpath
++from cueforge.production.yaml_loader import parse_yaml_text, parse_yaml_with_positions
+ 
+ MANIFEST_NAMES = ("cueforge.yaml", "cueforge.yml", "cueforge.json")
+ 
+@@ -219,3 +228,210 @@ def load_merged_mapping(root: Path) -> tuple[dict[str, Any] | None, list[Finding
+     if findings:
+         return None, findings, root.as_posix()
+     return merged, findings, root.as_posix()
++
++
++# --- loading with positions -------------------------------------------------
++#
++# Everything above answers "which files, and what do they say".  The
++# functions below answer "and where was each node written", which the
++# findings need.  They reuse discovery and merging as they are and only add
++# the bookkeeping: one SourceMap per file, folded into one map whose list
++# indices follow the merged lists.
++
++
++@dataclass
++class LoadedSource:
++    """A production mapping, the findings raised loading it, and where its nodes sit."""
++
++    data: dict[str, Any] | None
++    findings: list[Finding]
++    source_path: str
++    positions: SourceMap = field(default_factory=SourceMap)
++
++
++def _error_ref(exc: BaseException, rel: str) -> SourceRef | None:
++    """Where the parser stopped, when it can say."""
++    if isinstance(exc, yaml.MarkedYAMLError) and exc.problem_mark is not None:
++        mark = exc.problem_mark
++        return SourceRef(path=rel, line=mark.line + 1, column=mark.column + 1)
++    if isinstance(exc, json.JSONDecodeError):
++        return SourceRef(path=rel, line=exc.lineno, column=exc.colno)
++    return None
++
++
++def parse_document_with_positions(
++    path: Path, text: str, rel: str
++) -> tuple[Any, Finding | None, SourceMap]:
++    """Like :func:`parse_document`, also returning where every node starts.
++
++    ``rel`` is the name findings and positions report for this file.  A
++    parse failure points at the place the parser gave up.
++    """
++    suffix = path.suffix.lower()
++    stripped = text.lstrip()
++    as_json = suffix == ".json" or (
++        suffix not in {".yaml", ".yml"} and (stripped.startswith("{") or stripped.startswith("["))
++    )
++    try:
++        if as_json:
++            value, positions = parse_json_with_positions(text, rel)
++        else:
++            value, positions = parse_yaml_with_positions(text, rel)
++        return value, None, positions
++    except Exception as exc:  # noqa: BLE001 — convert parser errors to findings
++        return None, Finding(
++            code=CF1005_PARSE_ERROR,
++            severity=Severity.ERROR,
++            message=f"failed to parse {rel}: {exc}",
++            subject_kind="document",
++            subject_id=rel,
++            source=_error_ref(exc, rel),
++        ), SourceMap()
++
++
++def _manifest(root: Path) -> tuple[Any, SourceMap] | None:
++    """The workspace manifest and its positions, when the workspace has one."""
++    for name in MANIFEST_NAMES:
++        candidate = root / name
++        if candidate.is_file():
++            document, finding, positions = parse_document_with_positions(
++                candidate, read_text(candidate), name
++            )
++            return (document, positions) if finding is None else None
++    return None
++
++
++def _locate_discovery(findings: list[Finding], manifest: tuple[Any, SourceMap] | None) -> list[Finding]:
++    """Point findings about ``sources`` entries at the entry in the manifest."""
++    if manifest is None:
++        return findings
++    document, positions = manifest
++    entries = document.get("sources") if isinstance(document, dict) else None
++    out: list[Finding] = []
++    for finding in findings:
++        ref: SourceRef | None = None
++        if finding.subject_kind == "manifest" and finding.subject_id == "sources":
++            ref = positions.value(("sources",))
++        elif finding.subject_kind == "manifest" and finding.subject_id is not None:
++            ref = positions.value(())
++        elif finding.subject_kind == "path" and isinstance(entries, list):
++            for index, item in enumerate(entries):
++                if str(item) == finding.subject_id:
++                    ref = positions.value(("sources", index))
++                    break
++        out.append(located(finding, ref))
++    return out
++
++
++def _locate_merge(findings: list[Finding], maps: dict[str, SourceMap]) -> list[Finding]:
++    """Point merge findings at the later occurrence, in the file that holds it."""
++    out: list[Finding] = []
++    for finding in findings:
++        ref: SourceRef | None = None
++        witness = finding.witness
++        second = witness.get("second_path") or witness.get("path")
++        positions = maps.get(str(second)) if second is not None else None
++        if positions is None and finding.subject_kind not in {"document", "field"}:
++            positions = maps.get(str(finding.subject_id))
++        if positions is not None:
++            if finding.code == CF1001_DUPLICATE_ID and finding.subject_kind == "field":
++                ref = positions.key((str(finding.subject_id),))
++            elif finding.code == CF1001_DUPLICATE_ID:
++                ref = positions.key((str(finding.subject_kind), str(finding.subject_id)))
++            elif finding.subject_kind == "document":
++                ref = positions.value(())
++            else:
++                ref = positions.key((str(finding.subject_kind),))
++        out.append(located(finding, ref))
++    return out
++
++
++def _merged_positions(documents: list[tuple[str, dict[str, Any], SourceMap]]) -> SourceMap:
++    """Fold per-file positions into one map whose list indices follow the merge."""
++    positions = SourceMap()
++    lengths: dict[str, int] = {}
++    for _rel, document, file_positions in documents:
++        offsets: dict[str, int] = {}
++        for key, value in document.items():
++            if key in ("cues", "assertions") and isinstance(value, list):
++                offsets[key] = lengths.get(key, 0)
++                lengths[key] = offsets[key] + len(value)
++        positions.absorb(file_positions, offsets)
++    return positions
++
++
++def load_source(root: Path) -> LoadedSource:
++    """Load a file or workspace into one mapping, keeping every node's position."""
++    if root.is_file():
++        rel = posix_relpath(str(root))
++        document, parse_finding, positions = parse_document_with_positions(root, read_text(root), rel)
++        if parse_finding is not None:
++            return LoadedSource(None, [parse_finding], rel, positions)
++        if document is None:
++            return LoadedSource(
++                None,
++                [
++                    Finding(
++                        code=CF1008_EMPTY_DOCUMENT,
++                        severity=Severity.ERROR,
++                        message=f"empty production document: {root.name}",
++                        subject_kind="document",
++                        subject_id=root.name,
++                    )
++                ],
++                rel,
++                positions,
++            )
++        if not isinstance(document, dict):
++            return LoadedSource(
++                None,
++                [
++                    Finding(
++                        code=CF1005_PARSE_ERROR,
++                        severity=Severity.ERROR,
++                        message="production document must be a mapping",
++                        subject_kind="document",
++                        subject_id=root.name,
++                        source=positions.value(()),
++                    )
++                ],
++                rel,
++                positions,
++            )
++        document.pop("sources", None)
++        return LoadedSource(document, [], rel, positions)
++
++    manifest = _manifest(root)
++    paths, discover_findings = discover_sources(root)
++    findings = _locate_discovery(discover_findings, manifest)
++    documents: list[tuple[str, dict[str, Any], SourceMap]] = []
++    root_resolved = root.resolve()
++    for path in paths:
++        rel = path.relative_to(root_resolved).as_posix() if path.is_relative_to(root_resolved) else path.name
++        document, parse_finding, positions = parse_document_with_positions(path, read_text(path), rel)
++        if parse_finding is not None:
++            findings.append(parse_finding)
++            continue
++        if not isinstance(document, dict):
++            findings.append(
++                Finding(
++                    code=CF1005_PARSE_ERROR,
++                    severity=Severity.ERROR,
++                    message=f"production document must be a mapping: {path.name}",
++                    subject_kind="document",
++                    subject_id=path.name,
++                    source=positions.value(()),
++                )
++            )
++            continue
++        document = dict(document)
++        document.pop("sources", None)
++        documents.append((rel, document, positions))
++    if findings:
++        return LoadedSource(None, findings, root.as_posix())
++    merged, merge_findings = merge_documents([(rel, document) for rel, document, _ in documents])
++    positions = _merged_positions(documents)
++    findings.extend(_locate_merge(merge_findings, {rel: file_positions for rel, _, file_positions in documents}))
++    if findings:
++        return LoadedSource(None, findings, root.as_posix(), positions)
++    return LoadedSource(merged, findings, root.as_posix(), positions)
+diff --git a/src/cueforge/production/json_loader.py b/src/cueforge/production/json_loader.py
+index b168ae5..b4e4ddd 100644
+--- a/src/cueforge/production/json_loader.py
++++ b/src/cueforge/production/json_loader.py
+@@ -1,10 +1,213 @@
+-"""JSON loader that captures numeric tokens as decimal text."""
++"""JSON loader that captures numeric tokens as decimal text and node positions."""
+ 
+ from __future__ import annotations
+ 
+ import json
++import re
+ from typing import Any
+ 
++from cueforge.findings import SourceRef
++from cueforge.production.source_map import NodePath, SourceMap
++
++_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
++_ESCAPES = {
++    '"': '"',
++    "\\": "\\",
++    "/": "/",
++    "b": "\b",
++    "f": "\f",
++    "n": "\n",
++    "r": "\r",
++    "t": "\t",
++}
++_WHITESPACE = " \t\n\r"
++
+ 
+ def parse_json_text(text: str) -> Any:
+     return json.loads(text, parse_float=lambda token: token, parse_int=lambda token: token)
++
++
++class _Scanner:
++    """Recursive-descent JSON reader that remembers where each node started.
++
++    It accepts what :func:`json.loads` accepts for a production document and
++    yields the same values: numbers stay the text they were written as,
++    duplicate keys let the last one win, strings decode their escapes.  Every
++    node is recorded in a :class:`SourceMap` under its path, with the line
++    and column of its first character.
++    """
++
++    def __init__(self, text: str, path: str, positions: SourceMap) -> None:
++        self.text = text
++        self.path = path
++        self.positions = positions
++        self.index = 0
++        self.line = 1
++        self.column = 1
++
++    # -- low level -------------------------------------------------------
++
++    def error(self, message: str) -> json.JSONDecodeError:
++        return json.JSONDecodeError(message, self.text, self.index)
++
++    def here(self) -> SourceRef:
++        return SourceRef(path=self.path, line=self.line, column=self.column)
++
++    def peek(self) -> str:
++        return self.text[self.index] if self.index < len(self.text) else ""
++
++    def advance(self, count: int = 1) -> None:
++        for _ in range(count):
++            if self.index >= len(self.text):
++                return
++            if self.text[self.index] == "\n":
++                self.line += 1
++                self.column = 1
++            else:
++                self.column += 1
++            self.index += 1
++
++    def skip_whitespace(self) -> None:
++        while self.index < len(self.text) and self.text[self.index] in _WHITESPACE:
++            self.advance()
++
++    def expect(self, char: str, message: str) -> None:
++        if self.peek() != char:
++            raise self.error(message)
++        self.advance()
++
++    # -- grammar ---------------------------------------------------------
++
++    def document(self) -> Any:
++        value = self.value(())
++        self.skip_whitespace()
++        if self.index != len(self.text):
++            raise self.error("Extra data")
++        return value
++
++    def value(self, node: NodePath) -> Any:
++        self.skip_whitespace()
++        char = self.peek()
++        start = self.here()
++        if char == "{":
++            result: Any = self.mapping(node)
++        elif char == "[":
++            result = self.sequence(node)
++        elif char == '"':
++            result = self.string()
++        elif char == "-" or char.isdigit():
++            result = self.number()
++        elif self.text.startswith("true", self.index):
++            self.advance(4)
++            result = True
++        elif self.text.startswith("false", self.index):
++            self.advance(5)
++            result = False
++        elif self.text.startswith("null", self.index):
++            self.advance(4)
++            result = None
++        else:
++            raise self.error("Expecting value")
++        self.positions.add_value(node, start)
++        return result
++
++    def mapping(self, node: NodePath) -> dict[str, Any]:
++        self.advance()  # {
++        result: dict[str, Any] = {}
++        self.skip_whitespace()
++        if self.peek() == "}":
++            self.advance()
++            return result
++        while True:
++            self.skip_whitespace()
++            if self.peek() != '"':
++                raise self.error("Expecting property name enclosed in double quotes")
++            key_start = self.here()
++            key = self.string()
++            self.skip_whitespace()
++            self.expect(":", "Expecting ':' delimiter")
++            child = (*node, key)
++            result[key] = self.value(child)
++            self.positions.add_key(child, key_start)
++            self.skip_whitespace()
++            if self.peek() == ",":
++                self.advance()
++                continue
++            self.expect("}", "Expecting ',' delimiter")
++            return result
++
++    def sequence(self, node: NodePath) -> list[Any]:
++        self.advance()  # [
++        result: list[Any] = []
++        self.skip_whitespace()
++        if self.peek() == "]":
++            self.advance()
++            return result
++        while True:
++            result.append(self.value((*node, len(result))))
++            self.skip_whitespace()
++            if self.peek() == ",":
++                self.advance()
++                continue
++            self.expect("]", "Expecting ',' delimiter")
++            return result
++
++    def string(self) -> str:
++        self.advance()  # opening quote
++        pieces: list[str] = []
++        while True:
++            char = self.peek()
++            if char == "":
++                raise self.error("Unterminated string starting at")
++            if char == '"':
++                self.advance()
++                return "".join(pieces)
++            if char == "\\":
++                self.advance()
++                escape = self.peek()
++                if escape == "u":
++                    pieces.append(self.unicode_escape())
++                    continue
++                if escape not in _ESCAPES:
++                    raise self.error("Invalid \\escape")
++                pieces.append(_ESCAPES[escape])
++                self.advance()
++                continue
++            if ord(char) < 0x20:
++                raise self.error("Invalid control character at")
++            pieces.append(char)
++            self.advance()
++
++    def unicode_escape(self) -> str:
++        code = self.hex4()
++        if 0xD800 <= code <= 0xDBFF and self.text.startswith("\\u", self.index):
++            self.advance(2)
++            low = self.hex4()
++            if 0xDC00 <= low <= 0xDFFF:
++                code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
++                return chr(code)
++            return chr(code) + chr(low)
++        return chr(code)
++
++    def hex4(self) -> int:
++        self.advance()  # u
++        digits = self.text[self.index : self.index + 4]
++        if len(digits) != 4 or any(d not in "0123456789abcdefABCDEF" for d in digits):
++            raise self.error("Invalid \\uXXXX escape")
++        self.advance(4)
++        return int(digits, 16)
++
++    def number(self) -> str:
++        match = _NUMBER.match(self.text, self.index)
++        if match is None:
++            raise self.error("Expecting value")
++        token = match.group(0)
++        self.advance(len(token))
++        return token
++
++
++def parse_json_with_positions(text: str, path: str) -> tuple[Any, SourceMap]:
++    """Parse ``text`` like :func:`parse_json_text` and record every node's position."""
++    positions = SourceMap()
++    value = _Scanner(text, path, positions).document()
++    return value, positions
+diff --git a/src/cueforge/production/locate.py b/src/cueforge/production/locate.py
+new file mode 100644
+index 0000000..2e8c522
+--- /dev/null
++++ b/src/cueforge/production/locate.py
+@@ -0,0 +1,91 @@
++"""Attach source positions to compile findings raised deeper in the pipeline.
++
++The compiler's numeric, trigger, graph and reservation checks describe what
++they found through ``subject_kind``, ``subject_id`` and ``witness``.  Those
++say which authored node the finding is about; this module turns that into a
++:class:`SourceRef` using the production's :class:`SourceMap`, so the rules
++live in one place and every producer keeps its own shape.
++"""
++
++from __future__ import annotations
++
++from cueforge.findings import Finding, SourceRef
++from cueforge.production.models import Production
++from cueforge.production.source_map import NodePath, SourceMap, located
++
++# Fields the compiler names as "<cue id>.<field>", and where each one sits.
++_CUE_FIELDS: dict[str, tuple[str, ...]] = {
++    "duration": ("duration",),
++    "offset": ("trigger", "offset"),
++    "at": ("trigger", "at"),
++    "maximum_speed": ("action", "maximum_speed"),
++}
++
++
++def _field_path(field: str, cue_index: dict[str, int]) -> NodePath | None:
++    """Turn a compiler field name such as ``lx_21.offset`` into a node path."""
++    parts = field.split(".")
++    if len(parts) == 2 and parts[0] in cue_index and parts[1] in _CUE_FIELDS:
++        return ("cues", cue_index[parts[0]], *_CUE_FIELDS[parts[1]])
++    if parts[0] == "events" and len(parts) == 2:
++        return ("events", parts[1])
++    if parts[0] in {"locations", "resources"} and len(parts) == 3:
++        return (parts[0], parts[1], parts[2])
++    return None
++
++
++def _trigger_path(finding: Finding, cue_index: dict[str, int], *tail: str) -> NodePath | None:
++    cue_id = finding.subject_id
++    if cue_id is None or cue_id not in cue_index:
++        return None
++    return ("cues", cue_index[cue_id], "trigger", *tail)
++
++
++def locate_finding(finding: Finding, production: Production) -> Finding:
++    """Return ``finding`` pointing at the authored node it is about, when one exists."""
++    positions: SourceMap | None = production.source_map
++    if positions is None or finding.source is not None:
++        return finding
++    cue_index: dict[str, int] = {}
++    for index, cue in enumerate(production.cues):
++        cue_index.setdefault(cue.id, index)
++    code, kind, subject = finding.code, finding.subject_kind, finding.subject_id
++    ref: SourceRef | None = None
++    path: NodePath | None = None
++
++    if kind == "time":
++        field = subject if subject else finding.message.split(" ", 1)[0]
++        path = _field_path(field, cue_index)
++    elif code == "CF2001" and kind == "resource" and subject is not None:
++        path = ("resources", subject, "capacity")
++    elif code == "CF1004":
++        path = ("version",)
++    elif code == "CF2005":
++        path = ("time_unit",)
++    elif code == "CF3006":
++        path = ("cues",)
++    elif code == "CF4005" and subject is not None:
++        path = ("resources", subject, "initial_state")
++    elif code in {"CF3001", "CF3003"}:
++        path = _trigger_path(finding, cue_index, "after")
++    elif code == "CF3002":
++        cycle = str(finding.witness.get("cycle", "")).split(",")
++        first = cycle[0] if cycle and cycle[0] else subject
++        if first in cue_index:
++            path = ("cues", cue_index[first], "trigger", "after")
++    elif code in {"CF3004", "CF2004"} and kind == "cue":
++        path = _trigger_path(finding, cue_index)
++    elif code in {"CF4001", "CF4002"} and subject is not None:
++        ref = positions.key(("resources", subject))
++    elif code == "CF5001" and subject in cue_index:
++        path = ("cues", cue_index[subject], "duration")
++    elif code == "CF5004" and subject in cue_index:
++        path = ("cues", cue_index[subject], "action")
++
++    if ref is None and path is not None:
++        ref = positions.value(path) if path[-1] == "cues" or len(path) == 1 else positions.nearest(path)
++    return located(finding, ref)
++
++
++def locate_findings(findings: list[Finding] | tuple[Finding, ...], production: Production) -> list[Finding]:
++    return [locate_finding(item, production) for item in findings]
+diff --git a/src/cueforge/production/models.py b/src/cueforge/production/models.py
+index 52cf342..853a74f 100644
+--- a/src/cueforge/production/models.py
++++ b/src/cueforge/production/models.py
+@@ -2,7 +2,8 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Any, Literal, Mapping
++from collections.abc import Mapping
++from typing import Any, Literal
+ 
+ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+ 
+@@ -115,6 +116,8 @@ class Production(FrozenModel):
+     cues: tuple[CueDef, ...] = ()
+     assertions: tuple[AssertionDef, ...] = ()
+     source_path: str = "memory"
++    # Where each authored node sits (a SourceMap); never part of the semantic payload.
++    source_map: Any = Field(default=None, exclude=True, repr=False)
+ 
+     @field_validator("cues", mode="before")
+     @classmethod
+diff --git a/src/cueforge/production/references.py b/src/cueforge/production/references.py
+index 73832a9..f1ffaa4 100644
+--- a/src/cueforge/production/references.py
++++ b/src/cueforge/production/references.py
+@@ -2,42 +2,52 @@
+ 
+ from __future__ import annotations
+ 
++from cueforge.assertions.check import check_assertions
+ from cueforge.codes import CF1001_DUPLICATE_ID, CF1002_MISSING_REF, CF4004_UNKNOWN_RESOURCE
+-from cueforge.findings import Finding, Severity
++from cueforge.findings import Finding, Severity, SourceRef
+ from cueforge.identifiers import identifier_finding, is_valid_identifier
+ from cueforge.production.models import Production
++from cueforge.production.source_map import SourceMap, located
+ 
+ 
+ def collect_reference_findings(production: Production) -> list[Finding]:
+     findings: list[Finding] = []
+     seen_cues: dict[str, int] = {}
++    positions: SourceMap | None = production.source_map
+ 
+-    for name in production.resources:
+-        if not is_valid_identifier(name):
+-            findings.append(identifier_finding("resource", name, production.source_path))
+-    for name in production.performers:
+-        if not is_valid_identifier(name):
+-            findings.append(identifier_finding("performer", name, production.source_path))
+-    for name in production.locations:
+-        if not is_valid_identifier(name):
+-            findings.append(identifier_finding("location", name, production.source_path))
+-    for name in production.events:
+-        if not is_valid_identifier(name):
+-            findings.append(identifier_finding("event", name, production.source_path))
++    def value(*path: str | int) -> SourceRef | None:
++        return positions.value(path) if positions is not None else None
++
++    def key(*path: str | int) -> SourceRef | None:
++        return positions.key(path) if positions is not None else None
++
++    for section, kind in (
++        ("resources", "resource"),
++        ("performers", "performer"),
++        ("locations", "location"),
++        ("events", "event"),
++    ):
++        for name in getattr(production, section):
++            if not is_valid_identifier(name):
++                findings.append(
++                    located(identifier_finding(kind, name, production.source_path), key(section, name))
++                )
+ 
+     for index, cue in enumerate(production.cues):
+         if not is_valid_identifier(cue.id):
+-            findings.append(identifier_finding("cue", cue.id, production.source_path))
++            findings.append(
++                located(identifier_finding("cue", cue.id, production.source_path), value("cues", index, "id"))
++            )
+         if cue.id in seen_cues:
+             findings.append(
+-                Finding(
++                located(Finding(
+                     code=CF1001_DUPLICATE_ID,
+                     severity=Severity.ERROR,
+                     message=f"duplicate cue id {cue.id!r}",
+                     subject_kind="cue",
+                     subject_id=cue.id,
+                     witness={"first_index": seen_cues[cue.id], "second_index": index},
+-                )
++                ), value("cues", index, "id"))
+             )
+         else:
+             seen_cues[cue.id] = index
+@@ -46,91 +56,91 @@ def collect_reference_findings(production: Production) -> list[Finding]:
+             other.id == cue.trigger.after for other in production.cues
+         ):
+             findings.append(
+-                Finding(
++                located(Finding(
+                     code=CF1002_MISSING_REF,
+                     severity=Severity.ERROR,
+                     message=f"cue {cue.id!r} refers to missing cue {cue.trigger.after!r}",
+                     subject_kind="cue",
+                     subject_id=cue.id,
+                     witness={"missing": cue.trigger.after, "field": "after"},
+-                )
++                ), value("cues", index, "trigger", "after"))
+             )
+         if cue.trigger.on is not None and cue.trigger.on not in production.events:
+             findings.append(
+-                Finding(
++                located(Finding(
+                     code=CF1002_MISSING_REF,
+                     severity=Severity.ERROR,
+                     message=f"cue {cue.id!r} refers to missing event {cue.trigger.on!r}",
+                     subject_kind="cue",
+                     subject_id=cue.id,
+                     witness={"missing": cue.trigger.on, "field": "on"},
+-                )
++                ), value("cues", index, "trigger", "on"))
+             )
+-        for resource_id in cue.uses:
++        for position, resource_id in enumerate(cue.uses):
+             if resource_id not in production.resources:
+                 findings.append(
+-                    Finding(
++                    located(Finding(
+                         code=CF4004_UNKNOWN_RESOURCE,
+                         severity=Severity.ERROR,
+                         message=f"cue {cue.id!r} uses unknown resource {resource_id!r}",
+                         subject_kind="cue",
+                         subject_id=cue.id,
+                         witness={"resource": resource_id},
+-                    )
++                    ), value("cues", index, "uses", position))
+                 )
+-        for req in cue.requires:
++        for position, req in enumerate(cue.requires):
+             if req.resource not in production.resources:
+                 findings.append(
+-                    Finding(
++                    located(Finding(
+                         code=CF4004_UNKNOWN_RESOURCE,
+                         severity=Severity.ERROR,
+                         message=f"cue {cue.id!r} requires unknown resource {req.resource!r}",
+                         subject_kind="cue",
+                         subject_id=cue.id,
+                         witness={"resource": req.resource},
+-                    )
++                    ), value("cues", index, "requires", position, "resource"))
+                 )
+         action = cue.action
+         if action is not None:
+             if action.resource is not None and action.resource not in production.resources:
+                 findings.append(
+-                    Finding(
++                    located(Finding(
+                         code=CF4004_UNKNOWN_RESOURCE,
+                         severity=Severity.ERROR,
+                         message=f"cue {cue.id!r} action refers to unknown resource {action.resource!r}",
+                         subject_kind="cue",
+                         subject_id=cue.id,
+                         witness={"resource": action.resource},
+-                    )
++                    ), value("cues", index, "action", "resource"))
+                 )
+             if action.move is not None and action.move not in production.performers:
+                 findings.append(
+-                    Finding(
++                    located(Finding(
+                         code="CF5003",
+                         severity=Severity.ERROR,
+                         message=f"cue {cue.id!r} moves unknown performer {action.move!r}",
+                         subject_kind="cue",
+                         subject_id=cue.id,
+                         witness={"performer": action.move},
+-                    )
++                    ), value("cues", index, "action", "move"))
+                 )
+-            for mark in (action.from_mark, action.to):
++            for field_name, mark in (("from", action.from_mark), ("to", action.to)):
+                 if mark is not None and mark not in production.locations:
+                     findings.append(
+-                        Finding(
++                        located(Finding(
+                             code="CF5002",
+                             severity=Severity.ERROR,
+                             message=f"cue {cue.id!r} refers to unknown location {mark!r}",
+                             subject_kind="cue",
+                             subject_id=cue.id,
+                             witness={"location": mark},
+-                        )
++                        ), value("cues", index, "action", field_name))
+                     )
+             if action.from_mark is not None and action.move is not None:
+                 performer = production.performers.get(action.move)
+                 if performer is not None and performer.initial_mark not in production.locations:
+                     findings.append(
+-                        Finding(
++                        located(Finding(
+                             code="CF5002",
+                             severity=Severity.ERROR,
+                             message=(
+@@ -140,7 +150,10 @@ def collect_reference_findings(production: Production) -> list[Finding]:
+                             subject_kind="performer",
+                             subject_id=action.move,
+                             witness={"location": performer.initial_mark},
+-                        )
++                        ), value("performers", action.move, "initial_mark"))
+                     )
+ 
++    for index, finding in check_assertions(production):
++        findings.append(located(finding, value("assertions", index, "expression")))
++
+     return findings
+diff --git a/src/cueforge/production/source_map.py b/src/cueforge/production/source_map.py
+index 0f07fd6..dd608ef 100644
+--- a/src/cueforge/production/source_map.py
++++ b/src/cueforge/production/source_map.py
+@@ -1,12 +1,16 @@
+-"""Normalize source paths and record locations."""
++"""Normalize source paths and record where authored nodes sit."""
+ 
+ from __future__ import annotations
+ 
++from collections.abc import Iterable, Mapping
++from dataclasses import dataclass, field, replace
+ from pathlib import Path
+ 
+ from cueforge.codes import CF1003_PATH_ESCAPE
+ from cueforge.findings import Finding, Severity, SourceRef
+ 
++NodePath = tuple[str | int, ...]
++
+ 
+ def posix_relpath(path: str) -> str:
+     text = path.replace("\\", "/")
+@@ -46,3 +50,59 @@ def path_escape_finding(raw: str) -> Finding:
+ 
+ def ref_for(path: str, line: int = 1, column: int = 1) -> SourceRef:
+     return SourceRef(path=posix_relpath(path), line=line, column=column)
++
++
++@dataclass
++class SourceMap:
++    """Where every authored node sits, keyed by its path in the loaded mapping.
++
++    A path is the sequence of mapping keys and list indices that reaches the
++    node from the document root, ``("cues", 2, "trigger", "after")`` for
++    example.  ``values`` holds the first character of the node itself,
++    ``keys`` the first character of the key that introduced it.  Lines and
++    columns are 1-based.
++    """
++
++    values: dict[NodePath, SourceRef] = field(default_factory=dict)
++    keys: dict[NodePath, SourceRef] = field(default_factory=dict)
++
++    def add_value(self, path: Iterable[str | int], ref: SourceRef) -> None:
++        self.values[tuple(path)] = ref
++
++    def add_key(self, path: Iterable[str | int], ref: SourceRef) -> None:
++        self.keys[tuple(path)] = ref
++
++    def value(self, path: Iterable[str | int]) -> SourceRef | None:
++        return self.values.get(tuple(path))
++
++    def key(self, path: Iterable[str | int]) -> SourceRef | None:
++        return self.keys.get(tuple(path))
++
++    def nearest(self, path: Iterable[str | int]) -> SourceRef | None:
++        """The node at ``path``, or the closest node that encloses it."""
++        full = tuple(path)
++        for length in range(len(full), -1, -1):
++            ref = self.values.get(full[:length])
++            if ref is not None:
++                return ref
++        return None
++
++    def absorb(self, other: SourceMap, list_offsets: Mapping[str, int]) -> None:
++        """Take another file's positions, shifting list indices by ``list_offsets``.
++
++        A position already known for a path is kept, which matches the merge
++        rule that the first document to set a top-level value owns it.
++        """
++        for source, target in ((other.values, self.values), (other.keys, self.keys)):
++            for path, ref in source.items():
++                shifted = path
++                if len(path) > 1 and isinstance(path[1], int) and path[0] in list_offsets:
++                    shifted = (path[0], path[1] + list_offsets[str(path[0])], *path[2:])
++                target.setdefault(shifted, ref)
++
++
++def located(finding: Finding, ref: SourceRef | None) -> Finding:
++    """Return ``finding`` carrying ``ref``, unless it already has a source."""
++    if ref is None or finding.source is not None:
++        return finding
++    return replace(finding, source=ref)
+diff --git a/src/cueforge/production/yaml_loader.py b/src/cueforge/production/yaml_loader.py
+index 648b617..9a3f8ec 100644
+--- a/src/cueforge/production/yaml_loader.py
++++ b/src/cueforge/production/yaml_loader.py
+@@ -1,12 +1,19 @@
+-"""YAML loader that preserves numeric tokens as decimal text."""
++"""YAML loader that preserves numeric tokens as decimal text and node positions."""
+ 
+ from __future__ import annotations
+ 
+ from typing import Any
+ 
++import copy
++
+ import yaml
++from yaml.error import Mark
++from yaml.events import AliasEvent
+ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
+ 
++from cueforge.findings import SourceRef
++from cueforge.production.source_map import NodePath, SourceMap
++
+ 
+ class DecimalSafeLoader(yaml.SafeLoader):
+     """SafeLoader that does not implicitly convert ints, floats, or timestamps."""
+@@ -63,3 +70,101 @@ def parse_yaml_text(text: str) -> Any:
+         return _node_value(loader, node)
+     finally:
+         loader.dispose()
++
++
++def _content_mark(mark: Mark) -> Mark:
++    """The mark of a node's content, past any ``&anchor`` or ``!tag`` in front of it.
++
++    PyYAML starts an anchored node at the ``&``; the anchor names the node and
++    the node itself opens after it, at its first key, its ``{`` or its quote.
++    """
++    text = mark.buffer or ""
++    index = mark.index
++    while index < len(text):
++        char = text[index]
++        if char in "&!":
++            index += 1
++            while index < len(text) and text[index] not in " \t\r\n\0[]{},":
++                index += 1
++        elif char in " \t\r\n":
++            index += 1
++        elif char == "#":
++            while index < len(text) and text[index] != "\n":
++                index += 1
++        else:
++            break
++    line = text.count("\n", 0, index)
++    column = index - (text.rfind("\n", 0, index) + 1)
++    return Mark(mark.name, index, line, column, mark.buffer, mark.pointer)
++
++
++class _PositionLoader(DecimalSafeLoader):
++    """Composer that remembers alias sites and starts anchored nodes at their content."""
++
++    def compose_node(self, parent: Node | None, index: Any) -> Node:  # type: ignore[override]
++        event = self.peek_event()
++        node = super().compose_node(parent, index)
++        if isinstance(event, AliasEvent):
++            # The composer hands back the anchored node itself; keep it shared
++            # for values but remember where the reuse was written.
++            reached = copy.copy(node)
++            reached.alias_mark = event.start_mark  # type: ignore[attr-defined]
++            return reached
++        if node is not None and getattr(event, "anchor", None) is not None:
++            node.start_mark = _content_mark(event.start_mark)
++        return node
++
++
++def _ref(mark: Mark, path: str) -> SourceRef:
++    return SourceRef(path=path, line=mark.line + 1, column=mark.column + 1)
++
++
++def _positioned_value(
++    loader: DecimalSafeLoader,
++    node: Node,
++    positions: SourceMap,
++    path: str,
++    at: NodePath,
++    through: SourceRef | None = None,
++) -> Any:
++    """Like ``_node_value``, recording where every node and key starts.
++
++    ``through`` is the ``*alias`` the walk came in by, if any: everything
++    reached through an alias points at that alias, and an alias met inside
++    another keeps the outer one, so a finding names the outermost reuse the
++    author wrote rather than the anchor the text was taken from.
++    """
++    alias_mark = getattr(node, "alias_mark", None)
++    if through is None and alias_mark is not None:
++        through = _ref(alias_mark, path)
++    positions.add_value(at, through if through is not None else _ref(node.start_mark, path))
++    if isinstance(node, SequenceNode):
++        return [
++            _positioned_value(loader, child, positions, path, (*at, index), through)
++            for index, child in enumerate(node.value)
++        ]
++    if isinstance(node, MappingNode):
++        mapping: dict[str, Any] = {}
++        for key_node, value_node in node.value:
++            key = str(_node_value(loader, key_node))
++            positions.add_key(
++                (*at, key), through if through is not None else _ref(key_node.start_mark, path)
++            )
++            mapping[key] = _positioned_value(
++                loader, value_node, positions, path, (*at, key), through
++            )
++        return mapping
++    return _node_value(loader, node)
++
++
++def parse_yaml_with_positions(text: str, path: str) -> tuple[Any, SourceMap]:
++    """Parse ``text`` like :func:`parse_yaml_text` and record every node's position."""
++    positions = SourceMap()
++    loader = _PositionLoader(text)
++    try:
++        node = loader.get_single_node()
++        if node is None:
++            return None, positions
++        return _positioned_value(loader, node, positions, path, ()), positions
++    finally:
++        loader.dispose()

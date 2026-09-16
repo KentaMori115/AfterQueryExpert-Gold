@@ -1,0 +1,924 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index eb0acc6..825a768 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,8 @@ based on [Keep a Changelog](https://keepachangelog.com/).
+ ## [Unreleased]
+ 
+ ### Added
++- `UPDATE` and `DELETE`, with `WHERE` matching on `TRUE` only, pre-statement
++  reads on the right-hand side of `SET`, and all-or-nothing application.
+ - `EXPLAIN <select>` returns the optimized logical plan as a result set.
+ - String concatenation operator `||`.
+ - Scalar functions: `POWER`, `SQRT`, `SIGN`, `LTRIM`, `RTRIM`, `REVERSE`,
+diff --git a/README.md b/README.md
+index a795043..532e493 100644
+--- a/README.md
++++ b/README.md
+@@ -35,6 +35,10 @@ println!("{}", tanager::render_table(&result));
+   `DROP TABLE`, and multi-row `INSERT` with optional column lists. Inserts are
+   atomic: a row that violates a type or `NOT NULL` constraint rejects the whole
+   statement.
++- **Row mutation** — `UPDATE ... SET ... WHERE` and `DELETE FROM ... WHERE`,
++  both matching only rows whose predicate is `TRUE`. Assignments read the row
++  as it stood before the statement, so `SET a = b, b = a` swaps two columns, and
++  a rejected value leaves the table exactly as it was.
+ - **Queries** — `SELECT` with projection and aliases, `WHERE`, `INNER`/`LEFT`
+   joins (with table aliases and self-joins), `GROUP BY` / `HAVING`, `DISTINCT`,
+   `ORDER BY` (ASC/DESC, `NULLS FIRST`/`LAST`, positional and non-projected keys),
+@@ -114,7 +118,7 @@ id | name
+ ## Supported SQL grammar (informal)
+ 
+ ```
+-statement   := select | insert | create_table | drop_table
++statement   := select | insert | update | delete | create_table | drop_table
+ select      := SELECT [DISTINCT] select_list
+                [FROM table [alias] { join }]
+                [WHERE expr]
+@@ -124,6 +128,8 @@ select      := SELECT [DISTINCT] select_list
+ join        := [INNER | LEFT] JOIN table [alias] ON expr
+ sort_key    := expr [ASC | DESC] [NULLS (FIRST | LAST)]
+ insert      := INSERT INTO table [ ( col {, col} ) ] VALUES tuple {, tuple}
++update      := UPDATE table [alias] SET col = expr {, col = expr} [WHERE expr]
++delete      := DELETE FROM table [alias] [WHERE expr]
+ create_table:= CREATE TABLE [IF NOT EXISTS] table ( col type [NOT NULL] {, ...} )
+ type        := INTEGER | FLOAT | TEXT | BOOLEAN
+ ```
+diff --git a/docs/DESIGN.md b/docs/DESIGN.md
+index 2afea81..ae5e516 100644
+--- a/docs/DESIGN.md
++++ b/docs/DESIGN.md
+@@ -50,6 +50,18 @@ earlier stage:
+   case they ride along as hidden projection columns that a final projection
+   strips after the sort.
+ 
++## Mutating statements
++
++`UPDATE` and `DELETE` read one base table, so they skip the plan entirely:
++`planner::dml` binds the target's schema into a scope, resolves each `SET`
++column to a position, and hands `api` a predicate plus assignments. `api` builds
++and validates every candidate row against the table before writing a single
++column, which is what makes a statement all-or-nothing, and it reads assignment
++right-hand sides from the stored row rather than from the row it is building, so
++assignments cannot see each other. Storage then either overwrites rows in place
++or compacts each column vector around the removed positions, leaving the
++survivors in their stored order.
++
+ ## Adding a feature
+ 
+ - **A scalar function**: add a `ScalarFn` variant, its name mapping, its
+diff --git a/src/api.rs b/src/api.rs
+index fee1011..fa2f032 100644
+--- a/src/api.rs
++++ b/src/api.rs
+@@ -1,10 +1,13 @@
+ //! The high-level embedding API: [`Database`], [`QueryResult`], and [`Outcome`].
+ 
+-use crate::ast::statement::{CreateTableStmt, DropTableStmt, InsertStmt, SelectStmt, Statement};
++use crate::ast::statement::{
++    CreateTableStmt, DeleteStmt, DropTableStmt, InsertStmt, SelectStmt, Statement, UpdateStmt,
++};
+ use crate::error::{Error, Result};
+ use crate::exec::Executor;
+ use crate::optimizer::Optimizer;
+ use crate::parser::{parse_program, parse_statement};
++use crate::planner::dml::{bind_delete, bind_update, row_matches};
+ use crate::planner::scope::Scope;
+ use crate::planner::Binder;
+ use crate::storage::{Catalog, Row};
+@@ -21,6 +24,24 @@
+ /// assert_eq!(result.row_count(), 1);
+ /// assert_eq!(result.rows()[0].get(0).unwrap().to_string(), "grace");
+ /// ```
++///
++/// Stored rows can be rewritten and removed as well:
++///
++/// ```
++/// use tanager::{Database, Outcome};
++/// let mut db = Database::new();
++/// db.execute("CREATE TABLE t (id INTEGER, name TEXT)").unwrap();
++/// db.execute("INSERT INTO t VALUES (1, 'ada'), (2, 'grace')").unwrap();
++/// assert_eq!(
++///     db.execute("UPDATE t SET name = 'hopper' WHERE id = 2").unwrap(),
++///     Outcome::Updated(1)
++/// );
++/// assert_eq!(
++///     db.execute("DELETE FROM t WHERE id = 1").unwrap(),
++///     Outcome::Deleted(1)
++/// );
++/// assert_eq!(db.query("SELECT name FROM t").unwrap().row_count(), 1);
++/// ```
+ pub struct Database {
+     catalog: Catalog,
+     optimizer: Optimizer,
+@@ -35,6 +56,10 @@ pub enum Outcome {
+     TableDropped(String),
+     /// `INSERT` added this many rows.
+     Inserted(usize),
++    /// `UPDATE` left this many rows holding different values.
++    Updated(usize),
++    /// `DELETE` removed this many rows.
++    Deleted(usize),
+     /// `SELECT` produced a result set.
+     Query(QueryResult),
+ }
+@@ -99,6 +124,8 @@ fn execute_statement(&mut self, stmt: Statement) -> Result<Outcome> {
+             Statement::CreateTable(c) => self.exec_create(c),
+             Statement::DropTable(d) => self.exec_drop(d),
+             Statement::Insert(i) => self.exec_insert(i),
++            Statement::Update(u) => self.exec_update(u),
++            Statement::Delete(d) => self.exec_delete(d),
+             Statement::Select(s) => Ok(Outcome::Query(self.run_select(&s)?)),
+             Statement::Explain(s) => Ok(Outcome::Query(self.run_explain(&s)?)),
+         }
+@@ -192,6 +219,52 @@ fn exec_insert(&mut self, stmt: InsertStmt) -> Result<Outcome> {
+         Ok(Outcome::Inserted(n))
+     }
+ 
++    /// Apply an `UPDATE`.
++    ///
++    /// Every candidate row is built and validated before a single column is
++    /// touched, so a row the table refuses — a widening that does not exist, a
++    /// `NULL` under `NOT NULL` — leaves the whole statement without effect.
++    /// Assignments read the row as it stood before the statement, which is what
++    /// makes `SET a = b, b = a` a swap rather than two copies of `b`.
++    fn exec_update(&mut self, stmt: UpdateStmt) -> Result<Outcome> {
++        let bound = bind_update(&self.catalog, &stmt)?;
++        let table = self.catalog.table(&bound.table)?;
++
++        let mut pending: Vec<(usize, Row)> = Vec::new();
++        for (position, stored) in table.iter_rows().enumerate() {
++            if !row_matches(bound.predicate.as_ref(), &stored)? {
++                continue;
++            }
++            let mut values = stored.values().to_vec();
++            for assignment in &bound.assignments {
++                values[assignment.column] = crate::exec::eval::eval(&assignment.value, &stored)?;
++            }
++            let candidate = table.coerce_row(Row::new(values))?;
++            // A matched row whose stored values do not move is not a change.
++            if candidate != stored {
++                pending.push((position, candidate));
++            }
++        }
++
++        let changed = pending.len();
++        self.catalog.table_mut(&bound.table)?.replace_rows(pending)?;
++        Ok(Outcome::Updated(changed))
++    }
++
++    /// Apply a `DELETE`, keeping the surviving rows in their stored order.
++    fn exec_delete(&mut self, stmt: DeleteStmt) -> Result<Outcome> {
++        let bound = bind_delete(&self.catalog, &stmt)?;
++        let table = self.catalog.table(&bound.table)?;
++
++        let mut doomed = Vec::with_capacity(table.row_count());
++        for stored in table.iter_rows() {
++            doomed.push(row_matches(bound.predicate.as_ref(), &stored)?);
++        }
++
++        let removed = self.catalog.table_mut(&bound.table)?.remove_rows(&doomed);
++        Ok(Outcome::Deleted(removed))
++    }
++
+     fn run_select(&self, select: &SelectStmt) -> Result<QueryResult> {
+         let plan = Binder::new(&self.catalog).bind_select(select)?;
+         let plan = self.optimizer.optimize(plan)?;
+diff --git a/src/ast/statement.rs b/src/ast/statement.rs
+index 9ddf08b..ba1c310 100644
+--- a/src/ast/statement.rs
++++ b/src/ast/statement.rs
+@@ -8,6 +8,8 @@
+ pub enum Statement {
+     Select(SelectStmt),
+     Insert(InsertStmt),
++    Update(UpdateStmt),
++    Delete(DeleteStmt),
+     CreateTable(CreateTableStmt),
+     DropTable(DropTableStmt),
+     /// `EXPLAIN <select>` — return the optimized plan instead of executing it.
+@@ -154,6 +156,33 @@ pub struct InsertStmt {
+     pub rows: Vec<Vec<Expr>>,
+ }
+ 
++/// One `column = expression` assignment inside an `UPDATE` statement.
++#[derive(Debug, Clone, PartialEq)]
++pub struct Assignment {
++    pub column: String,
++    pub value: Expr,
++}
++
++/// An `UPDATE` statement: assignments over the rows a `WHERE` keeps.
++#[derive(Debug, Clone, PartialEq)]
++pub struct UpdateStmt {
++    /// The table being written, with its optional alias.
++    pub target: TableFactor,
++    /// The `SET` list, in written order.
++    pub assignments: Vec<Assignment>,
++    /// The `WHERE` predicate; `None` matches every row.
++    pub selection: Option<Expr>,
++}
++
++/// A `DELETE` statement: the rows a `WHERE` keeps are removed.
++#[derive(Debug, Clone, PartialEq)]
++pub struct DeleteStmt {
++    /// The table being written, with its optional alias.
++    pub target: TableFactor,
++    /// The `WHERE` predicate; `None` matches every row.
++    pub selection: Option<Expr>,
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -172,6 +201,30 @@ fn table_factor_binding_prefers_alias() {
+         assert_eq!(tf2.binding_name(), "employees");
+     }
+ 
++    #[test]
++    fn mutation_targets_carry_their_alias() {
++        let update = UpdateStmt {
++            target: TableFactor {
++                name: "employees".into(),
++                alias: Some("e".into()),
++            },
++            assignments: vec![Assignment {
++                column: "salary".into(),
++                value: Expr::Literal(crate::types::Value::Integer(1)),
++            }],
++            selection: None,
++        };
++        assert_eq!(update.target.binding_name(), "e");
++        let delete = DeleteStmt {
++            target: TableFactor {
++                name: "employees".into(),
++                alias: None,
++            },
++            selection: None,
++        };
++        assert_eq!(delete.target.binding_name(), "employees");
++    }
++
+     #[test]
+     fn join_keywords() {
+         assert_eq!(JoinType::Inner.keyword(), "INNER JOIN");
+diff --git a/src/bin/tanager.rs b/src/bin/tanager.rs
+index d3b88f6..5ad6a74 100644
+--- a/src/bin/tanager.rs
++++ b/src/bin/tanager.rs
+@@ -47,6 +47,8 @@ fn print_outcome(outcome: &Outcome) {
+     match outcome {
+         Outcome::Query(result) => println!("{}", render_table(result)),
+         Outcome::Inserted(n) => println!("INSERT {}", n),
++        Outcome::Updated(n) => println!("UPDATE {}", n),
++        Outcome::Deleted(n) => println!("DELETE {}", n),
+         Outcome::TableCreated(name) => println!("CREATE TABLE {}", name),
+         Outcome::TableDropped(name) => println!("DROP TABLE {}", name),
+     }
+diff --git a/src/parser/keyword.rs b/src/parser/keyword.rs
+index 89bc64c..756d018 100644
+--- a/src/parser/keyword.rs
++++ b/src/parser/keyword.rs
+@@ -21,6 +21,9 @@ pub enum Keyword {
+     Insert,
+     Into,
+     Values,
++    Update,
++    Set,
++    Delete,
+     Create,
+     Table,
+     Drop,
+@@ -77,6 +80,9 @@ pub fn from_upper(word: &str) -> Option<Keyword> {
+             "INSERT" => Keyword::Insert,
+             "INTO" => Keyword::Into,
+             "VALUES" => Keyword::Values,
++            "UPDATE" => Keyword::Update,
++            "SET" => Keyword::Set,
++            "DELETE" => Keyword::Delete,
+             "CREATE" => Keyword::Create,
+             "TABLE" => Keyword::Table,
+             "DROP" => Keyword::Drop,
+diff --git a/src/parser/parser.rs b/src/parser/parser.rs
+index b411018..7c81f3a 100644
+--- a/src/parser/parser.rs
++++ b/src/parser/parser.rs
+@@ -4,8 +4,9 @@
+ use crate::ast::expr::{ColumnRef, Expr};
+ use crate::ast::operators::{BinaryOp, UnaryOp};
+ use crate::ast::statement::{
+-    ColumnDef, CreateTableStmt, DropTableStmt, FromClause, InsertStmt, Join, JoinType, OrderByExpr,
+-    SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
++    Assignment, ColumnDef, CreateTableStmt, DeleteStmt, DropTableStmt, FromClause, InsertStmt, Join,
++    JoinType, OrderByExpr, SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
++    UpdateStmt,
+ };
+ use crate::error::{Error, Result};
+ use crate::parser::keyword::Keyword;
+@@ -167,6 +168,8 @@ fn parse_statement(&mut self) -> Result<Statement> {
+             } => match kw {
+                 Keyword::Select => Ok(Statement::Select(self.parse_select()?)),
+                 Keyword::Insert => Ok(Statement::Insert(self.parse_insert()?)),
++                Keyword::Update => Ok(Statement::Update(self.parse_update()?)),
++                Keyword::Delete => Ok(Statement::Delete(self.parse_delete()?)),
+                 Keyword::Create => Ok(Statement::CreateTable(self.parse_create_table()?)),
+                 Keyword::Drop => Ok(Statement::DropTable(self.parse_drop_table()?)),
+                 Keyword::Explain => {
+@@ -456,6 +459,49 @@ fn parse_insert(&mut self) -> Result<InsertStmt> {
+         })
+     }
+ 
++    // ---- UPDATE / DELETE ----
++
++    fn parse_update(&mut self) -> Result<UpdateStmt> {
++        self.expect_keyword(Keyword::Update)?;
++        let target = self.parse_table_factor()?;
++        self.expect_keyword(Keyword::Set)?;
++        let mut assignments = vec![self.parse_assignment()?];
++        while self.eat(&TokenKind::Comma) {
++            assignments.push(self.parse_assignment()?);
++        }
++        let selection = self.parse_optional_where()?;
++        Ok(UpdateStmt {
++            target,
++            assignments,
++            selection,
++        })
++    }
++
++    /// One `column = expression` pair of a `SET` list.
++    fn parse_assignment(&mut self) -> Result<Assignment> {
++        let column = self.expect_identifier()?;
++        self.expect(&TokenKind::Eq)?;
++        let value = self.parse_expr(0)?;
++        Ok(Assignment { column, value })
++    }
++
++    fn parse_delete(&mut self) -> Result<DeleteStmt> {
++        self.expect_keyword(Keyword::Delete)?;
++        self.expect_keyword(Keyword::From)?;
++        let target = self.parse_table_factor()?;
++        let selection = self.parse_optional_where()?;
++        Ok(DeleteStmt { target, selection })
++    }
++
++    /// An optional trailing `WHERE <expr>`, shared by `UPDATE` and `DELETE`.
++    fn parse_optional_where(&mut self) -> Result<Option<Expr>> {
++        if self.eat_keyword(Keyword::Where) {
++            Ok(Some(self.parse_expr(0)?))
++        } else {
++            Ok(None)
++        }
++    }
++
+     // ---- expressions (Pratt) ----
+ 
+     fn parse_expr(&mut self, min_bp: u8) -> Result<Expr> {
+@@ -755,6 +801,57 @@ fn expr(sql: &str) -> Expr {
+         }
+     }
+ 
++    fn update_of(sql: &str) -> UpdateStmt {
++        match parse_statement(sql).unwrap() {
++            Statement::Update(u) => u,
++            other => panic!("expected update, got {:?}", other),
++        }
++    }
++
++    #[test]
++    fn parses_assignment_list_in_written_order() {
++        let stmt = update_of("UPDATE t SET b = a, a = 1 + 2 WHERE id = 7");
++        assert_eq!(stmt.target.name, "t");
++        assert_eq!(stmt.assignments[0].column, "b");
++        assert_eq!(stmt.assignments[1].column, "a");
++        assert!(stmt.selection.is_some());
++    }
++
++    #[test]
++    fn parses_update_target_alias() {
++        let stmt = update_of("UPDATE t AS x SET a = x.a + 1");
++        assert_eq!(stmt.target.binding_name(), "x");
++        assert!(stmt.selection.is_none());
++    }
++
++    #[test]
++    fn parses_delete_with_and_without_where() {
++        match parse_statement("DELETE FROM t").unwrap() {
++            Statement::Delete(d) => {
++                assert_eq!(d.target.name, "t");
++                assert!(d.selection.is_none());
++            }
++            other => panic!("expected delete, got {:?}", other),
++        }
++        match parse_statement("DELETE FROM t WHERE a IS NULL").unwrap() {
++            Statement::Delete(d) => assert!(d.selection.is_some()),
++            other => panic!("expected delete, got {:?}", other),
++        }
++    }
++
++    #[test]
++    fn delete_requires_from() {
++        let err = parse_statement("DELETE t").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Parse);
++    }
++
++    #[test]
++    fn update_requires_a_set_list() {
++        assert!(parse_statement("UPDATE t WHERE a = 1").is_err());
++        assert!(parse_statement("UPDATE t SET").is_err());
++        assert!(parse_statement("UPDATE t SET a").is_err());
++    }
++
+     #[test]
+     fn precedence_multiplies_before_adds() {
+         // 1 + 2 * 3  ==  1 + (2 * 3)
+diff --git a/src/planner/dml.rs b/src/planner/dml.rs
+new file mode 100644
+index 0000000..6d70f00
+--- /dev/null
++++ b/src/planner/dml.rs
+@@ -0,0 +1,279 @@
++//! Binding for the row-mutating statements, `UPDATE` and `DELETE`.
++//!
++//! Both statements read exactly one base table, so their scope is the target
++//! relation alone and every column reference binds to a position in that
++//! table's schema. The result is deliberately *not* a [`LogicalPlan`]: a
++//! mutation has no output relation, so what the caller needs is the target
++//! name, a predicate to test each stored row against, and (for `UPDATE`) the
++//! assignments to apply, each already resolved to a column position.
++
++use crate::ast::statement::{DeleteStmt, UpdateStmt};
++use crate::error::{Error, Result};
++use crate::optimizer::constant_folding::fold;
++use crate::planner::binder::Binder;
++use crate::planner::binder_util::require_predicate;
++use crate::planner::bound::BoundExpr;
++use crate::planner::scope::Scope;
++use crate::storage::{Catalog, Row};
++use crate::types::{DataType, Schema};
++
++/// One `SET` assignment, resolved to a column position in the target schema.
++#[derive(Debug, Clone, PartialEq)]
++pub struct BoundAssignment {
++    /// Position of the assigned column in the table's schema.
++    pub column: usize,
++    /// The value expression, bound against the target relation.
++    pub value: BoundExpr,
++}
++
++/// A bound `UPDATE`: which table, which assignments, and which rows.
++#[derive(Debug, Clone, PartialEq)]
++pub struct BoundUpdate {
++    pub table: String,
++    pub assignments: Vec<BoundAssignment>,
++    /// `None` when the statement carries no `WHERE`, which matches every row.
++    pub predicate: Option<BoundExpr>,
++}
++
++/// A bound `DELETE`: which table, and which rows.
++#[derive(Debug, Clone, PartialEq)]
++pub struct BoundDelete {
++    pub table: String,
++    /// `None` when the statement carries no `WHERE`, which matches every row.
++    pub predicate: Option<BoundExpr>,
++}
++
++/// Bind an `UPDATE` against `catalog`.
++///
++/// Errors are the ones the rest of the engine already raises: `Catalog` for an
++/// unknown table, `Binder` for an unknown column, a repeated assignment target,
++/// an aggregate call, or a non-boolean `WHERE`, and `Type` when an assigned
++/// expression cannot be stored in its column.
++pub fn bind_update(catalog: &Catalog, stmt: &UpdateStmt) -> Result<BoundUpdate> {
++    let schema = catalog.schema_of(&stmt.target.name)?;
++    let scope = Scope::from_table(&stmt.target.name, &schema, 0);
++    let binder = Binder::new(catalog);
++
++    let mut assignments: Vec<BoundAssignment> = Vec::with_capacity(stmt.assignments.len());
++    for assignment in &stmt.assignments {
++        let column = schema.index_of(&assignment.column)?;
++        if assignments.iter().any(|a| a.column == column) {
++            return Err(Error::binder(format!(
++                "column '{}' is assigned more than once",
++                assignment.column
++            )));
++        }
++        // Both a `SET` right-hand side and a `WHERE` are evaluated once per
++        // stored row, so folding their constant parts here pays per row.
++        let value = fold(binder.bind_scalar(&assignment.value, &scope)?);
++        check_assignable(&schema, column, value.data_type())?;
++        assignments.push(BoundAssignment { column, value });
++    }
++
++    Ok(BoundUpdate {
++        table: stmt.target.name.clone(),
++        assignments,
++        predicate: bind_predicate(&binder, &scope, stmt.selection.as_ref())?,
++    })
++}
++
++/// Bind a `DELETE` against `catalog`.
++pub fn bind_delete(catalog: &Catalog, stmt: &DeleteStmt) -> Result<BoundDelete> {
++    let schema = catalog.schema_of(&stmt.target.name)?;
++    let scope = Scope::from_table(stmt.target.binding_name(), &schema, 0);
++    let binder = Binder::new(catalog);
++    Ok(BoundDelete {
++        table: stmt.target.name.clone(),
++        predicate: bind_predicate(&binder, &scope, stmt.selection.as_ref())?,
++    })
++}
++
++/// Bind an optional `WHERE` clause, requiring a boolean result.
++fn bind_predicate(
++    binder: &Binder<'_>,
++    scope: &Scope,
++    selection: Option<&crate::ast::expr::Expr>,
++) -> Result<Option<BoundExpr>> {
++    match selection {
++        None => Ok(None),
++        Some(expr) => {
++            let bound = binder.bind_scalar(expr, scope)?;
++            require_predicate("WHERE", &bound)?;
++            Ok(Some(fold(bound)))
++        }
++    }
++}
++
++/// Reject an assignment whose static type can never be stored in the column.
++///
++/// `NULL` passes here and is checked against the column's nullability when the
++/// value is written; an `INTEGER` expression is accepted for a `FLOAT` column
++/// because storage widens it, exactly as it does for `INSERT`.
++fn check_assignable(schema: &Schema, column: usize, actual: DataType) -> Result<()> {
++    let field = &schema.fields()[column];
++    let expected = field.data_type();
++    let ok = actual == expected
++        || actual == DataType::Null
++        || (actual == DataType::Integer && expected == DataType::Float);
++    if ok {
++        Ok(())
++    } else {
++        Err(Error::type_error(format!(
++            "column '{}' expects {}, got {}",
++            field.name(),
++            expected,
++            actual
++        )))
++    }
++}
++
++/// Whether `row` is matched by an optional predicate. A missing `WHERE` matches
++/// everything; a present one matches only where it evaluates to `TRUE`, so both
++/// `FALSE` and `NULL` leave the row alone.
++pub fn row_matches(predicate: Option<&BoundExpr>, row: &Row) -> Result<bool> {
++    match predicate {
++        None => Ok(true),
++        Some(expr) => Ok(crate::exec::eval(expr, row)?.is_truthy()),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::parser::parse_statement;
++    use crate::ast::statement::Statement;
++    use crate::types::{Field, Value};
++
++    fn catalog() -> Catalog {
++        let mut catalog = Catalog::new();
++        let schema = Schema::new(vec![
++            Field::with_nullability("id", DataType::Integer, false),
++            Field::new("name", DataType::Text),
++            Field::new("score", DataType::Float),
++        ])
++        .unwrap();
++        catalog.create_table("t", schema).unwrap();
++        catalog
++    }
++
++    fn update_of(sql: &str) -> Result<BoundUpdate> {
++        match parse_statement(sql).unwrap() {
++            Statement::Update(u) => bind_update(&catalog(), &u),
++            other => panic!("not an update: {:?}", other),
++        }
++    }
++
++    #[test]
++    fn resolves_assignment_positions() {
++        let bound = update_of("UPDATE t SET score = 1, name = 'x'").unwrap();
++        assert_eq!(bound.table, "t");
++        assert_eq!(bound.assignments[0].column, 2);
++        assert_eq!(bound.assignments[1].column, 1);
++        assert!(bound.predicate.is_none());
++    }
++
++    #[test]
++    fn rejects_repeated_target_column() {
++        let err = update_of("UPDATE t SET name = 'a', name = 'b'").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Binder);
++    }
++
++    #[test]
++    fn rejects_unstorable_assignment() {
++        let err = update_of("UPDATE t SET id = 'nope'").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Type);
++    }
++
++    #[test]
++    fn rejects_non_boolean_where() {
++        let err = update_of("UPDATE t SET name = 'a' WHERE id").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Binder);
++    }
++
++    fn delete_of(sql: &str) -> Result<BoundDelete> {
++        match parse_statement(sql).unwrap() {
++            Statement::Delete(d) => bind_delete(&catalog(), &d),
++            other => panic!("not a delete: {:?}", other),
++        }
++    }
++
++    #[test]
++    fn widens_an_integer_assignment_into_a_float_column() {
++        let bound = update_of("UPDATE t SET score = 3").unwrap();
++        assert_eq!(bound.assignments[0].column, 2);
++    }
++
++    #[test]
++    fn rejects_a_narrowing_assignment() {
++        let err = update_of("UPDATE t SET id = 1.5").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Type);
++    }
++
++    #[test]
++    fn rejects_an_unknown_target_column() {
++        let err = update_of("UPDATE t SET missing = 1").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Binder);
++    }
++
++    #[test]
++    fn rejects_an_aggregate_in_an_assignment() {
++        let err = update_of("UPDATE t SET id = COUNT(*)").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Binder);
++    }
++
++    #[test]
++    fn reports_an_unknown_table_as_a_catalog_error() {
++        let err = delete_of("DELETE FROM missing").unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Catalog);
++    }
++
++    #[test]
++    fn an_alias_qualifies_the_target_columns() {
++        let bound = delete_of("DELETE FROM t AS x WHERE x.id = 1").unwrap();
++        assert_eq!(bound.table, "t");
++        assert!(bound.predicate.is_some());
++        // The table's own name is out of scope once an alias renames it.
++        assert!(delete_of("DELETE FROM t AS x WHERE t.id = 1").is_err());
++    }
++
++    #[test]
++    fn folds_a_constant_predicate() {
++        let bound = delete_of("DELETE FROM t WHERE 2 > 1").unwrap();
++        assert_eq!(
++            bound.predicate,
++            Some(BoundExpr::Literal(Value::Boolean(true)))
++        );
++    }
++
++    #[test]
++    fn a_predicate_keeps_only_true_rows() {
++        let bound = delete_of("DELETE FROM t WHERE name = 'a'").unwrap();
++        let predicate = bound.predicate.as_ref();
++        let matching = Row::new(vec![Value::Integer(1), Value::text("a"), Value::Float(1.0)]);
++        let other = Row::new(vec![Value::Integer(2), Value::text("b"), Value::Float(1.0)]);
++        let unknown = Row::new(vec![Value::Integer(3), Value::Null, Value::Float(1.0)]);
++        assert!(row_matches(predicate, &matching).unwrap());
++        assert!(!row_matches(predicate, &other).unwrap());
++        assert!(!row_matches(predicate, &unknown).unwrap());
++    }
++
++    #[test]
++    fn a_delete_carries_no_assignments() {
++        let bound = delete_of("DELETE FROM t").unwrap();
++        assert!(bound.predicate.is_none());
++        assert_eq!(bound.table, "t");
++    }
++
++    #[test]
++    fn assignments_keep_their_written_order() {
++        let bound = update_of("UPDATE t SET name = 'a', score = 2, id = 3").unwrap();
++        let columns: Vec<usize> = bound.assignments.iter().map(|a| a.column).collect();
++        assert_eq!(columns, vec![1, 2, 0]);
++    }
++
++    #[test]
++    fn missing_predicate_matches_every_row() {
++        let row = Row::new(vec![Value::Integer(1), Value::text("a"), Value::Float(1.0)]);
++        assert!(row_matches(None, &row).unwrap());
++    }
++}
+diff --git a/src/planner/mod.rs b/src/planner/mod.rs
+index f479871..f1bf5a4 100644
+--- a/src/planner/mod.rs
++++ b/src/planner/mod.rs
+@@ -3,10 +3,12 @@
+ pub mod binder;
+ mod binder_util;
+ pub mod bound;
++pub mod dml;
+ pub mod logical;
+ pub mod scope;
+ 
+ pub use binder::Binder;
++pub use dml::{BoundDelete, BoundUpdate};
+ pub use bound::{BoundAggregate, BoundExpr};
+ pub use logical::{LogicalPlan, SortKey};
+ pub use scope::Scope;
+diff --git a/src/storage/column.rs b/src/storage/column.rs
+index 5379567..1affd92 100644
+--- a/src/storage/column.rs
++++ b/src/storage/column.rs
+@@ -68,6 +68,26 @@ pub fn push_unchecked(&mut self, value: Value) {
+         self.values.push(value);
+     }
+ 
++    /// Overwrite the value at `index` with one already known to match the
++    /// column type. Out-of-range positions are ignored.
++    pub fn set_unchecked(&mut self, index: usize, value: Value) {
++        if let Some(slot) = self.values.get_mut(index) {
++            *slot = value;
++        }
++    }
++
++    /// Drop every value whose flag in `remove` is `true`, keeping the rest in
++    /// their original order. Flags beyond the column's length are ignored, and
++    /// a short `remove` keeps the trailing values.
++    pub fn remove_marked(&mut self, remove: &[bool]) {
++        let mut position = 0;
++        self.values.retain(|_| {
++            let drop = remove.get(position).copied().unwrap_or(false);
++            position += 1;
++            !drop
++        });
++    }
++
+     /// Iterate over the stored values.
+     pub fn iter(&self) -> impl Iterator<Item = &Value> {
+         self.values.iter()
+diff --git a/src/storage/table.rs b/src/storage/table.rs
+index fc81437..b744a7e 100644
+--- a/src/storage/table.rs
++++ b/src/storage/table.rs
+@@ -69,22 +69,10 @@ pub fn column(&self, index: usize) -> Option<&ColumnVector> {
+     ///   `FLOAT` column is widened), and
+     /// * a `NULL` supplied for a `NOT NULL` column is rejected.
+     pub fn insert_row(&mut self, row: Row) -> Result<()> {
+-        let values = row.into_values();
+-        if values.len() != self.schema.len() {
+-            return Err(Error::api(format!(
+-                "table '{}' expects {} value(s) per row, got {}",
+-                self.name,
+-                self.schema.len(),
+-                values.len()
+-            )));
+-        }
+         // Coerce and validate every value before mutating any column so a
+         // rejected row leaves the table unchanged.
+-        let mut coerced = Vec::with_capacity(values.len());
+-        for (value, field) in values.into_iter().zip(self.schema.fields()) {
+-            coerced.push(coerce_for_field(value, field)?);
+-        }
+-        for (column, value) in self.columns.iter_mut().zip(coerced) {
++        let coerced = self.coerce_row(row)?;
++        for (column, value) in self.columns.iter_mut().zip(coerced.into_values()) {
+             column.push_unchecked(value);
+         }
+         self.row_count += 1;
+@@ -102,6 +90,62 @@ pub fn insert_rows(&mut self, rows: impl IntoIterator<Item = Row>) -> Result<usi
+         Ok(n)
+     }
+ 
++    /// Validate and widen `row` for storage in this table without writing it.
++    ///
++    /// Callers that must leave the table untouched when any row of a statement
++    /// is bad — `UPDATE` is one — coerce every candidate row first and only
++    /// then write.
++    pub fn coerce_row(&self, row: Row) -> Result<Row> {
++        let values = row.into_values();
++        if values.len() != self.schema.len() {
++            return Err(Error::api(format!(
++                "table '{}' expects {} value(s) per row, got {}",
++                self.name,
++                self.schema.len(),
++                values.len()
++            )));
++        }
++        let mut coerced = Vec::with_capacity(values.len());
++        for (value, field) in values.into_iter().zip(self.schema.fields()) {
++            coerced.push(coerce_for_field(value, field)?);
++        }
++        Ok(Row::new(coerced))
++    }
++
++    /// Overwrite stored rows in place.
++    ///
++    /// Every row must already have been through [`Table::coerce_row`] for this
++    /// table, which is what lets the write itself be infallible: by the time
++    /// any column is touched, no later row can reject the statement.
++    pub fn replace_rows(&mut self, rows: Vec<(usize, Row)>) -> Result<usize> {
++        for (index, _) in &rows {
++            if *index >= self.row_count {
++                return Err(Error::api(format!(
++                    "table '{}' has no row at position {}",
++                    self.name, index
++                )));
++            }
++        }
++        let replaced = rows.len();
++        for (index, row) in rows {
++            for (column, value) in self.columns.iter_mut().zip(row.into_values()) {
++                column.set_unchecked(index, value);
++            }
++        }
++        Ok(replaced)
++    }
++
++    /// Remove every row whose flag in `remove` is `true`, keeping the survivors
++    /// in their stored order. Returns how many rows went away.
++    pub fn remove_rows(&mut self, remove: &[bool]) -> usize {
++        let removed = remove.iter().take(self.row_count).filter(|d| **d).count();
++        for column in self.columns.iter_mut() {
++            column.remove_marked(remove);
++        }
++        self.row_count -= removed;
++        removed
++    }
++
+     /// Materialize the row at `index`.
+     pub fn row(&self, index: usize) -> Option<Row> {
+         if index >= self.row_count {
+@@ -208,6 +252,64 @@ fn insert_and_iterate() {
+         assert_eq!(rows[1].get(2), Some(&Value::Float(8.0)));
+     }
+ 
++    #[test]
++    fn replace_rows_keeps_positions() {
++        let mut t = people();
++        t.insert_row(Row::new(vec![
++            Value::Integer(1),
++            Value::text("ada"),
++            Value::Float(1.0),
++        ]))
++        .unwrap();
++        t.insert_row(Row::new(vec![
++            Value::Integer(2),
++            Value::text("grace"),
++            Value::Float(2.0),
++        ]))
++        .unwrap();
++        let replacement = t
++            .coerce_row(Row::new(vec![
++                Value::Integer(2),
++                Value::text("hopper"),
++                Value::Integer(3),
++            ]))
++            .unwrap();
++        assert_eq!(t.replace_rows(vec![(1, replacement)]).unwrap(), 1);
++        let rows = t.to_rows();
++        assert_eq!(rows[0].get(1), Some(&Value::text("ada")));
++        assert_eq!(rows[1].get(1), Some(&Value::text("hopper")));
++        assert_eq!(rows[1].get(2), Some(&Value::Float(3.0)));
++    }
++
++    #[test]
++    fn remove_rows_compacts_every_column() {
++        let mut t = people();
++        for i in 0..4 {
++            t.insert_row(Row::new(vec![
++                Value::Integer(i),
++                Value::text(format!("n{}", i)),
++                Value::Float(i as f64),
++            ]))
++            .unwrap();
++        }
++        assert_eq!(t.remove_rows(&[false, true, true, false]), 2);
++        assert_eq!(t.row_count(), 2);
++        let rows = t.to_rows();
++        assert_eq!(rows[0].get(0), Some(&Value::Integer(0)));
++        assert_eq!(rows[1].get(0), Some(&Value::Integer(3)));
++        assert_eq!(t.column(1).unwrap().len(), 2);
++    }
++
++    #[test]
++    fn coerce_row_reports_a_not_null_violation() {
++        let t = people();
++        let err = t
++            .coerce_row(Row::new(vec![Value::Null, Value::text("x"), Value::Null]))
++            .unwrap_err();
++        assert_eq!(err.kind(), crate::error::ErrorKind::Api);
++        assert_eq!(t.row_count(), 0);
++    }
++
+     #[test]
+     fn rejects_bad_arity() {
+         let mut t = people();

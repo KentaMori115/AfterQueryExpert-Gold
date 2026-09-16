@@ -1,0 +1,123 @@
+/*
+ * Printing.
+ *
+ * The lice register gets printed. Not often, but when it does it is because
+ * somebody from the regulator is standing in the office, or because the well
+ * boat skipper wants the harvest order on paper in a wheelhouse with no signal.
+ * Both of those are bad moments to discover that the page prints as a
+ * navigation rail and half a table.
+ *
+ * So: the chrome goes, the content gets the whole width, colour is replaced by
+ * weight and rules where it carried meaning, and tables are told not to break
+ * a row across a page.
+ */
+
+@media print {
+  :root {
+    --surface-page: #fff;
+    --surface-card: #fff;
+    --surface-sunken: #fff;
+    --ink-primary: #000;
+    --ink-secondary: #222;
+    --ink-muted: #444;
+  }
+
+  html,
+  body {
+    height: auto;
+    background: #fff;
+    color: #000;
+  }
+
+  /* The rail, the top bar and anything that only exists to be clicked. */
+  .rail,
+  .topbar,
+  .skip,
+  .keys,
+  button,
+  select,
+  input[type="checkbox"],
+  input[type="radio"] {
+    display: none !important;
+  }
+
+  .shell {
+    display: block;
+    height: auto;
+  }
+
+  .main {
+    overflow: visible;
+    padding: 0;
+  }
+
+  /*
+   * A panel is a box on screen because it groups; on paper the grouping is
+   * done by the heading and the white space, and a page full of boxes wastes
+   * the margin a reader writes in.
+   */
+  .panel {
+    border: 0;
+    border-top: 1px solid #000;
+    border-radius: 0;
+    box-shadow: none;
+    break-inside: auto;
+  }
+
+  .panel h3 {
+    break-after: avoid;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+
+  th,
+  td {
+    border-bottom: 1px solid #999;
+  }
+
+  /*
+   * Colour is the whole of how a breach is marked on screen. On a monochrome
+   * office printer it disappears, so anything that was red comes back as bold
+   * with a rule under it.
+   */
+  .over,
+  .passed,
+  .short {
+    font-weight: 700;
+    text-decoration: underline;
+  }
+
+  .badge {
+    border: 1px solid #000 !important;
+    background: none !important;
+    color: #000 !important;
+  }
+
+  /* Charts print as line work; the fills turn to mud on a laser printer. */
+  svg .overshoot {
+    opacity: 0.35;
+  }
+
+  /* A link to /pens is useless on paper, so the address is not printed. */
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* Landscape suits the register, which is wide and short. */
+  @page {
+    size: landscape;
+    margin: 14mm;
+  }
+}

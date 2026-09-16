@@ -1,0 +1,398 @@
+[verifier] no model.patch submitted — grading pristine base state
+[verifier] Resetting files touched by test.patch
+[verifier] Applying test.patch
+[verifier] harness dir /run/aqh
+[verifier] running suites as nobody
+PASS __tests__/api-key.test.ts
+PASS __tests__/stats.test.ts
+PASS __tests__/file-utils.test.ts
+PASS __tests__/share-utils.test.ts
+PASS __tests__/image-processor.test.ts
+PASS __tests__/workspace-rbac.test.ts
+PASS __tests__/webhook.test.ts
+PASS __tests__/version-trash.test.ts
+PASS __tests__/share-manager.test.ts
+
+Test Suites: 9 passed, 9 total
+Tests:       95 passed, 95 total
+Snapshots:   0 total
+Time:        5.911 s
+Ran all test suites within paths "/app/__tests__/api-key.test.ts", "/app/__tests__/file-utils.test.ts", "/app/__tests__/image-processor.test.ts", "/app/__tests__/share-manager.test.ts", "/app/__tests__/share-utils.test.ts", "/app/__tests__/stats.test.ts", "/app/__tests__/version-trash.test.ts", "/app/__tests__/webhook.test.ts", "/app/__tests__/workspace-rbac.test.ts".
+[publish] p2p_node_ids -> 95 declared, 95 passed, 0 failed (honest=True)
+FAIL __tests__/plan-balances.test.ts
+  ● Test suite failed to run
+
+    [96m__tests__/plan-balances.test.ts[0m:[93m1[0m:[93m36[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/billing-period' or its corresponding type declarations.
+
+    [7m1[0m import { type BillingAnchor } from "../lib/billing-period"
+    [7m [0m [91m                                   ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m2[0m:[93m63[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/usage-ledger' or its corresponding type declarations.
+
+    [7m2[0m import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+    [7m [0m [91m                                                              ~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m3[0m:[93m41[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/allowance' or its corresponding type declarations.
+
+    [7m3[0m import { foldBalances, type Plan } from "../lib/allowance"
+    [7m [0m [91m                                        ~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m4[0m:[93m50[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/quota-decision' or its corresponding type declarations.
+
+    [7m4[0m import { decideRequest, retryAfterSeconds } from "../lib/quota-decision"
+    [7m [0m [91m                                                 ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m87[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m87[0m         expect(balances.map((b) => b.storageOverBytes)).toEqual([200, 200, 200])
+    [7m  [0m [91m                             ~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m135[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m135[0m         expect(balances.map((b) => b.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                             ~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m265[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m265[0m         expect(balances.map((b) => b.carriedInRequests)).toEqual([0, 100, 200, 200])
+    [7m   [0m [91m                             ~[0m
+
+FAIL __tests__/metering-fold.test.ts
+  ● Test suite failed to run
+
+    [96m__tests__/metering-fold.test.ts[0m:[93m1[0m:[93m61[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/billing-period' or its corresponding type declarations.
+
+    [7m1[0m import { periodByIndex, periodAt, type BillingAnchor } from "../lib/billing-period"
+    [7m [0m [91m                                                            ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m2[0m:[93m63[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/usage-ledger' or its corresponding type declarations.
+
+    [7m2[0m import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+    [7m [0m [91m                                                              ~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m105[0m:[93m49[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m105[0m         buildLedger(even, [], files, upTo).map((p) => p.peakStoredBytes)
+    [7m   [0m [91m                                                ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m184[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m184[0m         expect(ledger.map((p) => p.requests)).toEqual([1, 1, 1])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m192[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m192[0m         expect(ledger.map((p) => p.peakStoredBytes)).toEqual([300, 300, 300])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m227[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m227[0m         expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m232[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m232[0m         expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m237[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m237[0m         expect(ledger.map((p) => p.requests)).toEqual([0, 0])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m281[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m281[0m         expect(ledger.map((p) => p.requests)).toEqual([2, 1])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m291[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m291[0m         expect(ledger.map((p) => p.index)).toEqual([0])
+    [7m   [0m [91m                           ~[0m
+
+Test Suites: 2 failed, 2 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        4.515 s
+Ran all test suites within paths "/app/__tests__/metering-fold.test.ts", "/app/__tests__/plan-balances.test.ts".
+[publish] f2p_node_ids -> 95 declared, 0 passed, 95 failed (honest=True)
+===== raw suite output: run.log =====
++ jest selection base: /app/__tests__/api-key.test.ts /app/__tests__/file-utils.test.ts /app/__tests__/image-processor.test.ts /app/__tests__/share-manager.test.ts /app/__tests__/share-utils.test.ts /app/__tests__/stats.test.ts /app/__tests__/version-trash.test.ts /app/__tests__/webhook.test.ts /app/__tests__/workspace-rbac.test.ts
+PASS __tests__/api-key.test.ts
+PASS __tests__/stats.test.ts
+PASS __tests__/file-utils.test.ts
+PASS __tests__/share-utils.test.ts
+PASS __tests__/image-processor.test.ts
+PASS __tests__/workspace-rbac.test.ts
+PASS __tests__/webhook.test.ts
+PASS __tests__/version-trash.test.ts
+PASS __tests__/share-manager.test.ts
+
+Test Suites: 9 passed, 9 total
+Tests:       95 passed, 95 total
+Snapshots:   0 total
+Time:        5.911 s
+Ran all test suites within paths "/app/__tests__/api-key.test.ts", "/app/__tests__/file-utils.test.ts", "/app/__tests__/image-processor.test.ts", "/app/__tests__/share-manager.test.ts", "/app/__tests__/share-utils.test.ts", "/app/__tests__/stats.test.ts", "/app/__tests__/version-trash.test.ts", "/app/__tests__/webhook.test.ts", "/app/__tests__/workspace-rbac.test.ts".
+[publish] p2p_node_ids -> 95 declared, 95 passed, 0 failed (honest=True)
++ jest selection new: /app/__tests__/metering-fold.test.ts /app/__tests__/plan-balances.test.ts
+FAIL __tests__/plan-balances.test.ts
+  ● Test suite failed to run
+
+    [96m__tests__/plan-balances.test.ts[0m:[93m1[0m:[93m36[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/billing-period' or its corresponding type declarations.
+
+    [7m1[0m import { type BillingAnchor } from "../lib/billing-period"
+    [7m [0m [91m                                   ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m2[0m:[93m63[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/usage-ledger' or its corresponding type declarations.
+
+    [7m2[0m import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+    [7m [0m [91m                                                              ~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m3[0m:[93m41[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/allowance' or its corresponding type declarations.
+
+    [7m3[0m import { foldBalances, type Plan } from "../lib/allowance"
+    [7m [0m [91m                                        ~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m4[0m:[93m50[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/quota-decision' or its corresponding type declarations.
+
+    [7m4[0m import { decideRequest, retryAfterSeconds } from "../lib/quota-decision"
+    [7m [0m [91m                                                 ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m87[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m87[0m         expect(balances.map((b) => b.storageOverBytes)).toEqual([200, 200, 200])
+    [7m  [0m [91m                             ~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m135[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m135[0m         expect(balances.map((b) => b.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                             ~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m265[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m265[0m         expect(balances.map((b) => b.carriedInRequests)).toEqual([0, 100, 200, 200])
+    [7m   [0m [91m                             ~[0m
+
+FAIL __tests__/metering-fold.test.ts
+  ● Test suite failed to run
+
+    [96m__tests__/metering-fold.test.ts[0m:[93m1[0m:[93m61[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/billing-period' or its corresponding type declarations.
+
+    [7m1[0m import { periodByIndex, periodAt, type BillingAnchor } from "../lib/billing-period"
+    [7m [0m [91m                                                            ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m2[0m:[93m63[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/usage-ledger' or its corresponding type declarations.
+
+    [7m2[0m import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+    [7m [0m [91m                                                              ~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m105[0m:[93m49[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m105[0m         buildLedger(even, [], files, upTo).map((p) => p.peakStoredBytes)
+    [7m   [0m [91m                                                ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m184[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m184[0m         expect(ledger.map((p) => p.requests)).toEqual([1, 1, 1])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m192[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m192[0m         expect(ledger.map((p) => p.peakStoredBytes)).toEqual([300, 300, 300])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m227[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m227[0m         expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m232[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m232[0m         expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m237[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m237[0m         expect(ledger.map((p) => p.requests)).toEqual([0, 0])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m281[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m281[0m         expect(ledger.map((p) => p.requests)).toEqual([2, 1])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m291[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m291[0m         expect(ledger.map((p) => p.index)).toEqual([0])
+    [7m   [0m [91m                           ~[0m
+
+Test Suites: 2 failed, 2 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        4.515 s
+Ran all test suites within paths "/app/__tests__/metering-fold.test.ts", "/app/__tests__/plan-balances.test.ts".
+[publish] f2p_node_ids -> 95 declared, 0 passed, 95 failed (honest=True)
+===== grade =====
+[verifier] ===== FAILURES (95) =====
+[verifier] ✗ [f2p] a year of boundaries carries an anchor across the turn of the year
+    reported failed or never reported
+[verifier] ✗ [f2p] a year of boundaries gives every month of a leap year a boundary of its own
+    reported failed or never reported
+[verifier] ✗ [f2p] a year of boundaries keeps a 29th anchor through a leap February and a common one
+    reported failed or never reported
+[verifier] ✗ [f2p] a year of boundaries walks a 15th anchor through every month of a common year
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request admits a request that trips nothing
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request admits an upload that exactly fills the remaining storage
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request denies a request landing outside every period
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request denies a transfer larger than the bandwidth left
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request denies an upload the remaining storage cannot hold
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request does not weigh a download against storage
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request leaves every remaining figure at zero outside every period
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request measures the wait to the next boundary
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request offers no wait when nothing covers the instant
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request reports bandwidth before requests when both stand in the way
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request reports every remaining figure on an admitted request
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request reports storage first when storage and bandwidth both stand in the way
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request reports the period it judged the request in
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request throttles a listing even when storage is full, since it moves nothing
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request throttles once the request credit is spent
+    reported failed or never reported
+[verifier] ✗ [f2p] admitting the next request weighs an upload against bandwidth once storage has room for it
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank banks bandwidth the same way and to its own ceiling
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank banks nothing out of a period that ran past its credit
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank banks what a quiet period left unspent
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank calls a period clear when nothing ran past its limit
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank calls a period unclear on storage alone
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank covers no instant before the subscription opened
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank folds one balance per ledger entry, in the order they were metered
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank holds the bank down to the plan's carry ceiling
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank leaves the next period on its bare allowance when nothing may bank
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank lets a wider carry ceiling bank more than one period of allowance
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank lets the bank cover a period that would otherwise have run over
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank measures storage against the ceiling and not against a bank
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank opens the first period with an empty bank
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank places an instant in the period a boundary opens, not the one it closes
+    reported failed or never reported
+[verifier] ✗ [f2p] allowances and the bank reports how far past its credit each counter ran
+    reported failed or never reported
+[verifier] ✗ [f2p] anchor clamping leaves an anchor the month can hold alone
+    reported failed or never reported
+[verifier] ✗ [f2p] anchor clamping settles a 30th anchor in February and leaves it in April
+    reported failed or never reported
+[verifier] ✗ [f2p] anchor clamping settles a 31st anchor onto the end of February
+    reported failed or never reported
+[verifier] ✗ [f2p] anchor clamping settles onto the leap day in a leap February
+    reported failed or never reported
+[verifier] ✗ [f2p] anchor clamping treats an anchor day below 1 as 1
+    reported failed or never reported
+[verifier] ✗ [f2p] locating a period answers with nothing before the subscription opened
+    reported failed or never reported
+[verifier] ✗ [f2p] locating a period finds the period holding an instant inside it
+    reported failed or never reported
+[verifier] ✗ [f2p] locating a period puts an instant exactly on a boundary in the period it opens
+    reported failed or never reported
+[verifier] ✗ [f2p] locating a period puts the instant one millisecond earlier in the period before
+    reported failed or never reported
+[verifier] ✗ [f2p] locating a period reaches periods far from the start
+    reported failed or never reported
+[verifier] ✗ [f2p] metering a period adds nothing to bandwidth when an upload reports no bytes
+    reported failed or never reported
+[verifier] ✗ [f2p] metering a period counts every event, failed ones included
+    reported failed or never reported
+[verifier] ✗ [f2p] metering a period moves no bandwidth on a deletion whatever size it reports
+    reported failed or never reported
+[verifier] ✗ [f2p] metering a period moves no bandwidth on a listing that reports a size anyway
+    reported failed or never reported
+[verifier] ✗ [f2p] metering a period sorts events into periods however they arrive
+    reported failed or never reported
+[verifier] ✗ [f2p] metering a period sums bandwidth over successful uploads and downloads only
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the bank banks requests and bandwidth independently of each other
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the bank calls a period unclear on a bandwidth overrun alone
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the bank calls a period unclear on a request overrun alone
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the bank empties the bank after a period runs over and refills it after a quiet one
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the bank keeps a storage overrun out of the next period's reckoning
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the bank stacks two quiet periods against a wider carry ceiling
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the decision admits a transfer that exactly spends the bandwidth left
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the decision judges the last millisecond of a period inside that period
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the decision never denies a deletion for want of storage
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the decision rounds a part second up to a whole one
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the decision spans a full January to February gap from the opening instant
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the decision treats an upload with no size as moving nothing
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the stored level adds uploads and downloads into one bandwidth figure
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the stored level counts a file uploaded exactly when a period opens
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the stored level counts requests separately in each period
+    reported failed or never reported
+[verifier] ✗ [f2p] more of the stored level meters only the opening period when nothing has closed yet
+    reported failed or never reported
+[verifier] ✗ [f2p] period boundaries carries the index it was asked for
+    reported failed or never reported
+[verifier] ✗ [f2p] period boundaries closes a period where the next one opens
+    reported failed or never reported
+[verifier] ✗ [f2p] period boundaries does not let a settled boundary drag the anchor down
+    reported failed or never reported
+[verifier] ✗ [f2p] period boundaries keeps returning to the original anchor after every short month
+    reported failed or never reported
+[verifier] ✗ [f2p] period boundaries opens period 0 in the month before when the anchor had not yet come
+    reported failed or never reported
+[verifier] ✗ [f2p] period boundaries opens period 0 on the anchor when the subscription began there
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods carries a level into a period that saw no events at all
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods counts a level that only rose in an earlier period as this period's peak
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods drops the level for a file deleted in an earlier period
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods includes the period a closing instant opens
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods leaves an event after the closing instant out of the count
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods meters one period per boundary crossed up to the closing instant
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods reports the level the period closed on
+    reported failed or never reported
+[verifier] ✗ [f2p] storage across periods takes the peak rather than the closing level
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level adds up several files held at once
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level counts a file from the very instant it was uploaded
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level counts nothing at all when no file has been stored
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level falls back to nothing once every file has gone
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level ignores a file reporting a size of zero
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level never counts a file deleted the instant it arrived
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level shows nothing in the period before a file arrives
+    reported failed or never reported
+[verifier] ✗ [f2p] the stored level stops counting a file at the instant it was deleted
+    reported failed or never reported
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription counts an event landing exactly on the opening instant
+    reported failed or never reported
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription leaves an event on that earlier stretch out of the count
+    reported failed or never reported
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription leaves bandwidth moved before the subscription out of the sum
+    reported failed or never reported
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription opens period 0 before the subscription began
+    reported failed or never reported
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription still counts a file that was already stored when the subscription began
+    reported failed or never reported
+[verifier] ✗ [f2p] the stretch of period 0 before the subscription takes the peak from the subscription onward, not from the boundary
+    reported failed or never reported
+P2P 95/95 pass 0 fail; F2P 0/95 pass 95 fail; PARTIAL 0.5; BINARY 0
+[verifier] reward.json={"reward": 0, "f2p_total": 95, "f2p_passed": 0, "p2p_total": 95, "p2p_passed": 95, "f2p": 0.0, "p2p": 1.0, "partial": 0.5}

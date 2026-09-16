@@ -1,0 +1,62 @@
+{% extends 'admin_base.html' %}
+{% load static %}
+
+{% block content %}
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-secondary text-white">
+                        <h4 class="mb-0">Bot Run Setting</h4>
+                    </div>
+                    <div class="card-body">
+                        <form id = "bot_run_setting_form">
+                            <div class="mb-3">
+                                <label class="form-label text-success" for="select_vix_gap_lower">Vix Gap Mode</label>
+                                <select id="select_vix_gap_mode" class="form-control">
+                                    <option {% if vix_automatic_mode %} selected {% endif %} value="Automatic">Automatic</option>
+                                    <option {% if not vix_automatic_mode %} selected {% endif %} value="Manual">Manual</option>
+                                </select>
+                            </div>
+                            <hr>
+
+                            <p class="text-success">Vix Gap Manual Setting</p>
+                            <!-- Vix Gap Lower Field -->
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="input_vix_gap_lower" {% if vix_gap_lower %} checked {% endif %}>
+                                <label class="form-check-label" for="input_vix_gap_lower">Vix Gap Lower</label>
+                            </div>
+
+                            <!-- Vix Gap Up Field -->
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="input_vix_gap_up" {% if vix_gap_up %} checked {% endif %}>
+                                <label class="form-check-label" for="input_vix_gap_up">Vix Gap Up</label>
+                            </div>
+                            <hr>
+
+                            <!-- Order Gap Second -->
+                            <div class="mb-3">
+                                <label for="input_order_gap_second" class="form-label  text-success">Order Gap Second</label>
+                                <input type="text" class="form-control" id="input_order_gap_second" placeholder="Order Gap Second" value = "{{order_gap_sec}}" required>
+                            </div>
+                            
+
+                            <!-- Submit Button -->
+                            <button type="button" class="btn btn-success" onclick="submitBotRunSetting()">Submit</button>
+                            <p class="text-danger">You should submit setting before EST 09:34:00</p>
+                            <p class="text-success" id="p_time_panel"></p>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+{% endblock %}
+
+{% block script %} 
+    {{ block.super }}
+    <script src="{% static 'js/config_3.13.js' %}"></script>
+    <script src="{% static 'js/admin_3.13.js' %}"></script>
+{% endblock %}

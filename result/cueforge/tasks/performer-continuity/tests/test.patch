@@ -1,0 +1,721 @@
+diff --git a/tests/integration/test_performer_continuity.py b/tests/integration/test_performer_continuity.py
+new file mode 100644
+index 0000000..848cfff
+--- /dev/null
++++ b/tests/integration/test_performer_continuity.py
+@@ -0,0 +1,382 @@
++"""Compile-time performer positions: where a move really departs from."""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++from typing import Any
++
++from typer.testing import CliRunner
++
++from cueforge.cli.main import app
++from cueforge.compiler.plan import compile_production_document
++from cueforge.findings import Severity
++from cueforge.production.build import production_from_mapping
++
++runner = CliRunner()
++
++# Stage left, centre and stage right on one line: 8 units, then 12 more.
++LOCATIONS = {"sl": {"x": 0, "y": 0}, "c": {"x": 8, "y": 0}, "sr": {"x": 20, "y": 0}}
++PERFORMERS = {"mira": {"initial_mark": "sl"}, "joe": {"initial_mark": "sr"}}
++
++# 1.4 units per second: 8 units take 5715 ms, 12 take 8572, 20 take 14286.
++SL_TO_C = 5715
++C_TO_SR = 8572
++SL_TO_SR = 14286
++
++
++def move(
++    cue_id: str,
++    trigger: dict[str, Any],
++    to: str,
++    who: str = "mira",
++    from_mark: str | None = None,
++    duration: int = 0,
++) -> dict[str, Any]:
++    action: dict[str, Any] = {"move": who, "to": to, "maximum_speed": "1.4"}
++    if from_mark is not None:
++        action["from"] = from_mark
++    return {
++        "id": cue_id,
++        "department": "stage",
++        "trigger": trigger,
++        "duration": duration,
++        "action": action,
++    }
++
++
++def light(cue_id: str, at: int) -> dict[str, Any]:
++    return {"id": cue_id, "department": "lighting", "trigger": {"at": at}, "duration": 10}
++
++
++def production(cues: list[dict[str, Any]], **top: Any) -> dict[str, Any]:
++    data: dict[str, Any] = {
++        "version": 1,
++        "production": "marks",
++        "time_unit": "ms",
++        "performers": dict(PERFORMERS),
++        "locations": dict(LOCATIONS),
++        "cues": cues,
++    }
++    data.update(top)
++    return data
++
++
++def compile_of(data: dict[str, Any]):
++    parsed, findings = production_from_mapping(data, "memory")
++    assert parsed is not None, findings
++    return compile_production_document(parsed)
++
++
++def compiled(data: dict[str, Any]):
++    show, findings = compile_of(data)
++    assert show is not None, findings
++    return show, findings
++
++
++def codes_of(findings: Any) -> list[str]:
++    return [item.code for item in findings]
++
++
++def subjects_of(findings: Any, code: str) -> list[str | None]:
++    return sorted(item.subject_id for item in findings if item.code == code)
++
++
++def errors_of(findings: Any) -> list[str]:
++    return [item.code for item in findings if item.severity == Severity.ERROR]
++
++
++def test_omitted_from_departs_from_the_initial_mark() -> None:
++    show, findings = compiled(production([move("b", {"at": 1000}, "c")]))
++    assert errors_of(findings) == []
++    b = show.cue_map()["b"]
++    assert b.duration_ms == SL_TO_C
++    assert b.action["from"] == "sl"
++
++
++def test_second_move_departs_where_the_first_ended() -> None:
++    # Identifier order puts a first; start order puts b first, and b moves mira.
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 8000}, "sr")])
++    )
++    assert errors_of(findings) == []
++    a = show.cue_map()["a"]
++    assert a.action["from"] == "c"
++    assert a.duration_ms == C_TO_SR
++
++
++def test_ties_break_by_cue_id() -> None:
++    show, findings = compiled(
++        production([move("n", {"at": 1000}, "sr"), move("m", {"at": 1000}, "c")])
++    )
++    m = show.cue_map()["m"]
++    n = show.cue_map()["n"]
++    assert (m.action["from"], m.duration_ms) == ("sl", SL_TO_C)
++    assert (n.action["from"], n.duration_ms) == ("c", C_TO_SR)
++    assert subjects_of(findings, "CF5004") == ["n"]
++
++
++def test_move_during_a_running_move_is_flagged_and_departs_from_its_to() -> None:
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 3000}, "sr")])
++    )
++    assert subjects_of(findings, "CF5004") == ["a"]
++    assert all(item.severity == Severity.ERROR for item in findings if item.code == "CF5004")
++    a = show.cue_map()["a"]
++    assert a.action["from"] == "c"
++    assert a.duration_ms == C_TO_SR
++
++
++def test_move_at_the_end_instant_of_a_running_move_is_clean() -> None:
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 1000 + SL_TO_C}, "sr")])
++    )
++    assert "CF5004" not in codes_of(findings)
++    assert show.cue_map()["a"].action["from"] == "c"
++
++
++def test_stated_from_that_disagrees_is_flagged_and_ignored_for_travel() -> None:
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 8000}, "sr", from_mark="sl")])
++    )
++    assert subjects_of(findings, "CF5004") == ["a"]
++    a = show.cue_map()["a"]
++    assert a.duration_ms == C_TO_SR
++    assert a.action["from"] == "c"
++
++
++def test_omitted_and_correct_from_compile_alike() -> None:
++    stated, stated_findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 8000}, "sr", from_mark="c")])
++    )
++    omitted, omitted_findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 8000}, "sr")])
++    )
++    assert errors_of(stated_findings) == []
++    assert errors_of(omitted_findings) == []
++    assert stated.digest == omitted.digest
++    assert stated.cue_map()["a"].action == omitted.cue_map()["a"].action
++
++
++def test_unknown_initial_mark_is_reported_without_any_move() -> None:
++    ghost = {"mira": {"initial_mark": "sl"}, "ghost": {"initial_mark": "nowhere"}}
++    _, findings = compile_of(production([light("x", 0)], performers=ghost))
++    unknown = [item for item in findings if item.code == "CF5002"]
++    assert len(unknown) == 1
++    assert unknown[0].severity == Severity.ERROR
++    _, clean = compile_of(production([light("x", 0)]))
++    assert "CF5002" not in codes_of(clean)
++
++
++def test_a_manual_move_makes_the_position_unknown() -> None:
++    manual = move("m", {"manual": True}, "c", from_mark="sl")
++    _, findings = compile_of(production([manual, move("a", {"at": 8000}, "sr")]))
++    assert subjects_of(findings, "CF3005") == ["a"]
++    assert all(item.severity == Severity.ERROR for item in findings if item.code == "CF3005")
++    show, stated = compiled(production([manual, move("a", {"at": 8000}, "sr", from_mark="c")]))
++    assert "CF3005" not in codes_of(stated)
++    assert show.cue_map()["a"].duration_ms == C_TO_SR
++    assert show.cue_map()["m"].duration_ms == SL_TO_C
++
++
++def test_a_manual_move_needs_its_own_from() -> None:
++    _, findings = compile_of(production([move("m", {"manual": True}, "c")]))
++    assert subjects_of(findings, "CF3005") == ["m"]
++    show, stated = compiled(production([move("m", {"manual": True}, "c", from_mark="sl")]))
++    assert errors_of(stated) == []
++    assert show.cue_map()["m"].action["from"] == "sl"
++
++
++def test_duration_rules_use_the_real_position() -> None:
++    show, findings = compiled(
++        production(
++            [
++                move("b", {"at": 1000}, "c"),
++                move("a", {"at": 8000}, "sr", from_mark="sl", duration=9000),
++            ]
++        )
++    )
++    assert "CF5004" in codes_of(findings)
++    assert "CF5001" not in codes_of(findings)
++    assert show.cue_map()["a"].duration_ms == 9000
++
++
++def test_authored_duration_shorter_than_the_real_travel() -> None:
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 8000}, "sr", duration=8000)])
++    )
++    assert "CF5004" not in codes_of(findings)
++    assert subjects_of(findings, "CF5001") == ["a"]
++    assert show.cue_map()["a"].action["from"] == "c"
++
++
++def test_performers_are_followed_independently() -> None:
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 2000}, "c", who="joe")])
++    )
++    assert errors_of(findings) == []
++    a = show.cue_map()["a"]
++    assert a.action["from"] == "sr"
++    assert a.duration_ms == C_TO_SR
++
++
++def test_after_chains_are_followed_by_start_time() -> None:
++    show, findings = compiled(
++        production(
++            [
++                light("z", 0),
++                move("b", {"after": "z", "offset": 1000}, "c"),
++                move("a", {"after": "b", "offset": 7000}, "sr"),
++            ]
++        )
++    )
++    assert errors_of(findings) == []
++    assert show.cue_map()["b"].action["from"] == "sl"
++    assert show.cue_map()["a"].action["from"] == "c"
++    assert show.cue_map()["a"].duration_ms == C_TO_SR
++
++
++def test_compile_json_carries_the_resolved_from(tmp_path: Path) -> None:
++    path = tmp_path / "marks.yaml"
++    path.write_text(
++        "version: 1\nproduction: marks\ntime_unit: ms\n"
++        "performers:\n  mira: {initial_mark: sl}\n"
++        "locations:\n  sl: {x: 0, y: 0}\n  c: {x: 8, y: 0}\n  sr: {x: 20, y: 0}\n"
++        "cues:\n"
++        "  - id: b\n    department: stage\n    trigger: {at: 1000}\n"
++        "    action: {move: mira, to: c, maximum_speed: 1.4}\n"
++        "  - id: a\n    department: stage\n    trigger: {at: 8000}\n"
++        "    action: {move: mira, to: sr, maximum_speed: 1.4}\n",
++        encoding="utf-8",
++    )
++    result = runner.invoke(app, ["compile", str(path), "--format", "json"])
++    assert result.exit_code == 0
++    assert '"from":"c"' in result.stdout
++    assert '"from":"sl"' in result.stdout
++
++
++def test_travel_from_the_real_position_moves_the_reservations() -> None:
++    proj = {"proj": {"kind": "video_output", "capacity": 1}}
++    first = move("b", {"at": 1000}, "c")
++    second = move("a", {"at": 8000}, "sr")
++    second["uses"] = ["proj"]
++    clear = {"id": "x", "department": "video", "trigger": {"at": 17000}, "duration": 100, "uses": ["proj"]}
++    show, findings = compiled(production([first, second, clear], resources=proj))
++    assert errors_of(findings) == []
++    assert show.cue_map()["a"].end_ms() == 8000 + C_TO_SR
++    close = dict(clear, id="y", trigger={"at": 16000})
++    _, crowded = compiled(production([first, second, close], resources=proj))
++    assert "CF4001" in codes_of(crowded)
++
++
++def test_two_performers_may_move_at_the_same_instant() -> None:
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 1000}, "c", who="joe")])
++    )
++    assert errors_of(findings) == []
++    assert show.cue_map()["b"].action["from"] == "sl"
++    assert show.cue_map()["a"].action["from"] == "sr"
++    assert show.cue_map()["a"].duration_ms == C_TO_SR
++
++
++def test_positions_continue_past_a_flagged_move() -> None:
++    show, findings = compiled(
++        production(
++            [
++                move("b", {"at": 1000}, "c"),
++                move("a", {"at": 3000}, "sr"),
++                move("d", {"at": 3000 + C_TO_SR}, "c"),
++            ]
++        )
++    )
++    assert subjects_of(findings, "CF5004") == ["a"]
++    assert show.cue_map()["d"].action["from"] == "sr"
++    assert show.cue_map()["d"].duration_ms == C_TO_SR
++
++
++def test_unknown_initial_mark_stays_an_error_beside_a_move() -> None:
++    ghost = {"mira": {"initial_mark": "sl"}, "ghost": {"initial_mark": "nowhere"}}
++    _, findings = compile_of(
++        production([move("b", {"at": 1000}, "c", who="ghost")], performers=ghost)
++    )
++    assert "CF5002" in errors_of(findings)
++    assert "CF5004" not in codes_of(findings)
++
++
++def test_compile_text_report_carries_the_finding(tmp_path: Path) -> None:
++    path = tmp_path / "disagree.yaml"
++    path.write_text(
++        "version: 1\nproduction: marks\ntime_unit: ms\n"
++        "performers:\n  mira: {initial_mark: sl}\n"
++        "locations:\n  sl: {x: 0, y: 0}\n  c: {x: 8, y: 0}\n  sr: {x: 20, y: 0}\n"
++        "cues:\n"
++        "  - id: b\n    department: stage\n    trigger: {at: 1000}\n"
++        "    action: {move: mira, to: c, maximum_speed: 1.4}\n"
++        "  - id: a\n    department: stage\n    trigger: {at: 8000}\n"
++        "    action: {move: mira, from: sl, to: sr, maximum_speed: 1.4}\n",
++        encoding="utf-8",
++    )
++    result = runner.invoke(app, ["compile", str(path), "--format", "json"])
++    assert result.exit_code == 1
++    report = json.loads(result.stdout)
++    assert report["ok"] is False
++    flagged = [(item["code"], item["subject_id"]) for item in report["findings"]]
++    assert flagged == [("CF5004", "a")]
++    assert '"from":"c"' in result.stdout
++
++
++def test_moves_are_ordered_by_start_not_by_dependency() -> None:
++    # b is authored first and a hangs off it, yet a's negative offset starts it
++    # four seconds earlier, so b is the one that runs into a.
++    show, findings = compiled(
++        production(
++            [
++                move("b", {"at": 5000}, "c"),
++                move("a", {"after": "b", "offset": -4000}, "sr"),
++            ]
++        )
++    )
++    assert subjects_of(findings, "CF5004") == ["b"]
++    assert show.cue_map()["a"].action["from"] == "sl"
++    assert show.cue_map()["a"].duration_ms == SL_TO_SR
++    assert show.cue_map()["b"].action["from"] == "sr"
++    assert show.cue_map()["b"].duration_ms == C_TO_SR
++
++
++def test_a_zero_travel_move_never_runs() -> None:
++    show, findings = compiled(
++        production(
++            [
++                move("b", {"at": 1000}, "c"),
++                move("d", {"at": 1000 + SL_TO_C}, "c"),
++                move("e", {"at": 1000 + SL_TO_C}, "sr"),
++            ]
++        )
++    )
++    assert errors_of(findings) == []
++    assert show.cue_map()["d"].action["from"] == "c"
++    assert show.cue_map()["d"].duration_ms == 0
++    assert show.cue_map()["e"].action["from"] == "c"
++    assert show.cue_map()["e"].duration_ms == C_TO_SR
++
++
++def test_a_stated_from_is_taken_as_authored_while_the_position_is_unknown() -> None:
++    show, findings = compiled(
++        production([move("m", {"manual": True}, "c", from_mark="sr"), light("x", 0)])
++    )
++    assert errors_of(findings) == []
++    assert show.cue_map()["m"].action["from"] == "sr"
++    assert show.cue_map()["m"].duration_ms == C_TO_SR
++    _, missing = compile_of(production([move("m", {"manual": True}, "c"), light("x", 0)]))
++    assert subjects_of(missing, "CF3005") == ["m"]
++    assert "CF5004" not in codes_of(missing)
++
++
++def test_a_running_move_is_flagged_even_when_from_names_its_destination() -> None:
++    show, findings = compiled(
++        production([move("b", {"at": 1000}, "c"), move("a", {"at": 3000}, "sr", from_mark="c")])
++    )
++    flagged = [item for item in findings if item.code == "CF5004"]
++    assert [item.subject_id for item in flagged] == ["a"]
++    assert show.cue_map()["a"].action["from"] == "c"
++    assert show.cue_map()["a"].duration_ms == C_TO_SR
+diff --git a/tests/integration/test_rehearsal_marks.py b/tests/integration/test_rehearsal_marks.py
+new file mode 100644
+index 0000000..c3366bf
+--- /dev/null
++++ b/tests/integration/test_rehearsal_marks.py
+@@ -0,0 +1,327 @@
++"""Rehearsal performer positions, performer_marks and mark assertions."""
++
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Any
++
++from typer.testing import CliRunner
++
++from cueforge.cli.main import app
++from cueforge.compiler.plan import compile_production_document
++from cueforge.findings import Severity
++from cueforge.production.build import production_from_mapping
++from cueforge.simulation import DelayCue, FailCue, GoCue, run_rehearsal
++
++runner = CliRunner()
++
++LOCATIONS = {"sl": {"x": 0, "y": 0}, "c": {"x": 8, "y": 0}, "sr": {"x": 20, "y": 0}}
++PERFORMERS = {"mira": {"initial_mark": "sl"}, "joe": {"initial_mark": "sr"}}
++SL_TO_C = 5715
++C_TO_SR = 8572
++
++
++def move(
++    cue_id: str,
++    trigger: dict[str, Any],
++    to: str,
++    from_mark: str | None = None,
++) -> dict[str, Any]:
++    action: dict[str, Any] = {"move": "mira", "to": to, "maximum_speed": "1.4"}
++    if from_mark is not None:
++        action["from"] = from_mark
++    return {"id": cue_id, "department": "stage", "trigger": trigger, "action": action}
++
++
++def light(cue_id: str, at: int) -> dict[str, Any]:
++    return {"id": cue_id, "department": "lighting", "trigger": {"at": at}, "duration": 10}
++
++
++def production(cues: list[dict[str, Any]], assertions: list[str] = ()) -> dict[str, Any]:
++    return {
++        "version": 1,
++        "production": "marks",
++        "time_unit": "ms",
++        "performers": dict(PERFORMERS),
++        "locations": dict(LOCATIONS),
++        "cues": cues,
++        "assertions": [{"expression": text} for text in assertions],
++    }
++
++
++def compiled(data: dict[str, Any]):
++    parsed, findings = production_from_mapping(data, "memory")
++    assert parsed is not None, findings
++    show, compile_findings = compile_production_document(parsed)
++    assert show is not None, compile_findings
++    return show
++
++
++def rehearsed(data: dict[str, Any], interventions: list[Any] | None = None):
++    return run_rehearsal(compiled(data), interventions or [])
++
++
++def codes_of(result: Any) -> list[str]:
++    return [item.code for item in result.findings]
++
++
++def subjects_of(result: Any, code: str) -> list[str | None]:
++    return sorted(item.subject_id for item in result.findings if item.code == code)
++
++
++def status_of(result: Any, cue_id: str) -> Any:
++    return next(item for item in result.statuses if item.cue_id == cue_id)
++
++
++# mira crosses to centre at one second and on to stage right at eight.
++def two_moves() -> dict[str, Any]:
++    return production([move("b", {"at": 1000}, "c"), move("a", {"at": 8000}, "sr")])
++
++
++def test_performer_marks_after_the_rehearsal() -> None:
++    result = rehearsed(two_moves())
++    assert codes_of(result) == []
++    assert result.performer_marks == {"joe": "sr", "mira": "sr"}
++
++
++def test_json_report_carries_performer_marks(tmp_path: Path) -> None:
++    path = tmp_path / "marks.yaml"
++    path.write_text(
++        "version: 1\nproduction: marks\ntime_unit: ms\n"
++        "performers:\n  mira: {initial_mark: sl}\n  joe: {initial_mark: sr}\n"
++        "locations:\n  sl: {x: 0, y: 0}\n  c: {x: 8, y: 0}\n  sr: {x: 20, y: 0}\n"
++        "cues:\n"
++        "  - id: b\n    department: stage\n    trigger: {at: 1000}\n"
++        "    action: {move: mira, to: c, maximum_speed: 1.4}\n",
++        encoding="utf-8",
++    )
++    result = runner.invoke(app, ["rehearse", str(path), "--format", "json"])
++    assert result.exit_code == 0
++    assert '"performer_marks":{"joe":"sr","mira":"c"}' in result.stdout
++
++
++def test_a_delay_reorders_the_moves_and_flags_both() -> None:
++    result = rehearsed(two_moves(), [DelayCue("b", 8000)])
++    assert subjects_of(result, "CF5004") == ["a", "b"]
++    assert all(item.severity == Severity.ERROR for item in result.findings if item.code == "CF5004")
++    a = status_of(result, "a")
++    b = status_of(result, "b")
++    assert (a.start_ms, a.end_ms) == (8000, 8000 + C_TO_SR)
++    assert (b.start_ms, b.end_ms) == (9000, 9000 + SL_TO_C)
++    assert result.performer_marks["mira"] == "sr"
++
++
++def test_a_delay_that_keeps_the_order_is_silent() -> None:
++    result = rehearsed(two_moves(), [DelayCue("b", 1000)])
++    assert "CF5004" not in codes_of(result)
++    assert result.performer_marks["mira"] == "sr"
++
++
++def test_a_fail_before_start_leaves_the_performer_on_the_first_mark() -> None:
++    result = rehearsed(two_moves(), [FailCue("b")])
++    assert subjects_of(result, "CF5004") == ["a"]
++    assert status_of(result, "b").status == "failed"
++    assert status_of(result, "a").status == "completed"
++    assert result.performer_marks["mira"] == "sr"
++
++
++def test_a_fail_mid_run_leaves_the_performer_where_it_was() -> None:
++    result = rehearsed(two_moves(), [FailCue("a", 9000)])
++    assert "CF5004" not in codes_of(result)
++    assert status_of(result, "a").status == "failed"
++    assert result.performer_marks["mira"] == "c"
++
++
++def test_go_places_a_manual_move() -> None:
++    data = production(
++        [move("m", {"manual": True}, "c", from_mark="sl"), move("a", {"at": 8000}, "sr", from_mark="c")]
++    )
++    show = compiled(data)
++    early = run_rehearsal(show, [GoCue("m", 500)])
++    assert "CF5004" not in codes_of(early)
++    assert early.performer_marks["mira"] == "sr"
++    late = run_rehearsal(show, [GoCue("m", 7000)])
++    assert subjects_of(late, "CF5004") == ["a"]
++    assert late.performer_marks["mira"] == "sr"
++    idle = run_rehearsal(show)
++    assert status_of(idle, "m").status == "pending"
++    assert subjects_of(idle, "CF5004") == ["a"]
++
++
++def test_pending_manual_move_keeps_the_initial_mark() -> None:
++    result = rehearsed(production([move("m", {"manual": True}, "c", from_mark="sl")]))
++    assert "CF5004" not in codes_of(result)
++    assert result.performer_marks == {"joe": "sr", "mira": "sl"}
++
++
++def test_mark_assertion_holds_after_the_move() -> None:
++    passing = rehearsed(production([move("b", {"at": 1000}, "c")], ["mira.mark == c at b.completed"]))
++    assert "CF6001" not in codes_of(passing)
++    assert "CF6003" not in codes_of(passing)
++    failing = rehearsed(production([move("b", {"at": 1000}, "c")], ["mira.mark == sl at b.completed"]))
++    assert "CF6001" in codes_of(failing)
++
++
++def test_mark_assertion_fails_while_moving() -> None:
++    at_start = rehearsed(production([move("b", {"at": 1000}, "c")], ["mira.mark == sl at b.started"]))
++    assert "CF6001" in codes_of(at_start)
++    destination = rehearsed(production([move("b", {"at": 1000}, "c")], ["mira.mark == c at b.visible"]))
++    assert "CF6001" in codes_of(destination)
++
++
++def test_mark_assertion_sees_the_initial_mark() -> None:
++    cues = [light("z", 0), move("b", {"at": 1000}, "c")]
++    result = rehearsed(production(cues, ["mira.mark == sl at z.visible"]))
++    assert codes_of(result) == []
++    elsewhere = rehearsed(production(cues, ["mira.mark == c at z.visible"]))
++    assert codes_of(elsewhere) == ["CF6001"]
++
++
++def test_arrival_instant_counts_as_arrived() -> None:
++    arrived = rehearsed(
++        production(
++            [light("x", 1000 + SL_TO_C), move("b", {"at": 1000}, "c")],
++            ["mira.mark == c at x.visible"],
++        )
++    )
++    assert codes_of(arrived) == []
++    still_moving = rehearsed(
++        production(
++            [light("x", 1000 + SL_TO_C - 1), move("b", {"at": 1000}, "c")],
++            ["mira.mark == c at x.visible"],
++        )
++    )
++    assert codes_of(still_moving) == ["CF6001"]
++
++
++def test_mark_assertion_at_a_fail_instant() -> None:
++    show = compiled(production([move("b", {"at": 1000}, "c")], ["mira.mark == sl at b.failed"]))
++    before_start = run_rehearsal(show, [FailCue("b")])
++    assert [item.code for item in before_start.findings if item.code.startswith("CF6")] == []
++    stopped = run_rehearsal(show, [FailCue("b", 3000)])
++    assert [item.code for item in stopped.findings if item.code.startswith("CF6")] == []
++    assert stopped.performer_marks["mira"] == "sl"
++    mid_move = compiled(
++        production([light("x", 2000), move("b", {"at": 1000}, "c")], ["mira.mark == sl at x.visible"])
++    )
++    assert "CF6001" in codes_of(run_rehearsal(mid_move, [FailCue("b", 3000)]))
++
++
++def test_performer_marks_without_any_move() -> None:
++    result = rehearsed(production([light("z", 0)]))
++    assert result.performer_marks == {"joe": "sr", "mira": "sl"}
++    assert codes_of(result) == []
++
++
++def test_rehearsal_flags_the_running_move_case_too() -> None:
++    data = production([move("b", {"at": 1000}, "c"), move("a", {"at": 7000}, "sr")])
++    show = compiled(data)
++    assert subjects_of(run_rehearsal(show), "CF5004") == []
++    delayed = run_rehearsal(show, [DelayCue("b", 500)])
++    assert subjects_of(delayed, "CF5004") == ["a"]
++    a = status_of(delayed, "a")
++    assert (a.start_ms, a.end_ms) == (7000, 7000 + C_TO_SR)
++    assert delayed.performer_marks["mira"] == "sr"
++
++
++def test_mark_assertion_follows_delays() -> None:
++    data = production([light("x", 7000), move("b", {"at": 1000}, "c")], ["mira.mark == c at x.visible"])
++    show = compiled(data)
++    on_time = run_rehearsal(show)
++    assert "CF6001" not in codes_of(on_time)
++    delayed = run_rehearsal(show, [DelayCue("b", 1000)])
++    assert "CF6001" in codes_of(delayed)
++
++
++def test_mark_assertion_unknown_subjects() -> None:
++    nobody = rehearsed(production([move("b", {"at": 1000}, "c")], ["nobody.mark == c at b.completed"]))
++    assert "CF6003" in codes_of(nobody)
++    nowhere = rehearsed(production([move("b", {"at": 1000}, "c")], ["mira.mark == moon at b.completed"]))
++    assert "CF6003" in codes_of(nowhere)
++    assert "CF6002" not in codes_of(nowhere)
++
++
++def test_compile_time_disagreement_is_settled_by_the_real_position() -> None:
++    # The compiler already flags the stated mark and departs from the real one,
++    # so a rehearsal that keeps the order has nothing further to report.
++    data = production([move("b", {"at": 1000}, "c"), move("a", {"at": 8000}, "sr", from_mark="sl")])
++    show = compiled(data)
++    assert show.cue_map()["a"].action["from"] == "c"
++    result = run_rehearsal(show)
++    assert subjects_of(result, "CF5004") == []
++    assert result.performer_marks["mira"] == "sr"
++
++
++def test_two_performers_are_followed_apart_in_a_rehearsal() -> None:
++    tomas = {
++        "id": "t",
++        "department": "stage",
++        "trigger": {"at": 1000},
++        "action": {"move": "joe", "to": "c", "maximum_speed": "1.4"},
++    }
++    data = production(
++        [move("b", {"at": 1000}, "c"), tomas, light("x", 10000)],
++        ["joe.mark == c at x.visible", "mira.mark == c at x.visible"],
++    )
++    show = compiled(data)
++    on_time = run_rehearsal(show)
++    assert codes_of(on_time) == []
++    assert on_time.performer_marks == {"joe": "c", "mira": "c"}
++    assert status_of(on_time, "t").end_ms == 1000 + C_TO_SR
++    # Holding joe back leaves him mid-cross at ten seconds; mira is unaffected.
++    held_back = run_rehearsal(show, [DelayCue("t", 5000)])
++    assert subjects_of(held_back, "CF5004") == []
++    assert [item.subject_id for item in held_back.findings if item.code == "CF6001"] == [
++        "joe.mark == c at x.visible"
++    ]
++    assert held_back.performer_marks == {"joe": "c", "mira": "c"}
++
++
++def test_cli_fail_flag_leaves_the_performer_where_it_was(tmp_path: Path) -> None:
++    path = tmp_path / "marks.yaml"
++    path.write_text(
++        "version: 1\nproduction: marks\ntime_unit: ms\n"
++        "performers:\n  mira: {initial_mark: sl}\n  joe: {initial_mark: sr}\n"
++        "locations:\n  sl: {x: 0, y: 0}\n  c: {x: 8, y: 0}\n  sr: {x: 20, y: 0}\n"
++        "cues:\n"
++        "  - id: b\n    department: stage\n    trigger: {at: 1000}\n"
++        "    action: {move: mira, to: c, maximum_speed: 1.4}\n"
++        "  - id: a\n    department: stage\n    trigger: {at: 8000}\n"
++        "    action: {move: mira, to: sr, maximum_speed: 1.4}\n",
++        encoding="utf-8",
++    )
++    result = runner.invoke(app, ["rehearse", str(path), "--fail", "a", "--format", "json"])
++    assert result.exit_code == 1
++    assert '"performer_marks":{"joe":"sr","mira":"c"}' in result.stdout
++
++
++def test_a_go_checks_the_from_the_compiler_had_to_trust() -> None:
++    show = compiled(production([move("m", {"manual": True}, "c", from_mark="sr"), light("x", 9000)]))
++    fired = run_rehearsal(show, [GoCue("m", 0)])
++    assert subjects_of(fired, "CF5004") == ["m"]
++    assert fired.performer_marks["mira"] == "c"
++
++
++def test_mark_assertion_waits_for_the_go() -> None:
++    data = production(
++        [move("m", {"manual": True}, "c", from_mark="sl"), light("x", 9000)],
++        ["mira.mark == c at x.visible"],
++    )
++    show = compiled(data)
++    assert "CF6001" not in codes_of(run_rehearsal(show, [GoCue("m", 0)]))
++    assert "CF6001" in codes_of(run_rehearsal(show))
++    assert "CF6001" in codes_of(run_rehearsal(show, [GoCue("m", 5000)]))
++
++
++def test_the_move_that_finishes_last_decides_the_mark() -> None:
++    data = production(
++        [move("b", {"at": 1000}, "c"), move("a", {"at": 3000}, "sr"), light("x", 1000 + SL_TO_C)],
++        ["mira.mark == c at x.visible"],
++    )
++    result = rehearsed(data)
++    assert "CF6001" in codes_of(result)
++    assert result.performer_marks["mira"] == "sr"
++    a = status_of(result, "a")
++    b = status_of(result, "b")
++    assert a.end_ms is not None and b.end_ms is not None
++    assert a.end_ms > b.end_ms

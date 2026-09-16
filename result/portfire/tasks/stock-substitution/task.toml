@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/stock-substitution"
+
+[metadata]
+task_id = "stock-substitution"
+display_title = "Fire the show from what the magazine holds"
+display_description = "Draw every shot from the magazine book in firing order, cover a shortfall with a stand-in from what is left, drain lots oldest first, and put the lot on the cue sheet."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/WpqTJpXGevrGEFj3lf8N"
+base_commit_hash = "cbfb245b02c044e160ca8346fc17ce78eb374ddc"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-portfire-wpqtjp:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

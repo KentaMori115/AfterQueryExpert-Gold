@@ -1,0 +1,974 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1bbc530..01653e3 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,13 @@
+ # Changelog
+ 
++## Unreleased
++
++- Rehearsals hold a cue whose resources have no free slot and start it when
++  a slot frees, instead of double-booking and reporting `CF4001` afterwards.
++  Late starts are reported as `CF7001` warnings and listed under `holds`;
++  `after` dependents with non-negative offsets follow the actual start.
++  See `docs/timing-contract.md`.
++
+ ## 0.1.0 — Paper Tech
+ 
+ - Load YAML and JSON productions, including multi-file workspaces.
+diff --git a/README.md b/README.md
+index 5eaada3..fc36248 100644
+--- a/README.md
++++ b/README.md
+@@ -43,12 +43,28 @@ cueforge report examples/harbor_rehearsal.yaml --format json
+ 
+ Exit codes: `0` success, `1` production or rehearsal errors, `2` usage, `3` store I/O.
+ 
++## Holds
++
++A plan can book one device for two cues at once; `compile` reports that as
++`CF4001` or `CF4002`. A rehearsal never double-books. A cue called while every
++slot of a resource it uses is taken holds, and starts at the first instant a
++slot is free on each of its resources. Cues holding for one slot get it in
++order of planned instant, then cue id. Each late start is one `CF7001`
++warning and one entry under `holds` in the rehearsal result. Dependents with
++non-negative `after` offsets follow the actual start; negative offsets keep
++their planned instant. See `docs/timing-contract.md` and
++`docs/rehearsal-holds.md`.
++
++```bash
++cueforge rehearse examples/holds/shared_wall.yaml
++```
++
+ ## Paper Tech
+ 
+ This baseline is the Paper Tech release. It supports absolute and single
+-dependency triggers, cycle witnesses, exclusive reservations, basic resource
+-state, delay and fail injection, master and departmental sheets, and
+-canonical JSON. Compound triggers, timing-window solvers, recovery branches,
++dependency triggers, cycle witnesses, exclusive reservations, resource holds
++during rehearsal, basic resource state, delay and fail injection, master and
++departmental sheets, and canonical JSON. Compound triggers, timing-window solvers, recovery branches,
+ and live operator protocols are intentionally absent.
+ 
+ See `docs/determinism.md`, `docs/production-format.md`, and `docs/timing-contract.md`.
+diff --git a/docs/cli.md b/docs/cli.md
+index 0fff2f8..87a9644 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -10,5 +10,6 @@
+ | `report` | Compile, rehearse, and emit a report |
+ | `runs inspect` | Read a stored run digest |
+ 
+-`--format json` writes one canonical document to stdout. Diagnostics that are
++`--format json` writes one canonical document to stdout. The text form of
++`rehearse` and `report` lists holds after the cue statuses. Diagnostics that are
+ not the result document go to stderr. `NO_COLOR` disables ANSI styling.
+diff --git a/docs/findings.md b/docs/findings.md
+index fdfc255..5b21dbb 100644
+--- a/docs/findings.md
++++ b/docs/findings.md
+@@ -10,7 +10,7 @@ A finding is a structured diagnostic. Codes are public.
+ | `CF4xxx` | Resource capacity and state |
+ | `CF5xxx` | Movement |
+ | `CF6xxx` | Assertions |
+-| `CF7xxx` | Simulation interventions and outcomes |
++| `CF7xxx` | Simulation interventions and outcomes; `CF7001` is a cue that started later than it was called |
+ | `CF8xxx` | Run-store integrity |
+ 
+ Human messages may become clearer. Codes, severity, subjects, and witness
+diff --git a/docs/rehearsal-holds.md b/docs/rehearsal-holds.md
+new file mode 100644
+index 0000000..6a2c7f7
+--- /dev/null
++++ b/docs/rehearsal-holds.md
+@@ -0,0 +1,157 @@
++# Rehearsal holds, worked through
++
++`docs/timing-contract.md` states the rules. This page walks one production
++through them so the numbers can be checked by hand. Every value below comes
++from `cueforge rehearse examples/holds/shared_wall.yaml --format json`.
++
++## The plan
++
++`shared_wall` has one video wall with a single slot and a haze rig with two.
++Three video cues want the wall:
++
++| cue | called | duration | uses |
++|---|---|---|---|
++| `vid_intro` | 0 | 5000 | wall |
++| `vid_verse` | 2000 | 4000 | wall |
++| `vid_bridge` | 5000 | 1000 | wall |
++
++`compile` reports `CF4001` for the wall: the plan books `vid_verse` over
++`vid_intro`, and `vid_bridge` over both. The compiled plan is still returned;
++the rehearsal is where the holds resolve it.
++
++## What the rehearsal does
++
++At 0 `vid_intro` starts and holds the wall until 5000.
++
++At 2000 `vid_verse` is called. The wall has one slot and one holder, so there
++is no free slot: `vid_verse` holds. It holds nothing while it waits.
++
++At 5000 two things happen at one instant. `vid_bridge` is called, and
++`vid_intro` completes. Reservations are half-open, so the release at 5000
++frees the slot for a cue called at 5000. Two cues could take that one slot:
++`vid_verse`, planned at 2000, and `vid_bridge`, planned at 5000. The earlier
++planned instant wins, so `vid_verse` starts at 5000 and runs to 9000, and
++`vid_bridge` holds.
++
++At 9000 `vid_verse` completes and `vid_bridge` starts, 4000 ms late.
++
++| cue | planned | started | held |
++|---|---|---|---|
++| `vid_verse` | 2000 | 5000 | 3000 |
++| `vid_bridge` | 5000 | 9000 | 4000 |
++
++Both appear in `holds`, ordered by planned instant, and each carries one
++`CF7001` warning:
++
++```json
++{"cue_id":"vid_verse","held_ms":3000,"planned_ms":2000,"resources":["wall"],"start_ms":5000}
++{"cue_id":"vid_bridge","held_ms":4000,"planned_ms":5000,"resources":["wall"],"start_ms":9000}
++```
++
++The witness on the finding carries the same numbers, with `resources` as the
++comma-joined string `wall`.
++
++## Dependents
++
++`lx_chase` is `after: vid_verse, offset: 250`. Its offset is not negative, so
++it is called from the actual start of `vid_verse`: 5000 + 250 = 5250, not the
++2250 the plan gave it. It never starts before its dependency.
++
++`lx_pre` is `after: vid_verse, offset: -500`. A negative offset cannot wait
++for an instant nobody knows yet, so `lx_pre` keeps its planned instant and
++starts at 1500, well before `vid_verse` actually starts at 5000. That is what
++happens on a real stage: the pre-verse look was already up when the wall
++turned out to be busy.
++
++The assertion `vid_verse.started before lx_chase.started` holds (5000 before
++5250). `vid_intro.completed before vid_bridge.started` holds too (5000 before
++9000), and would also have held without the hold.
++
++## Capacity above one
++
++The haze rig has two slots. `haze_a` (called at 100) and `haze_b` (called at
++200) take both. `haze_c` is called at 300, finds no free slot, and holds until
++`haze_a` releases at 3100. It starts then, 2800 ms late, and its `resources`
++lists only `haze`. The rig never reports `CF4002` from the rehearsal, because
++a third holder never exists.
++
++## Ties and order
++
++When several cues are holding for the same slot, the order they get it is
++the order of their planned instants, and cue id breaks ties. The planned
++instant of a dependent with a non-negative offset is the instant it was
++called, which is later than the plan said whenever its dependency was held.
++A cue that arrives at the release instant, like `vid_bridge` above, is
++behind every cue that has been waiting longer.
++
++## Failures
++
++A holder that fails while running releases its slots at the failure instant,
++and cues waiting for those slots start then. A cue that fails before it
++starts, at its planned instant or while holding, never held a slot and
++releases nothing; its dependents with non-negative offsets are called from
++the failure instant, exactly as they would be from a start.
++
++A held cue's `requires` states are checked when it actually starts, not when
++it was called. A cue called while the revolve is `locked`, held, and started
++after another cue moved the revolve, fails with `CF4003` at its actual start.
++
++## Exit codes
++
++`CF7001` is a warning. A rehearsal whose only findings are holds has no
++errors, so `rehearse` and `report` exit `0` for it, while `compile` on the
++same production still exits `1` for the plan-level conflict.
++
++## A hold that ends in a state failure
++
++`examples/holds/revolve_late.yaml` puts the state check where it belongs, at
++the actual start. `scene_change` is called at 1000 and needs the winch, which
++`fly_in` holds until 6000, so it holds. At 3000 `safety_unlock` moves the
++revolve from `locked` to `unlocked`. At 6000 the winch frees and
++`scene_change` starts, or rather tries to: its `requires` says the revolve
++must be `locked`, it is not, and the cue fails with `CF4003` at 6000. It
++never held the winch or the revolve, so nothing is released, and there is
++no `CF7001` for it: a hold is reported for a cue that started late, not for
++one that never started.
++
++`cleanup` is `after: scene_change, offset: 500`. Its dependency failed before
++starting, at 6000, so `cleanup` is called from that instant: 6500. It finds
++the revolve free and runs. `intro_vo`, with `offset: -300`, keeps its planned
++instant of 700 and runs long before any of this.
++
++```
++$ cueforge rehearse examples/holds/revolve_late.yaml
++rehearse revolve_late digest=...
++events=21
++  fly_in completed start=0 end=6000
++  safety_unlock completed start=3000 end=3100
++  scene_change failed start=None end=None
++  cleanup completed start=6500 end=7300
++  intro_vo completed start=700 end=1900
++findings:
++  ERROR CF4003 cue:scene_change: cue 'scene_change' failed at 6000ms
++  ERROR CF4003 resource:revolve: cue 'scene_change' requires revolve.locked but current state is unlocked
++```
++
++The command exits `1`: the failure is an error, and only holds are free of
++errors.
++
++`scripts/verify_holds.py` rehearses both examples and checks the invariants
++every hold must satisfy: no resource ever has more holders than slots, every
++recorded start is at or after its planned instant, and the `holds` list is
++ordered the way the contract says.
++
++## Reading a hold in the JSON report
++
++| key | meaning |
++|---|---|
++| `cue_id` | the cue that started late |
++| `planned_ms` | the instant it was called |
++| `start_ms` | the instant it actually started |
++| `held_ms` | `start_ms - planned_ms`, always positive |
++| `resources` | the resources that had no free slot when it was called, sorted |
++
++The same numbers sit on the `CF7001` finding as `witness`, with `resources`
++joined by commas because a witness value is a scalar. A cue that started when
++it was called never appears in either place, whichever slots it waited for
++at the same instant.
+diff --git a/docs/timing-contract.md b/docs/timing-contract.md
+index e74894f..e9090c8 100644
+--- a/docs/timing-contract.md
++++ b/docs/timing-contract.md
+@@ -26,3 +26,44 @@ rounds upward. Travel time is `ceil(distance * 1_000_000 / speed_milli)`.
+ 
+ Values outside signed 64-bit range produce `CF2004`. Scientific notation
+ produces `CF2002`. Fractional millisecond tokens produce `CF2007`.
++
++## Holds
++
++Compilation reserves a resource for the whole of a cue's interval and reports
++`CF4001` or `CF4002` when the plan books more claimants than the resource has
++capacity. Rehearsal does not double-book. A cue is called at its planned
++instant, and it starts there only when every resource it uses has a free
++slot. Otherwise it holds.
++
++- A resource with `capacity` slots has a free slot while fewer than
++  `capacity` started cues hold it. A holder releases at its completion
++  instant, or at its failure instant when it fails while running.
++- Reservations are half-open. A release at instant `t` frees the slot for a
++  cue called at `t`, and such a cue is not held.
++- A held cue starts at the first instant every resource it uses has a free
++  slot, taken together. It holds nothing while it waits, and its `requires`
++  states are checked at the instant it actually starts.
++- When several cues could take the last free slot at one instant, the cue
++  with the earlier planned instant starts first; equal planned instants are
++  ordered by cue id.
++
++The planned instant of an absolute, event or manual cue is what the compiled
++plan, the delays and the GO give it. An `after` dependent with an offset of
++zero or more is called at its dependency's actual start plus the offset (plus
++its own delay), never before the dependency started, so a hold on the
++dependency moves the dependent by the same amount; that call is the
++dependent's planned instant. A dependent with a negative offset keeps the
++planned instant it already had: it cannot wait for an instant that is not yet
++known, and it is not moved by a hold on its dependency. A dependency that
++fails without starting resolves its dependents from the failure instant.
++
++Every cue that started later than it was called is reported once as `CF7001`
++with severity `warning`, subject kind `cue`, and the witness keys
++`planned_ms`, `start_ms`, `held_ms` and `resources`, the last being the used
++resource ids that had no free slot at the planned instant, sorted and joined
++with commas. The rehearsal result carries the same facts as `holds`, ordered
++by planned instant then cue id, each entry holding `cue_id`, `planned_ms`,
++`start_ms`, `held_ms` and `resources` as a list. Statuses and events keep
++their shape: `eligible` is emitted at the planned instant and `started` at
++the actual one. A rehearsal whose only findings are holds has no errors, so
++`rehearse` and `report` exit `0` for it.
+diff --git a/examples/holds/revolve_late.yaml b/examples/holds/revolve_late.yaml
+new file mode 100644
+index 0000000..4176dec
+--- /dev/null
++++ b/examples/holds/revolve_late.yaml
+@@ -0,0 +1,56 @@
++version: 1
++production: revolve_late
++time_unit: ms
++
++# The revolve is busy when the scene change is called, so the scene change
++# holds. While it waits, a safety cue unlocks the revolve, and the scene
++# change fails its `requires` check at the instant it actually starts. A
++# second automation cue then finds the revolve free again.
++
++resources:
++  revolve:
++    kind: stage_automation
++    capacity: 1
++    states: [locked, unlocked, scene_two]
++    initial_state: locked
++  winch:
++    kind: stage_automation
++    capacity: 1
++
++cues:
++  - id: fly_in
++    department: automation
++    trigger: {at: 0}
++    duration: 6000
++    uses: [winch]
++
++  - id: scene_change
++    department: automation
++    trigger: {at: 1000}
++    duration: 2000
++    uses: [winch, revolve]
++    requires:
++      - resource: revolve
++        state: locked
++    action:
++      resource: revolve
++      transition_to: scene_two
++
++  - id: safety_unlock
++    department: automation
++    trigger: {at: 3000}
++    duration: 100
++    action:
++      resource: revolve
++      transition_to: unlocked
++
++  - id: cleanup
++    department: automation
++    trigger: {after: scene_change, offset: 500}
++    duration: 800
++    uses: [revolve]
++
++  - id: intro_vo
++    department: sound
++    trigger: {after: scene_change, offset: -300}
++    duration: 1200
+diff --git a/examples/holds/shared_wall.yaml b/examples/holds/shared_wall.yaml
+new file mode 100644
+index 0000000..0c39315
+--- /dev/null
++++ b/examples/holds/shared_wall.yaml
+@@ -0,0 +1,71 @@
++version: 1
++production: shared_wall
++time_unit: ms
++
++# One video wall, three cues that want it, and a lighting chase that
++# follows the second video. Rehearse it to see two holds and one
++# dependent that moves with its dependency.
++
++resources:
++  wall:
++    kind: video_output
++    capacity: 1
++  haze:
++    kind: atmosphere
++    capacity: 2
++
++cues:
++  - id: vid_intro
++    department: video
++    trigger: {at: 0}
++    duration: 5000
++    uses: [wall]
++    action: {play: intro.mov}
++
++  - id: vid_verse
++    department: video
++    trigger: {at: 2000}
++    duration: 4000
++    uses: [wall]
++    action: {play: verse.mov}
++
++  - id: vid_bridge
++    department: video
++    trigger: {at: 5000}
++    duration: 1000
++    uses: [wall]
++    action: {play: bridge.mov}
++
++  - id: lx_chase
++    department: lighting
++    trigger: {after: vid_verse, offset: 250}
++    duration: 3000
++    action: {preset: chase}
++
++  - id: lx_pre
++    department: lighting
++    trigger: {after: vid_verse, offset: -500}
++    duration: 400
++    action: {preset: pre_verse}
++
++  - id: haze_a
++    department: stage
++    trigger: {at: 100}
++    duration: 3000
++    uses: [haze]
++
++  - id: haze_b
++    department: stage
++    trigger: {at: 200}
++    duration: 3000
++    uses: [haze]
++
++  - id: haze_c
++    department: stage
++    trigger: {at: 300}
++    duration: 500
++    uses: [haze]
++
++assertions:
++  - expression: "vid_intro.completed before vid_bridge.started"
++  - expression: "vid_verse.started before lx_chase.started"
+diff --git a/scripts/verify_holds.py b/scripts/verify_holds.py
+new file mode 100644
+index 0000000..1db6f6d
+--- /dev/null
++++ b/scripts/verify_holds.py
+@@ -0,0 +1,78 @@
++#!/usr/bin/env python3
++"""Rehearse the hold examples and check the invariants every hold obeys."""
++
++from __future__ import annotations
++
++import sys
++from collections import defaultdict
++from pathlib import Path
++
++from cueforge.api import compile_production, load_production, rehearse
++
++ROOT = Path(__file__).resolve().parents[1]
++EXAMPLES = [
++    ROOT / "examples" / "holds" / "shared_wall.yaml",
++    ROOT / "examples" / "holds" / "revolve_late.yaml",
++    ROOT / "examples" / "invalid-productions" / "overlap.yaml",
++]
++
++
++def check(path: Path) -> list[str]:
++    problems: list[str] = []
++    loaded = load_production(path)
++    if loaded.value is None:
++        return [f"load failed: {path}"]
++    compiled = compile_production(loaded.value)
++    if compiled.value is None:
++        return [f"compile failed: {path}"]
++    show = compiled.value
++    result = rehearse(show)
++    capacity = {item.id: item.capacity for item in show.resources}
++
++    # No instant may see more holders on a resource than it has slots. Every
++    # reservation is half-open, so only the start instants need checking.
++    by_resource: dict[str, list[tuple[int, int]]] = defaultdict(list)
++    for item in result.reservations:
++        by_resource[item.resource_id].append((item.interval.start_ms, item.interval.end_ms))
++    for resource_id, spans in by_resource.items():
++        for start, _end in spans:
++            live = sum(1 for other_start, other_end in spans if other_start <= start < other_end)
++            if live > capacity.get(resource_id, 1):
++                problems.append(f"{path.name}: {resource_id} has {live} holders at {start}ms")
++
++    planned_seen: list[tuple[int, str]] = []
++    for entry in result.semantic_dict()["holds"]:
++        if entry["start_ms"] < entry["planned_ms"]:
++            problems.append(f"{path.name}: {entry['cue_id']} started before it was called")
++        if entry["held_ms"] != entry["start_ms"] - entry["planned_ms"]:
++            problems.append(f"{path.name}: {entry['cue_id']} held_ms does not add up")
++        if not entry["resources"] or entry["resources"] != sorted(entry["resources"]):
++            problems.append(f"{path.name}: {entry['cue_id']} resources are not sorted")
++        planned_seen.append((entry["planned_ms"], entry["cue_id"]))
++    if planned_seen != sorted(planned_seen):
++        problems.append(f"{path.name}: holds are not ordered by planned instant then id")
++
++    late = {item.subject_id for item in result.findings if item.code == "CF7001"}
++    listed = {entry["cue_id"] for entry in result.semantic_dict()["holds"]}
++    if late != listed:
++        problems.append(f"{path.name}: CF7001 findings {sorted(late)} do not match holds {sorted(listed)}")
++    for item in result.findings:
++        if item.code in {"CF4001", "CF4002"}:
++            problems.append(f"{path.name}: rehearsal still double-books ({item.code})")
++    return problems
++
++
++def main() -> int:
++    failures: list[str] = []
++    for path in EXAMPLES:
++        failures.extend(check(path))
++    for line in failures:
++        print(line, file=sys.stderr)
++    if failures:
++        return 1
++    print("holds ok")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/src/cueforge/reports/text.py b/src/cueforge/reports/text.py
+index eff0ab8..4d6d7a9 100644
+--- a/src/cueforge/reports/text.py
++++ b/src/cueforge/reports/text.py
+@@ -43,6 +43,13 @@ def render_text_rehearse(result: RehearsalResult) -> str:
+         lines.append(
+             f"  {status.cue_id} {status.status} start={status.start_ms} end={status.end_ms}"
+         )
++    if result.holds:
++        lines.append("holds:")
++        for hold in result.holds:
++            lines.append(
++                f"  {hold.cue_id} called={hold.planned_ms}ms started={hold.start_ms}ms "
++                f"held={hold.held_ms}ms waiting_for={','.join(hold.resources)}"
++            )
+     if result.findings:
+         lines.append("findings:")
+         lines.extend(f"  {_finding_line(item)}" for item in result.findings)
+diff --git a/src/cueforge/simulation/__init__.py b/src/cueforge/simulation/__init__.py
+index 7f80553..93e45c7 100644
+--- a/src/cueforge/simulation/__init__.py
++++ b/src/cueforge/simulation/__init__.py
+@@ -1,5 +1,6 @@
+ """Virtual-time rehearsal simulation."""
+ 
++from cueforge.simulation.holds import HoldRecord
+ from cueforge.simulation.interventions import DelayCue, FailCue, GoCue, Intervention
+ from cueforge.simulation.scheduler import RehearsalResult, run_rehearsal
+ 
+@@ -7,6 +8,7 @@ __all__ = [
+     "DelayCue",
+     "FailCue",
+     "GoCue",
++    "HoldRecord",
+     "Intervention",
+     "RehearsalResult",
+     "run_rehearsal",
+diff --git a/src/cueforge/simulation/holds.py b/src/cueforge/simulation/holds.py
+new file mode 100644
+index 0000000..f976b20
+--- /dev/null
++++ b/src/cueforge/simulation/holds.py
+@@ -0,0 +1,149 @@
++"""Resource slots and hold records for the virtual-time rehearsal.
++
++A resource with ``capacity`` slots can be held by that many started cues at
++once. A cue whose turn comes while every slot of one of its resources is
++taken does not start; it holds, and the scheduler starts it at the first
++instant a slot on each of its resources is free. ``SlotLedger`` keeps the
++live picture of who holds what, ``HoldQueue`` keeps the cues that are waiting
++in the order they are entitled to a slot, and ``HoldRecord`` is the public
++account of one cue that started later than it was called.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterator, Mapping
++from dataclasses import dataclass
++from typing import Any
++
++from cueforge.codes import CF7001_LATE_CUE
++from cueforge.findings import Finding, Severity
++
++
++@dataclass(frozen=True, slots=True)
++class HoldRecord:
++    """One cue that was called at ``planned_ms`` and started at ``start_ms``."""
++
++    cue_id: str
++    planned_ms: int
++    start_ms: int
++    resources: tuple[str, ...]
++
++    @property
++    def held_ms(self) -> int:
++        return self.start_ms - self.planned_ms
++
++    def sort_key(self) -> tuple[int, str]:
++        return (self.planned_ms, self.cue_id)
++
++    def as_dict(self) -> dict[str, Any]:
++        return {
++            "cue_id": self.cue_id,
++            "held_ms": self.held_ms,
++            "planned_ms": self.planned_ms,
++            "resources": list(self.resources),
++            "start_ms": self.start_ms,
++        }
++
++    def finding(self) -> Finding:
++        joined = ",".join(self.resources)
++        return Finding(
++            code=CF7001_LATE_CUE,
++            severity=Severity.WARNING,
++            message=(
++                f"cue {self.cue_id!r} held {self.held_ms}ms for {joined}: "
++                f"called at {self.planned_ms}ms, started at {self.start_ms}ms"
++            ),
++            subject_kind="cue",
++            subject_id=self.cue_id,
++            witness={
++                "planned_ms": self.planned_ms,
++                "start_ms": self.start_ms,
++                "held_ms": self.held_ms,
++                "resources": joined,
++            },
++        )
++
++
++class SlotLedger:
++    """Live slot accounting: which started cues hold which resource now.
++
++    A holder is counted from the instant it starts until the instant it
++    releases, which is its completion or its failure. Releases are applied
++    before the queue is retried at the same instant, so an interval that ends
++    at ``t`` never blocks a cue called at ``t``.
++    """
++
++    def __init__(self, capacities: Mapping[str, int]) -> None:
++        self._capacity = {name: max(1, int(cap)) for name, cap in capacities.items()}
++        self._holders: dict[str, list[str]] = {name: [] for name in self._capacity}
++
++    def capacity(self, resource_id: str) -> int:
++        return self._capacity.get(resource_id, 1)
++
++    def holders(self, resource_id: str) -> tuple[str, ...]:
++        return tuple(self._holders.get(resource_id, ()))
++
++    def free_slots(self, resource_id: str) -> int:
++        return self.capacity(resource_id) - len(self._holders.get(resource_id, ()))
++
++    def busy(self, resources: tuple[str, ...]) -> tuple[str, ...]:
++        """The resources among ``resources`` that have no free slot, sorted."""
++        return tuple(sorted({name for name in resources if self.free_slots(name) <= 0}))
++
++    def acquire(self, cue_id: str, resources: tuple[str, ...]) -> None:
++        for name in resources:
++            self._holders.setdefault(name, []).append(cue_id)
++
++    def release(self, cue_id: str, resources: tuple[str, ...]) -> tuple[str, ...]:
++        """Drop ``cue_id`` from every listed resource; return the ones it held."""
++        released: list[str] = []
++        for name in resources:
++            holders = self._holders.get(name)
++            if holders is not None and cue_id in holders:
++                holders.remove(cue_id)
++                released.append(name)
++        return tuple(released)
++
++
++@dataclass(frozen=True, slots=True)
++class HoldEntry:
++    """A cue waiting for a slot: called at ``planned_ms``, blocked by ``busy``."""
++
++    planned_ms: int
++    cue_id: str
++    busy: tuple[str, ...]
++
++    def sort_key(self) -> tuple[int, str]:
++        return (self.planned_ms, self.cue_id)
++
++
++class HoldQueue:
++    """Cues that are holding, in the order they are entitled to a free slot:
++    earlier planned instant first, then smaller cue id."""
++
++    def __init__(self) -> None:
++        self._entries: dict[str, HoldEntry] = {}
++
++    def __len__(self) -> int:
++        return len(self._entries)
++
++    def __contains__(self, cue_id: str) -> bool:
++        return cue_id in self._entries
++
++    def add(self, planned_ms: int, cue_id: str, busy: tuple[str, ...]) -> HoldEntry:
++        entry = HoldEntry(planned_ms, cue_id, busy)
++        self._entries[cue_id] = entry
++        return entry
++
++    def remove(self, cue_id: str) -> HoldEntry | None:
++        return self._entries.pop(cue_id, None)
++
++    def ordered(self) -> Iterator[HoldEntry]:
++        """Entries in entitlement order, safe against removal while iterating."""
++        for entry in sorted(self._entries.values(), key=lambda item: item.sort_key()):
++            if entry.cue_id in self._entries:
++                yield entry
++
++
++def hold_findings(records: tuple[HoldRecord, ...] | list[HoldRecord]) -> list[Finding]:
++    return [record.finding() for record in records]
+diff --git a/src/cueforge/simulation/scheduler.py b/src/cueforge/simulation/scheduler.py
+index aada9ea..b17c177 100644
+--- a/src/cueforge/simulation/scheduler.py
++++ b/src/cueforge/simulation/scheduler.py
+@@ -8,6 +8,7 @@ from typing import Any
+ 
+ from cueforge.assertions.evaluate import evaluate_assertions
+ from cueforge.codes import (
++    CF2004_OVERFLOW,
+     CF4003_ILLEGAL_STATE,
+     CF7002_CUE_FAILED,
+     CF7003_UNKNOWN_INTERVENTION,
+@@ -16,12 +17,13 @@ from cueforge.codes import (
+ from cueforge.compiler.plan import CompiledCue, CompiledShow
+ from cueforge.compiler.triggers import NormalizedTrigger
+ from cueforge.findings import Finding, Severity, sort_findings
+-from cueforge.resources.capacity import detect_capacity_conflicts
+ from cueforge.resources.reservations import Interval, Reservation
+ from cueforge.resources.state import ResourceState, apply_transition
+ from cueforge.simulation.clock import VirtualClock
+ from cueforge.simulation.events import KIND_RANK, SimulationEvent
++from cueforge.simulation.holds import HoldQueue, HoldRecord, SlotLedger, hold_findings
+ from cueforge.simulation.interventions import DelayCue, FailCue, GoCue, Intervention
++from cueforge.timing.instants import INT64_MAX, INT64_MIN
+ from cueforge.timing.schedule import resolve_starts
+ 
+ 
+@@ -44,6 +46,7 @@ class RehearsalResult:
+     resource_states: dict[str, str]
+     interventions: tuple[str, ...]
+     digest: str
++    holds: tuple[HoldRecord, ...] = ()
+ 
+     def semantic_dict(self) -> dict[str, Any]:
+         return {
+@@ -51,6 +54,7 @@ class RehearsalResult:
+             "digest": self.digest,
+             "events": [event.as_dict() for event in self.events],
+             "findings": [_finding_dict(item) for item in self.findings],
++            "holds": [record.as_dict() for record in self.holds],
+             "interventions": list(self.interventions),
+             "production_id": self.compiled.production_id,
+             "reservations": [
+@@ -205,6 +209,85 @@ def run_rehearsal(
+ 
+     compiled = show.cue_map()
+     cause: dict[str, int] = {}
++    ledger = SlotLedger({item.id: item.capacity for item in show.resources})
++    queue = HoldQueue()
++    records: list[HoldRecord] = []
++
++    # An ``after`` dependent with a non-negative offset is called from its
++    # dependency's actual start, so it is not queued until that instant is
++    # known. Negative offsets keep the planned instant: they cannot wait for
++    # an instant nobody knows yet.
++    followers: dict[str, list[str]] = {}
++    for cue in show.cues:
++        if cue.trigger_kind == "after" and cue.depends_on and cue.offset_ms >= 0:
++            followers.setdefault(cue.depends_on[0], []).append(cue.id)
++    deferred = {cue_id for group in followers.values() for cue_id in group}
++
++    def resolve(cue_id: str, time_ms: int) -> None:
++        """The cue started, or failed without starting: call its followers."""
++        for follower in sorted(followers.get(cue_id, ())):
++            if starts.get(follower) is None:
++                continue
++            due = time_ms + compiled[follower].offset_ms + delays.get(follower, 0)
++            if due < INT64_MIN or due > INT64_MAX:
++                findings.append(_overflow(follower))
++                continue
++            statuses[follower] = CueStatus(follower, "pending", due, None, None)
++            push(due, "eligible", follower)
++
++    def begin(cue: CompiledCue, time_ms: int, ev_seq: int) -> None:
++        """Mark ``cue`` running from ``time_ms`` and schedule its completion."""
++        end = time_ms + cue.duration_ms
++        statuses[cue.id] = CueStatus(cue.id, "running", time_ms, end, None)
++        _emit(
++            events,
++            time_ms,
++            "started",
++            cue.id,
++            _next_seq(events, ev_seq),
++            ev_seq,
++            (cue.id,),
++            {"duration_ms": cue.duration_ms},
++        )
++        push(end, "completed", cue.id)
++        resolve(cue.id, time_ms)
++
++    def attempt(cue: CompiledCue, time_ms: int, ev_seq: int) -> bool:
++        """Start ``cue`` now if its state requirements hold; fail it otherwise."""
++        started_ok, state_findings = _try_start(
++            cue, states, time_ms, events, ev_seq, live_reservations, ledger
++        )
++        findings.extend(state_findings)
++        if not started_ok:
++            _fail_cue(
++                events,
++                findings,
++                statuses,
++                cue,
++                time_ms,
++                ev_seq,
++                started=False,
++                extra_code=CF4003_ILLEGAL_STATE,
++            )
++            resolve(cue.id, time_ms)
++            return False
++        begin(cue, time_ms, ev_seq)
++        return True
++
++    def retry(time_ms: int) -> None:
++        """A slot was released: start every holding cue that now fits, in
++        entitlement order (earlier planned instant, then cue id)."""
++        for entry in queue.ordered():
++            waiting = compiled[entry.cue_id]
++            if ledger.busy(waiting.uses):
++                continue
++            queue.remove(entry.cue_id)
++            if attempt(waiting, time_ms, cause.get(entry.cue_id, 0)) and time_ms > entry.planned_ms:
++                records.append(HoldRecord(waiting.id, entry.planned_ms, time_ms, entry.busy))
++
++    def free(cue: CompiledCue, time_ms: int) -> None:
++        if ledger.release(cue.id, cue.uses):
++            retry(time_ms)
+ 
+     for cue in show.cues:
+         start = starts.get(cue.id)
+@@ -221,6 +304,8 @@ def run_rehearsal(
+             )
+             push(0, "pending_manual", cue.id)
+             continue
++        if cue.id in deferred:
++            continue
+         push(start, "eligible", cue.id)
+ 
+     while heap:
+@@ -249,39 +334,32 @@ def run_rehearsal(
+                     ev_seq,
+                     started=False,
+                 )
++                resolve(cue.id, item.time_ms)
+                 continue
+             if cue.id in fails and fails[cue.id] is not None and fails[cue.id] > item.time_ms:  # type: ignore[operator]
+                 push(int(fails[cue.id]), "failed", cue.id, {"started": True})  # type: ignore[arg-type]
+-            started_ok, state_findings = _try_start(
+-                cue, states, item.time_ms, events, ev_seq, live_reservations
+-            )
+-            findings.extend(state_findings)
+-            if not started_ok:
++            busy = ledger.busy(cue.uses)
++            if busy:
++                # Every slot of some resource is taken: hold, and start at the
++                # first release that leaves a slot free on each resource.
++                queue.add(item.time_ms, cue.id, busy)
++                continue
++            attempt(cue, item.time_ms, ev_seq)
++        elif item.kind == "failed":
++            if cue.id in queue:
++                # Failed while holding: it never started and holds nothing.
++                queue.remove(cue.id)
+                 _fail_cue(
+                     events,
+                     findings,
+                     statuses,
+                     cue,
+                     item.time_ms,
+-                    ev_seq,
++                    cause.get(cue.id),
+                     started=False,
+-                    extra_code=CF4003_ILLEGAL_STATE,
+                 )
++                resolve(cue.id, item.time_ms)
+                 continue
+-            end = item.time_ms + cue.duration_ms
+-            statuses[cue.id] = CueStatus(cue.id, "running", item.time_ms, end, None)
+-            _emit(
+-                events,
+-                item.time_ms,
+-                "started",
+-                cue.id,
+-                _next_seq(events, item.sequence),
+-                ev_seq,
+-                (cue.id,),
+-                {"duration_ms": cue.duration_ms},
+-            )
+-            push(end, "completed", cue.id)
+-        elif item.kind == "failed":
+             _fail_cue(
+                 events,
+                 findings,
+@@ -292,11 +370,13 @@ def run_rehearsal(
+                 started=True,
+                 reservations=live_reservations,
+             )
++            free(cue, item.time_ms)
+         elif item.kind == "completed":
+             status = statuses[cue.id]
+             if status.status != "running":
+                 continue
+             _release(live_reservations, events, cue, item.time_ms, cause.get(cue.id))
++            free(cue, item.time_ms)
+             statuses[cue.id] = CueStatus(cue.id, "completed", status.start_ms, item.time_ms, None)
+             _emit(
+                 events,
+@@ -320,8 +400,10 @@ def run_rehearsal(
+                 {},
+             )
+ 
+-    capacities = {item.id: item.capacity for item in show.resources}
+-    findings.extend(detect_capacity_conflicts(tuple(live_reservations), capacities))
++    # Holds are the only way a slot is ever shared, so there is nothing left
++    # to double-book; each late start is reported once.
++    holds_t = tuple(sorted(records, key=lambda item: item.sort_key()))
++    findings.extend(hold_findings(holds_t))
+ 
+     instants = {
+         cue_id: {
+@@ -359,6 +441,7 @@ def run_rehearsal(
+         "compiled_digest": show.digest,
+         "events": [event.as_dict() for event in events_t],
+         "findings": [_finding_dict(item) for item in findings_t],
++        "holds": [record.as_dict() for record in holds_t],
+         "interventions": intervention_labels,
+         "production_id": show.production_id,
+         "resource_states": resource_states,
+@@ -383,6 +466,7 @@ def run_rehearsal(
+         resource_states=resource_states,
+         interventions=tuple(intervention_labels),
+         digest=digest,
++        holds=holds_t,
+     )
+ 
+ 
+@@ -396,6 +480,16 @@ def _unknown(cue_id: str) -> Finding:
+     )
+ 
+ 
++def _overflow(cue_id: str) -> Finding:
++    return Finding(
++        code=CF2004_OVERFLOW,
++        severity=Severity.ERROR,
++        message=f"resolved start for {cue_id!r} overflows int64",
++        subject_kind="cue",
++        subject_id=cue_id,
++    )
++
++
+ def _next_seq(events: list[SimulationEvent], fallback: int) -> int:
+     return (events[-1].sequence + 1) if events else fallback + 1
+ 
+@@ -435,6 +529,7 @@ def _try_start(
+     events: list[SimulationEvent],
+     cause: int,
+     reservations: list[Reservation],
++    ledger: SlotLedger,
+ ) -> tuple[bool, list[Finding]]:
+     findings: list[Finding] = []
+     required = {resource_id: state for resource_id, state in cue.requires_state}
+@@ -479,6 +574,7 @@ def _try_start(
+         )
+     if cue.uses:
+         interval = Interval(time_ms, time_ms + cue.duration_ms)
++        ledger.acquire(cue.id, cue.uses)
+         for resource_id in cue.uses:
+             reservations.append(Reservation(resource_id, cue.id, interval))
+             _emit(

@@ -1,0 +1,118 @@
++ npx vitest run --config /tmp/biomeweaver-graded.config.ts --reporter=basic --reporter=junit --outputFile.junit=/logs/verifier/new_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+[1m[43m DEPRECATED [49m[22m [33m'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}[39m
+ [32m✓[39m packages/biome-model/src/event-validation.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 146[2mms[22m[39m
+ [32m✓[39m packages/biomeweaver-cli/src/event-commands.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 111[2mms[22m[39m
+ [31m❯[39m .verifier-canary/canary.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 18[2mms[22m[39m
+[31m   [31m×[31m verifier canary[2m > [22mnever passes[39m[32m 17[2mms[22m[39m
+[31m     → expected 1 to be 2 // Object.is equality[39m
+ [32m✓[39m packages/tick-runtime/src/fixed-events.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 302[2mms[22m[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m .verifier-canary/canary.test.ts[2m > [22mverifier canary[2m > [22mnever passes
+[31m[1mAssertionError[22m: expected 1 to be 2 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+[36m [2m❯[22m .verifier-canary/canary.test.ts:[2m5:15[22m[39m
+    [90m  3| [39m[34mdescribe[39m([32m"verifier canary"[39m[33m,[39m () [33m=>[39m {
+    [90m  4| [39m  [34mit[39m([32m"never passes"[39m[33m,[39m () [33m=>[39m {
+    [90m  5| [39m    [34mexpect[39m([34m1[39m)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m   | [39m              [31m^[39m
+    [90m  6| [39m  })[33m;[39m
+    [90m  7| [39m})[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m41 passed[39m[22m[90m (42)[39m
+[2m   Start at [22m 16:00:20
+[2m   Duration [22m 1.17s[2m (transform 655ms, setup 0ms, collect 1.54s, tests 576ms, environment 1ms, prepare 367ms)[22m
+
+JUNIT report written to /logs/verifier/new_junit.xml
++ npx vitest run --config /tmp/biomeweaver-shipped.config.ts --reporter=basic --reporter=junit --outputFile.junit=/logs/verifier/base_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+[1m[43m DEPRECATED [49m[22m [33m'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}[39m
+ [32m✓[39m ecosystem-lab/complete-biomes/crystal-tundra.biome.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 117[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/properties/determinism.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 126[2mms[22m[39m
+ [32m✓[39m packages/biomeweaver-cli/src/commands.catalog.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 295[2mms[22m[39m
+ [32m✓[39m packages/tick-runtime/src/advance.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 92[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/cli/commands.cli.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 162[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/properties/metamorphic.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 97[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/properties/conservation.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 93[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/compile.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 81[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/invalid-models/invalid.biome.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+ [32m✓[39m packages/biomeweaver/src/baseline-guard.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/discovery/discover.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m packages/predation-engine/src/consume.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/flow-explanations/src/catalog.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/coverage.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m packages/run-store/src/store.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/rounding.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/biomeweaver-cli/src/options.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/tick-runtime/src/events.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/gather/fingerprint.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/gather/gather.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/catalog.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/arithmetic.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/resource-engine/src/allocate.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m packages/resource-engine/src/modifiers.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/biome-reports/src/render.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/yaml/parse-yaml.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m packages/population-engine/src/cohorts.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/parse.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/diagnostics/diagnostic.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/flow-explanations/src/flow.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/decode.catalog.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/species.catalog.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/json/parse-json.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/calendar-engine/src/seasons.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/population-engine/src/stages.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/resource-engine/src/renew.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/identifiers.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/properties/locale.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+
+
+[2m Test Files [22m [1m[32m38 passed[39m[22m[90m (38)[39m
+[2m      Tests [22m [1m[32m196 passed[39m[22m[90m (196)[39m
+[2m   Start at [22m 16:00:21
+[2m   Duration [22m 4.90s[2m (transform 760ms, setup 0ms, collect 3.77s, tests 1.41s, environment 9ms, prepare 2.99s)[22m
+
+JUNIT report written to /logs/verifier/base_junit.xml

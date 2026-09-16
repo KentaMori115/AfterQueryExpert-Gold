@@ -1,0 +1,60 @@
+{% extends 'bot_base.html' %}
+{% load static %}
+
+{% block content %}
+<h2 class="text-center">Welcome To Our Platform</h2>
+<hr>
+
+<div class="container">
+    <p>
+        <input class="form-control" type="button" onclick="onAuthenBtnClick()" value="Authenticate" title="Authenticate" style="width:200px" />
+        <span class="text-danger">Please authenticate at least 10 minutes before 9:35 AM EST</span>
+    </p>    
+
+    
+    {% if expire_sec > 0 %}
+        <label id ="lblAuthStatus" style="color:green">Auth Status: Expire at <span style="color:blue">EST {{expire_est_formated}}</span> on the account <span style="color:blue">{{account_number}}</span></label>
+    {% else %}
+        <label id ="lblAuthStatus" style="color:red">Auth Status: Auth is not performed or Expired</label>
+    {% endif %}
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Bot Name</th>
+                <th>Bot Description</th>
+                <th>Status</th>
+                <th>Manage</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bot in bots %}
+                <tr {% if bot.status == "Running..." %} class="bg-info" {% else %} class="bg-warning" {% endif %}>
+                    <td>{{bot.botname}}</td>
+                    <td>{{bot.description}}</td>
+                    <td>{{bot.status}}</td>
+                    <td>
+                        <a href="{% url 'bot_detail' id=bot.id %}">Manage</a>  
+                    </td>
+                </tr>      
+            {% endfor %}
+
+            <tr class="table-secondary">
+                <td>New Bot</td>
+                <td>Under Development</td>
+                <td>Stopped</td>
+                <td>
+                    <a href="">Manage</a>  
+                </td>
+            </tr>      
+
+        </tbody>
+    </table>
+</div>
+  
+{% endblock %}
+
+{% block script %}
+    {{ block.super }}
+    <script src="{% static 'js/config_3.13.js' %}"></script>
+    <script  src="{% static 'js/bots_3.13.js' %}"></script>
+{% endblock %}

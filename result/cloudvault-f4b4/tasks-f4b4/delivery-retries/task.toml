@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/delivery-retries"
+
+[metadata]
+task_id = "delivery-retries"
+display_title = "Retry webhook deliveries instead of dropping them"
+display_description = "Webhook events are posted once and lost on any failure, and an endpoint that is down keeps being hit. Queue deliveries instead, with a retry schedule per delivery and a cooldown per endpoint."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/5CviKRq9xQSJMXtliovF"
+base_commit_hash = "451b9dc6ef18ab374ada270d111fa0731517a6b4"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-tg-storage-api-5cvikr:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

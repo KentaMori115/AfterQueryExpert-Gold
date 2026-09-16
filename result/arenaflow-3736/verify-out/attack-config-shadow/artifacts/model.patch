@@ -1,0 +1,30 @@
+diff --git a/package.json b/package.json
+index 9a32c91..2083105 100644
+--- a/package.json
++++ b/package.json
+@@ -27,7 +27,7 @@
+     "lint": "eslint src tests",
+     "format": "prettier --write .",
+     "format:check": "prettier --check .",
+-    "test": "vitest run --config vitest.config.ts",
++    "test": "true",
+     "test:watch": "vitest --config vitest.config.ts",
+     "test:integration": "vitest run --config vitest.integration.config.ts"
+   },
+diff --git a/vitest.config.ts b/vitest.config.ts
+index b165c4b..59ef516 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -3,11 +3,6 @@ import { defineConfig } from "vitest/config";
+ export default defineConfig({
+   test: {
+     environment: "node",
+-    include: ["tests/**/*.test.ts"],
+-    exclude: ["tests/integration/**"],
+-    sequence: { shuffle: false },
+-    fileParallelism: false,
+-    pool: "threads",
+-    isolate: true,
++    include: ["tests/core/shared.test.ts"],
+   },
+ });

@@ -1,0 +1,538 @@
+diff --git a/lib/range-plan.ts b/lib/range-plan.ts
+new file mode 100644
+index 0000000..3cd5720
+--- /dev/null
++++ b/lib/range-plan.ts
+@@ -0,0 +1,101 @@
++// Planning one answer to a download request.
++//
++// A stored file is a run of Telegram chunks, and until now the download path
++// has always sent all of them from the first byte to the last. This turns a
++// Range header into the reads that answer it and the headers that describe the
++// answer, so a client can resume a broken transfer or seek inside a video
++// without pulling the whole file again.
++
++import { clampSpecs, type Span } from "./range/clamp"
++import { mergeSpans, stitchSpans } from "./range/fold"
++import { multipartLength } from "./range/framing"
++import { parseRangeHeader } from "./range/header"
++import { manifestTotal, readsForSpan } from "./range/manifest"
++import type { ChunkManifest, RangePart, RangePlan } from "./range/types"
++
++// Stretches beyond this many cost more in framing than they save in bytes, and
++// the whole file goes out instead.
++export const MAX_PARTS = 4
++
++// Attach the reads to a stretch.
++function partFor(manifest: ChunkManifest, span: Span): RangePart {
++    return {
++        first: span.first,
++        last: span.last,
++        reads: readsForSpan(manifest, span.first, span.last),
++    }
++}
++
++// The answer that carries the file whole.
++function wholeFile(manifest: ChunkManifest, total: number): RangePlan {
++    return {
++        status: 200,
++        contentType: manifest.contentType,
++        contentRange: null,
++        contentLength: total,
++        parts: [partFor(manifest, { first: 0, last: total - 1 })],
++        bytesServed: total,
++    }
++}
++
++// The answer that carries nothing, because nothing asked for is there.
++function nothingThere(manifest: ChunkManifest, total: number): RangePlan {
++    return {
++        status: 416,
++        contentType: manifest.contentType,
++        contentRange: `bytes */${total}`,
++        contentLength: 0,
++        parts: [],
++        bytesServed: 0,
++    }
++}
++
++/**
++ * Work out how to answer one download request.
++ *
++ * The header is read whole or ignored whole, every member is measured against
++ * the file, what survives is folded into ascending stretches, and gaps too
++ * small to be worth keeping are crossed rather than described. What comes back
++ * says which bytes of which chunk to read and what the response headers hold.
++ */
++export function planRangedResponse(
++    manifest: ChunkManifest,
++    rangeHeader: string | null | undefined,
++    boundary: string,
++): RangePlan {
++    const total = manifestTotal(manifest)
++
++    const specs = parseRangeHeader(rangeHeader)
++    if (specs === null) return wholeFile(manifest, total)
++
++    const wanted = clampSpecs(specs, total)
++    if (wanted.length === 0) return nothingThere(manifest, total)
++
++    const spans = stitchSpans(mergeSpans(wanted), boundary, manifest.contentType, total)
++    if (spans.length > MAX_PARTS) return wholeFile(manifest, total)
++
++    const parts = spans.map((span) => partFor(manifest, span))
++    let served = 0
++    for (const part of parts) served += part.last - part.first + 1
++
++    if (parts.length === 1) {
++        const only = parts[0]
++        return {
++            status: 206,
++            contentType: manifest.contentType,
++            contentRange: `bytes ${only.first}-${only.last}/${total}`,
++            contentLength: served,
++            parts,
++            bytesServed: served,
++        }
++    }
++
++    return {
++        status: 206,
++        contentType: `multipart/byteranges; boundary=${boundary}`,
++        contentRange: null,
++        contentLength: multipartLength(boundary, manifest.contentType, total, parts),
++        parts,
++        bytesServed: served,
++    }
++}
+diff --git a/lib/range/clamp.ts b/lib/range/clamp.ts
+new file mode 100644
+index 0000000..cab89fa
+--- /dev/null
++++ b/lib/range/clamp.ts
+@@ -0,0 +1,46 @@
++// Measuring the members of a Range header against the file they ask about.
++//
++// A member is written by a client that does not know how long the file is, so
++// it may run past the end, start beyond it, or count backwards from it. This
++// is where those become byte offsets the file actually holds, and where the
++// ones that hold nothing are dropped.
++
++import type { RangeSpec } from "./types"
++
++// A stretch of the file, before its reads are worked out.
++export interface Span {
++    first: number
++    last: number
++}
++
++/**
++ * Measure one member against a file of the given size.
++ *
++ * Null means the member asks for nothing the file holds: it starts at or past
++ * the end, or it is a suffix of no bytes at all. A member that runs off the end
++ * is not thrown away, it stops at the last byte, and a suffix longer than the
++ * file starts at its first.
++ */
++export function clampSpec(spec: RangeSpec, total: number): Span | null {
++    if (spec.first === null) {
++        const suffix = spec.last === null ? 0 : spec.last
++        if (suffix <= 0) return null
++        const first = suffix >= total ? 0 : total - suffix
++        return { first, last: total - 1 }
++    }
++
++    if (spec.first >= total) return null
++
++    const last = spec.last === null ? total - 1 : Math.min(spec.last, total - 1)
++    return { first: spec.first, last }
++}
++
++// Measure every member, dropping the ones that ask for nothing.
++export function clampSpecs(specs: RangeSpec[], total: number): Span[] {
++    const spans: Span[] = []
++    for (const spec of specs) {
++        const span = clampSpec(spec, total)
++        if (span !== null) spans.push(span)
++    }
++    return spans
++}
+diff --git a/lib/range/fold.ts b/lib/range/fold.ts
+new file mode 100644
+index 0000000..cdb556e
+--- /dev/null
++++ b/lib/range/fold.ts
+@@ -0,0 +1,75 @@
++// Reducing the stretches a request asks for to the stretches it is answered in.
++//
++// Two passes. Overlapping stretches are one stretch and folding them loses
++// nothing. What is left is separated by real gaps, and a gap is only worth
++// describing when describing it costs less than sending it.
++
++import { stitchSaving } from "./framing"
++import type { Span } from "./clamp"
++
++/**
++ * Sort the stretches and fold together the ones that overlap or touch.
++ *
++ * Two stretches touch when the later one starts on the byte after the earlier
++ * one ends, so folding them loses nothing.
++ */
++export function mergeSpans(spans: Span[]): Span[] {
++    if (spans.length === 0) return []
++
++    const ordered = spans.slice().sort((left, right) => {
++        if (left.first !== right.first) return left.first - right.first
++        return left.last - right.last
++    })
++
++    const merged: Span[] = [{ first: ordered[0].first, last: ordered[0].last }]
++    for (let index = 1; index < ordered.length; index += 1) {
++        const span = ordered[index]
++        const open = merged[merged.length - 1]
++        if (span.first <= open.last + 1) {
++            if (span.last > open.last) open.last = span.last
++            continue
++        }
++        merged.push({ first: span.first, last: span.last })
++    }
++
++    return merged
++}
++
++/**
++ * Close the gaps that are not worth keeping.
++ *
++ * Keeping two stretches apart buys the bytes of the gap and pays a second set
++ * of frame lines for them. Where the gap holds fewer bytes than those lines
++ * cost, the pair is carried as one stretch and the gap goes out with it.
++ */
++export function stitchSpans(
++    spans: Span[],
++    boundary: string,
++    contentType: string,
++    total: number,
++): Span[] {
++    if (spans.length < 2) return spans.map((span) => ({ first: span.first, last: span.last }))
++
++    const stitched: Span[] = [{ first: spans[0].first, last: spans[0].last }]
++    for (let index = 1; index < spans.length; index += 1) {
++        const span = spans[index]
++        const open = stitched[stitched.length - 1]
++        const gap = span.first - open.last - 1
++        const saving = stitchSaving(
++            boundary,
++            contentType,
++            total,
++            open.first,
++            open.last,
++            span.first,
++            span.last,
++        )
++        if (gap < saving) {
++            open.last = span.last
++            continue
++        }
++        stitched.push({ first: span.first, last: span.last })
++    }
++
++    return stitched
++}
+diff --git a/lib/range/framing.ts b/lib/range/framing.ts
+new file mode 100644
+index 0000000..599d6de
+--- /dev/null
++++ b/lib/range/framing.ts
+@@ -0,0 +1,88 @@
++// Byte arithmetic for a multipart/byteranges body.
++//
++// The lines are written out here and measured, rather than counted label by
++// label, so there is one description of the layout and the sizes cannot drift
++// away from it. Nothing here builds the payload: a response has to declare its
++// own length before a single chunk has been fetched, and the chunks may be
++// hundreds of megabytes.
++
++import type { RangePart } from "./types"
++
++const CRLF = "\r\n"
++
++/**
++ * The lines one part writes above its payload: the boundary that opens it, the
++ * type and range it carries, and the blank line that ends its head.
++ */
++export function partHead(
++    boundary: string,
++    contentType: string,
++    total: number,
++    first: number,
++    last: number,
++): string {
++    return (
++        `--${boundary}${CRLF}` +
++        `Content-Type: ${contentType}${CRLF}` +
++        `Content-Range: bytes ${first}-${last}/${total}${CRLF}` +
++        CRLF
++    )
++}
++
++// The line that closes the body once every part is out.
++export function closingLine(boundary: string): string {
++    return `--${boundary}--${CRLF}`
++}
++
++/**
++ * Frame bytes one part costs: its head, and the CRLF that closes its payload.
++ * The payload itself is not counted.
++ */
++export function partFrameBytes(
++    boundary: string,
++    contentType: string,
++    total: number,
++    first: number,
++    last: number,
++): number {
++    return partHead(boundary, contentType, total, first, last).length + CRLF.length
++}
++
++/**
++ * Frame bytes saved by carrying one stretch instead of two.
++ *
++ * Two stretches pay two frames and one pays one, so what a stitch saves is the
++ * difference between them. It is not a constant: the range line carries the
++ * offsets, and the two that disappear from the middle are worth their own
++ * digits.
++ */
++export function stitchSaving(
++    boundary: string,
++    contentType: string,
++    total: number,
++    leftFirst: number,
++    leftLast: number,
++    rightFirst: number,
++    rightLast: number,
++): number {
++    const apart =
++        partFrameBytes(boundary, contentType, total, leftFirst, leftLast) +
++        partFrameBytes(boundary, contentType, total, rightFirst, rightLast)
++    const together = partFrameBytes(boundary, contentType, total, leftFirst, rightLast)
++    return apart - together
++}
++
++// Size of the whole multipart body, framing and payload together.
++export function multipartLength(
++    boundary: string,
++    contentType: string,
++    total: number,
++    parts: RangePart[],
++): number {
++    let length = 0
++    for (const part of parts) {
++        length += partFrameBytes(boundary, contentType, total, part.first, part.last)
++        length += part.last - part.first + 1
++    }
++    return length + closingLine(boundary).length
++}
+diff --git a/lib/range/header.ts b/lib/range/header.ts
+new file mode 100644
+index 0000000..20e203c
+--- /dev/null
++++ b/lib/range/header.ts
+@@ -0,0 +1,75 @@
++// Reading of the Range request header.
++//
++// The header is either understood whole or ignored whole: one bad member sends
++// the caller back the entire file rather than the members around it, which is
++// what keeps a mangled proxy header from turning into a truncated download.
++
++import type { RangeSpec } from "./types"
++
++const UNIT = "bytes="
++const DIGITS = /^[0-9]+$/
++
++// True when text is a run of decimal digits and nothing else.
++function isDigits(text: string): boolean {
++    return DIGITS.test(text)
++}
++
++// Read one member of the header. Null means the member is malformed.
++function parseSpec(text: string): RangeSpec | null {
++    const dash = text.indexOf("-")
++    if (dash < 0) return null
++    if (text.indexOf("-", dash + 1) >= 0) return null
++
++    const left = text.slice(0, dash).trim()
++    const right = text.slice(dash + 1).trim()
++
++    if (left === "" && right === "") return null
++
++    if (left === "") {
++        if (!isDigits(right)) return null
++        return { first: null, last: Number(right) }
++    }
++
++    if (!isDigits(left)) return null
++    const first = Number(left)
++
++    if (right === "") {
++        return { first, last: null }
++    }
++
++    if (!isDigits(right)) return null
++    const last = Number(right)
++    if (last < first) return null
++
++    return { first, last }
++}
++
++/**
++ * Read a Range header into its members.
++ *
++ * Null means the header does not ask for a range at all, either because it is
++ * absent, because its unit is something other than bytes, or because one of its
++ * members does not parse.
++ */
++export function parseRangeHeader(header: string | null | undefined): RangeSpec[] | null {
++    if (header === null || header === undefined) return null
++
++    const trimmed = header.trim()
++    if (trimmed === "") return null
++    if (trimmed.slice(0, UNIT.length).toLowerCase() !== UNIT) return null
++
++    const body = trimmed.slice(UNIT.length)
++    if (body.trim() === "") return null
++
++    const specs: RangeSpec[] = []
++    const members = body.split(",")
++    for (const member of members) {
++        const text = member.trim()
++        if (text === "") return null
++        const spec = parseSpec(text)
++        if (spec === null) return null
++        specs.push(spec)
++    }
++
++    return specs
++}
+diff --git a/lib/range/manifest.ts b/lib/range/manifest.ts
+new file mode 100644
+index 0000000..6e96b57
+--- /dev/null
++++ b/lib/range/manifest.ts
+@@ -0,0 +1,54 @@
++// Mapping a stretch of a file onto the chunks it was stored in.
++//
++// Chunks are not all one size: the last one holds the remainder, and a file
++// re-uploaded under a different part limit keeps the sizes it was stored with.
++// So a stretch is placed by walking the chunk boundaries, never by dividing.
++
++import type { ChunkManifest, ChunkRead } from "./types"
++
++// Bytes the whole file holds.
++export function manifestTotal(manifest: ChunkManifest): number {
++    let total = 0
++    for (const size of manifest.chunkSizes) total += size
++    return total
++}
++
++// Byte offset each chunk starts at, in chunk order.
++export function chunkStarts(manifest: ChunkManifest): number[] {
++    const starts: number[] = []
++    let offset = 0
++    for (const size of manifest.chunkSizes) {
++        starts.push(offset)
++        offset += size
++    }
++    return starts
++}
++
++/**
++ * The reads that cover one stretch of the file.
++ *
++ * A read never crosses a chunk, so a stretch that spans a boundary comes back
++ * as one read per chunk it touches, in ascending order. Offsets are counted
++ * from the start of their own chunk.
++ */
++export function readsForSpan(manifest: ChunkManifest, first: number, last: number): ChunkRead[] {
++    const reads: ChunkRead[] = []
++    const sizes = manifest.chunkSizes
++    let start = 0
++
++    for (let chunk = 0; chunk < sizes.length; chunk += 1) {
++        const size = sizes[chunk]
++        const end = start + size - 1
++
++        if (size > 0 && end >= first && start <= last) {
++            const from = Math.max(first, start)
++            const to = Math.min(last, end)
++            reads.push({ chunk, offset: from - start, length: to - from + 1 })
++        }
++
++        start += size
++        if (start > last) break
++    }
++
++    return reads
++}
+diff --git a/lib/range/types.ts b/lib/range/types.ts
+new file mode 100644
+index 0000000..f937461
+--- /dev/null
++++ b/lib/range/types.ts
+@@ -0,0 +1,57 @@
++// Shapes shared by the ranged download planner.
++//
++// A stored file is a list of Telegram chunks. Nothing here knows how a chunk is
++// fetched; the planner only decides which stretch of which chunk has to be read
++// and what the response headers say about it.
++
++// What the planner is told about a stored file.
++export interface ChunkManifest {
++    // Byte length of every chunk, in the order the chunks were uploaded.
++    chunkSizes: number[]
++    // Content type the whole file is served as.
++    contentType: string
++}
++
++// One contiguous read inside a single chunk.
++export interface ChunkRead {
++    // Index into ChunkManifest.chunkSizes.
++    chunk: number
++    // First byte to read, counted from the start of that chunk.
++    offset: number
++    // How many bytes to read.
++    length: number
++}
++
++// One stretch of the file that the response carries.
++export interface RangePart {
++    // First and last byte of the stretch, counted from the start of the file.
++    first: number
++    last: number
++    // The reads that cover the stretch, in ascending order.
++    reads: ChunkRead[]
++}
++
++// Everything the download route needs to answer one request.
++export interface RangePlan {
++    // 200 for the whole file, 206 for a partial answer, 416 when nothing asked
++    // for exists.
++    status: number
++    // Value of the response Content-Type header.
++    contentType: string
++    // Value of the response Content-Range header, or null when the response
++    // carries no such header.
++    contentRange: string | null
++    // Value of the response Content-Length header.
++    contentLength: number
++    // The stretches carried, in ascending order.
++    parts: RangePart[]
++    // File bytes read to answer the request, framing excluded.
++    bytesServed: number
++}
++
++// A range asked for, before it is measured against the file.
++export interface RangeSpec {
++    // Absent first means a suffix range, absent last means "to the end".
++    first: number | null
++    last: number | null
++}

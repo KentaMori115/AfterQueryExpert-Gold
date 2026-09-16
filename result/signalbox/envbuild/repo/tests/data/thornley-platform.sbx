@@ -1,0 +1,23 @@
+# A two platform station where the down platform signal has a subsidiary, so
+# that a second train can be called on to the back of the first.
+
+scheme thornley {
+    area "Thornley"
+    prefix T
+}
+
+node W boundary
+node E boundary
+node J1 plain
+node J2 plain
+
+edge P1 from W to J1 length 500 speed 40 direction down
+edge P2 from J1 to J2 length 400 speed 25 direction down
+edge P3 from J2 to E length 500 speed 40 direction down
+
+section TA over P1
+section TB over P2
+section TC over P3
+
+signal T1 on P1 at 500 facing forward direction down aspects 3 subsidiary yes
+signal T3 on P2 at 400 facing forward direction down aspects 3

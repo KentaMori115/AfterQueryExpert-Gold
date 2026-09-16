@@ -1,0 +1,640 @@
+diff --git a/tests/loader/test_yaml_loader.py b/tests/loader/test_yaml_loader.py
+new file mode 100644
+index 0000000..2584053
+--- /dev/null
++++ b/tests/loader/test_yaml_loader.py
+@@ -0,0 +1,456 @@
++"""Tests for the minimal-YAML-subset loader."""
++
++from __future__ import annotations
++
++import pytest
++
++from configlayer.exceptions import LoaderError, SourceError
++
++
++# ---------------------------------------------------------------------------
++# Block mappings
++# ---------------------------------------------------------------------------
++
++class TestBlockMappings:
++    def test_flat_mapping(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "host: localhost\nport: 5432\n"
++        assert YAMLLoader().load(text) == {"host": "localhost", "port": 5432}
++
++    def test_nested_mapping_by_indentation(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "db:\n  host: localhost\n  pool:\n    size: 10\n"
++        assert YAMLLoader().load(text) == {
++            "db": {"host": "localhost", "pool": {"size": 10}}
++        }
++
++    def test_key_with_empty_value_is_none(self):
++        from configlayer.loader import YAMLLoader
++
++        assert YAMLLoader().load("cache:\nname: x\n") == {
++            "cache": None,
++            "name": "x",
++        }
++
++    def test_quoted_keys(self):
++        from configlayer.loader import YAMLLoader
++
++        text = '"spaced key": 1\n\'other key\': 2\n'
++        assert YAMLLoader().load(text) == {"spaced key": 1, "other key": 2}
++
++    def test_colon_without_space_stays_in_key_search(self):
++        from configlayer.loader import YAMLLoader
++
++        # URLs contain ':' not followed by a space; the first 'key: ' wins.
++        text = "endpoint: http://example.com:8080/path\n"
++        assert YAMLLoader().load(text) == {
++            "endpoint": "http://example.com:8080/path"
++        }
++
++    def test_duplicate_key_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="duplicate"):
++            YAMLLoader().load("a: 1\na: 2\n")
++
++    def test_empty_document_is_empty_mapping(self):
++        from configlayer.loader import YAMLLoader
++
++        assert YAMLLoader().load("") == {}
++        assert YAMLLoader().load("\n# only a comment\n\n") == {}
++
++    def test_root_sequence_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="root must be a mapping"):
++            YAMLLoader().load("- 1\n- 2\n")
++
++    def test_root_scalar_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError):
++            YAMLLoader().load("just a scalar\n")
++
++
++# ---------------------------------------------------------------------------
++# Block sequences
++# ---------------------------------------------------------------------------
++
++class TestBlockSequences:
++    def test_sequence_of_scalars(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "servers:\n  - alpha\n  - beta\n  - gamma\n"
++        assert YAMLLoader().load(text) == {
++            "servers": ["alpha", "beta", "gamma"]
++        }
++
++    def test_sequence_of_mappings_compact_form(self):
++        from configlayer.loader import YAMLLoader
++
++        text = (
++            "users:\n"
++            "  - name: ada\n"
++            "    admin: true\n"
++            "  - name: brian\n"
++            "    admin: false\n"
++        )
++        assert YAMLLoader().load(text) == {
++            "users": [
++                {"name": "ada", "admin": True},
++                {"name": "brian", "admin": False},
++            ]
++        }
++
++    def test_sequence_entry_with_nested_block(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "jobs:\n  -\n    name: build\n    steps:\n      - compile\n"
++        assert YAMLLoader().load(text) == {
++            "jobs": [{"name": "build", "steps": ["compile"]}]
++        }
++
++    def test_nested_sequences(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "matrix:\n  - - 1\n    - 2\n  - - 3\n    - 4\n"
++        assert YAMLLoader().load(text) == {"matrix": [[1, 2], [3, 4]]}
++
++    def test_mixed_scalar_types_in_sequence(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "values:\n  - 42\n  - 2.5\n  - true\n  - null\n  - plain\n"
++        assert YAMLLoader().load(text) == {
++            "values": [42, 2.5, True, None, "plain"]
++        }
++
++
++# ---------------------------------------------------------------------------
++# Flow collections
++# ---------------------------------------------------------------------------
++
++class TestFlowCollections:
++    def test_flow_sequence(self):
++        from configlayer.loader import YAMLLoader
++
++        assert YAMLLoader().load("ports: [80, 443, 8080]\n") == {
++            "ports": [80, 443, 8080]
++        }
++
++    def test_flow_mapping(self):
++        from configlayer.loader import YAMLLoader
++
++        assert YAMLLoader().load("limits: {cpu: 2, mem: 512}\n") == {
++            "limits": {"cpu": 2, "mem": 512}
++        }
++
++    def test_nested_flow_collections(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "grid: [[1, 2], {a: [3]}]\n"
++        assert YAMLLoader().load(text) == {"grid": [[1, 2], {"a": [3]}]}
++
++    def test_empty_flow_collections(self):
++        from configlayer.loader import YAMLLoader
++
++        assert YAMLLoader().load("a: []\nb: {}\n") == {"a": [], "b": {}}
++
++    def test_quoted_strings_inside_flow(self):
++        from configlayer.loader import YAMLLoader
++
++        text = 'tags: ["with, comma", \'with] bracket\']\n'
++        assert YAMLLoader().load(text) == {
++            "tags": ["with, comma", "with] bracket"]
++        }
++
++    def test_unterminated_flow_sequence_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="unterminated flow"):
++            YAMLLoader().load("ports: [80, 443\n")
++
++    def test_trailing_content_after_flow_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="after"):
++            YAMLLoader().load("a: [1] trailing\n")
++
++
++# ---------------------------------------------------------------------------
++# Scalars
++# ---------------------------------------------------------------------------
++
++class TestScalars:
++    def test_boolean_and_null_literals(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "t: true\nf: false\nn: null\ntilde: ~\n"
++        data = YAMLLoader().load(text)
++        assert data["t"] is True
++        assert data["f"] is False
++        assert data["n"] is None
++        assert data["tilde"] is None
++
++    def test_capitalised_booleans_stay_strings(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load("a: True\nb: FALSE\nc: Null\n")
++        assert data == {"a": "True", "b": "FALSE", "c": "Null"}
++
++    def test_integer_and_float_coercion(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load("i: -17\nf: 3.5\ne: 2e3\nz: 0.5\n")
++        assert data["i"] == -17
++        assert isinstance(data["i"], int)
++        assert data["f"] == 3.5
++        assert data["e"] == 2000.0
++        assert isinstance(data["e"], float)
++        assert data["z"] == 0.5
++
++    def test_ambiguous_numerics_stay_strings(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load("a: 1_000\nb: inf\nc: nan\nd: 0x1f\n")
++        assert data == {"a": "1_000", "b": "inf", "c": "nan", "d": "0x1f"}
++
++    def test_double_quoted_escapes(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load('msg: "line\\none\\ttab \\"q\\" \\\\"\n')
++        assert data["msg"] == 'line\none\ttab "q" \\'
++
++    def test_single_quoted_literal_with_doubled_quote(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load("msg: 'it''s \\n literal'\n")
++        assert data["msg"] == "it's \\n literal"
++
++    def test_quoted_number_stays_string(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load('version: "1.10"\n')
++        assert data["version"] == "1.10"
++
++    def test_unknown_escape_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="escape"):
++            YAMLLoader().load('a: "bad \\x"\n')
++
++
++# ---------------------------------------------------------------------------
++# Comments and layout
++# ---------------------------------------------------------------------------
++
++class TestCommentsAndLayout:
++    def test_full_line_and_trailing_comments(self):
++        from configlayer.loader import YAMLLoader
++
++        text = (
++            "# heading comment\n"
++            "host: localhost  # trailing comment\n"
++            "   # indented comment\n"
++            "port: 5432\n"
++        )
++        assert YAMLLoader().load(text) == {"host": "localhost", "port": 5432}
++
++    def test_hash_inside_quotes_is_not_a_comment(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load('channel: "#general"\n')
++        assert data["channel"] == "#general"
++
++    def test_hash_without_leading_space_is_not_a_comment(self):
++        from configlayer.loader import YAMLLoader
++
++        data = YAMLLoader().load("color: red#dark\n")
++        assert data["color"] == "red#dark"
++
++    def test_tab_indentation_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="tab"):
++            YAMLLoader().load("db:\n\thost: x\n")
++
++    def test_bad_indentation_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "db:\n    host: x\n  port: 1\n"
++        with pytest.raises(LoaderError, match="indentation"):
++            YAMLLoader().load(text)
++
++    def test_error_messages_carry_line_numbers(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="line 3"):
++            YAMLLoader().load("a: 1\nb: 2\nc: [1,\n")
++
++
++# ---------------------------------------------------------------------------
++# Rejected constructs
++# ---------------------------------------------------------------------------
++
++class TestRejectedConstructs:
++    def test_anchor_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="anchors are not supported"):
++            YAMLLoader().load("base: &b {a: 1}\n")
++
++    def test_alias_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="aliases are not supported"):
++            YAMLLoader().load("other: *b\n")
++
++    def test_tag_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="tags are not supported"):
++            YAMLLoader().load("num: !!float 1\n")
++
++    def test_block_scalar_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="block scalars"):
++            YAMLLoader().load("text: |\n  body\n")
++
++    def test_folded_scalar_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="block scalars"):
++            YAMLLoader().load("text: >\n  body\n")
++
++    def test_document_marker_rejected(self):
++        from configlayer.loader import YAMLLoader
++
++        with pytest.raises(LoaderError, match="document markers"):
++            YAMLLoader().load("---\na: 1\n")
++
++    def test_loader_error_is_a_source_error(self):
++        from configlayer.loader import YAMLLoader
++
++        try:
++            YAMLLoader().load("---\n")
++        except LoaderError as exc:
++            assert isinstance(exc, SourceError)
++        else:  # pragma: no cover - the load must raise
++            pytest.fail("expected LoaderError")
++
++
++# ---------------------------------------------------------------------------
++# Public surface
++# ---------------------------------------------------------------------------
++
++class TestPublicSurface:
++    def test_yaml_loader_exported_from_loader_package(self):
++        import configlayer.loader as loader_pkg
++
++        assert hasattr(loader_pkg, "YAMLLoader")
++        assert "YAMLLoader" in loader_pkg.__all__
++
++    def test_yaml_loader_subclasses_loader_base(self):
++        from configlayer.loader import Loader, YAMLLoader
++
++        assert issubclass(YAMLLoader, Loader)
++        assert repr(YAMLLoader()) == "YAMLLoader()"
++
++    def test_registry_untouched_by_yaml_support(self):
++        from configlayer.loader import YAMLLoader, supported_formats
++
++        # YAMLLoader is wired through FileSource, like EnvLoader it is
++        # not part of the extension registry.
++        assert YAMLLoader is not None
++        assert supported_formats() == ["ini", "json", "toml"]
++
++
++# ---------------------------------------------------------------------------
++# Realistic documents
++# ---------------------------------------------------------------------------
++
++class TestRealisticDocuments:
++    def test_full_application_config(self):
++        from configlayer import deep_get
++        from configlayer.loader import YAMLLoader
++
++        text = (
++            "# application configuration\n"
++            "app:\n"
++            "  name: orders-api\n"
++            "  version: \"2.4\"\n"
++            "  debug: false\n"
++            "server:\n"
++            "  bind: 0.0.0.0\n"
++            "  port: 8080\n"
++            "  timeouts: {connect: 0.5, read: 30}\n"
++            "db:\n"
++            "  host: db.internal  # primary\n"
++            "  port: 5432\n"
++            "  replicas:\n"
++            "    - host: r1.internal\n"
++            "      lag_ms: 120\n"
++            "    - host: r2.internal\n"
++            "      lag_ms: 340\n"
++            "features:\n"
++            "  - checkout\n"
++            "  - refunds\n"
++            "limits:\n"
++            "  rps: 250\n"
++            "  burst: 1e2\n"
++        )
++        data = YAMLLoader().load(text)
++        assert data["app"] == {
++            "name": "orders-api", "version": "2.4", "debug": False,
++        }
++        assert data["server"]["timeouts"] == {"connect": 0.5, "read": 30}
++        assert deep_get(data, "db.replicas") == [
++            {"host": "r1.internal", "lag_ms": 120},
++            {"host": "r2.internal", "lag_ms": 340},
++        ]
++        assert data["features"] == ["checkout", "refunds"]
++        assert data["limits"]["burst"] == 100.0
++
++    def test_windows_line_endings(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "a: 1\r\nb:\r\n  c: two\r\n"
++        assert YAMLLoader().load(text) == {"a": 1, "b": {"c": "two"}}
++
++    def test_deeply_nested_blocks(self):
++        from configlayer.loader import YAMLLoader
++
++        text = (
++            "l1:\n"
++            "  l2:\n"
++            "    l3:\n"
++            "      l4:\n"
++            "        leaf: found\n"
++        )
++        data = YAMLLoader().load(text)
++        assert data["l1"]["l2"]["l3"]["l4"]["leaf"] == "found"
++
++    def test_sequence_of_flow_collections(self):
++        from configlayer.loader import YAMLLoader
++
++        text = (
++            "points:\n"
++            "  - {x: 1, y: 2}\n"
++            "  - {x: -3, y: 4.5}\n"
++            "pairs:\n"
++            "  - [a, 1]\n"
++            "  - [b, 2]\n"
++        )
++        data = YAMLLoader().load(text)
++        assert data["points"][1] == {"x": -3, "y": 4.5}
++        assert data["pairs"] == [["a", 1], ["b", 2]]
++
++    def test_wider_indent_steps_are_accepted(self):
++        from configlayer.loader import YAMLLoader
++
++        text = "db:\n      host: x\n      opts:\n            tls: true\n"
++        assert YAMLLoader().load(text) == {
++            "db": {"host": "x", "opts": {"tls": True}}
++        }
+diff --git a/tests/source/test_yaml_file_source.py b/tests/source/test_yaml_file_source.py
+new file mode 100644
+index 0000000..fa27872
+--- /dev/null
++++ b/tests/source/test_yaml_file_source.py
+@@ -0,0 +1,172 @@
++"""Tests for YAML support in FileSource."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from configlayer.exceptions import LoaderError, SourceError
++
++
++def write_file(tmp_path: Path, filename: str, content: str) -> Path:
++    p = tmp_path / filename
++    p.write_text(content, encoding="utf-8")
++    return p
++
++
++# ---------------------------------------------------------------------------
++# Format auto-detection
++# ---------------------------------------------------------------------------
++
++class TestYamlAutoDetect:
++    def test_yaml_extension_detected(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "cfg.yaml", "k: v\n")
++        assert FileSource(str(p)).format == "yaml"
++
++    def test_yml_extension_detected(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "cfg.yml", "k: v\n")
++        assert FileSource(str(p)).format == "yaml"
++
++    def test_uppercase_extension_detected(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "CFG.YAML", "k: v\n")
++        assert FileSource(str(p)).format == "yaml"
++
++    def test_explicit_yaml_format_on_other_extension(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "config.txt", "db:\n  port: 5432\n")
++        src = FileSource(str(p), format="yaml")
++        assert src.load() == {"db": {"port": 5432}}
++
++
++# ---------------------------------------------------------------------------
++# Loading
++# ---------------------------------------------------------------------------
++
++class TestYamlLoading:
++    def test_nested_document(self, tmp_path):
++        from configlayer.source import FileSource
++
++        text = (
++            "app:\n"
++            "  name: demo\n"
++            "  debug: false\n"
++            "db:\n"
++            "  host: localhost\n"
++            "  port: 5432\n"
++            "  replicas:\n"
++            "    - r1\n"
++            "    - r2\n"
++        )
++        p = write_file(tmp_path, "app.yaml", text)
++        data = FileSource(str(p)).load()
++        assert data == {
++            "app": {"name": "demo", "debug": False},
++            "db": {"host": "localhost", "port": 5432,
++                   "replicas": ["r1", "r2"]},
++        }
++
++    def test_dot_notation_get(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "app.yaml", "db:\n  pool:\n    size: 7\n")
++        src = FileSource(str(p))
++        assert src.get("db.pool.size") == 7
++
++    def test_scalar_types_survive_loading(self, tmp_path):
++        from configlayer.source import FileSource
++
++        text = 'i: 3\nf: 0.25\nb: true\nn: null\ns: "0.25"\n'
++        p = write_file(tmp_path, "types.yml", text)
++        data = FileSource(str(p)).load()
++        assert data["i"] == 3 and isinstance(data["i"], int)
++        assert data["f"] == 0.25 and isinstance(data["f"], float)
++        assert data["b"] is True
++        assert data["n"] is None
++        assert data["s"] == "0.25"
++
++    def test_missing_file_raises_not_found(self, tmp_path):
++        from configlayer.source import FileSource
++
++        src = FileSource(str(tmp_path / "absent.yaml"))
++        with pytest.raises(SourceError, match="not found"):
++            src.load()
++
++
++# ---------------------------------------------------------------------------
++# Error wrapping
++# ---------------------------------------------------------------------------
++
++class TestYamlErrors:
++    def test_invalid_yaml_raises_source_error(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "bad.yaml", "a: [1,\n")
++        with pytest.raises(SourceError, match="Invalid YAML"):
++            FileSource(str(p)).load()
++
++    def test_loader_error_is_chained_as_cause(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "bad.yaml", "text: |\n  block\n")
++        try:
++            FileSource(str(p)).load()
++        except SourceError as exc:
++            assert isinstance(exc.__cause__, LoaderError)
++            assert "block scalars" in str(exc.__cause__)
++        else:  # pragma: no cover - the load must raise
++            pytest.fail("expected SourceError")
++
++    def test_error_names_the_file(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "broken.yml", "x: &a 1\n")
++        with pytest.raises(SourceError, match=r"Invalid YAML in .*broken\.yml"):
++            FileSource(str(p)).load()
++
++    def test_root_sequence_raises_source_error(self, tmp_path):
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "list.yaml", "- a\n- b\n")
++        with pytest.raises(SourceError, match="Invalid YAML"):
++            FileSource(str(p)).load()
++
++
++# ---------------------------------------------------------------------------
++# Integration with the layer stack
++# ---------------------------------------------------------------------------
++
++class TestYamlLayering:
++    def test_yaml_file_as_a_layer(self, tmp_path):
++        from configlayer import LayeredConfig
++        from configlayer.source import DictSource, FileSource
++
++        p = write_file(tmp_path, "site.yaml",
++                       "db:\n  host: prod-db\n")
++        cfg = LayeredConfig([
++            DictSource({"db": {"host": "localhost", "port": 5432}},
++                       name="defaults"),
++            FileSource(str(p), priority=10),
++        ])
++        assert cfg["db.host"] == "prod-db"
++        assert cfg["db.port"] == 5432
++        assert cfg.origin("db.host") == "site.yaml"
++
++    def test_reload_picks_up_yaml_edits(self, tmp_path):
++        from configlayer import LayeredConfig
++        from configlayer.source import FileSource
++
++        p = write_file(tmp_path, "app.yaml", "flag: false\n")
++        cfg = LayeredConfig([FileSource(str(p))])
++        assert cfg["flag"] is False
++        write_file(tmp_path, "app.yaml", "flag: true\n")
++        changes = cfg.reload()
++        assert cfg["flag"] is True
++        assert any(change.path == "flag" for change in changes)

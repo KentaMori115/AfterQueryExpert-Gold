@@ -1,0 +1,31 @@
+----- 2026-09-06 06:50:00Z
+task llbYfP7u7lzO4VDezIqi  [chunk-audit]  status=Validating  repo=2G9D18szl7aNlQIbAKTv submitted=2026-09-06 02:44
+  ciChecks           Automated checks         passed
+  aiCheck            AI check                 passed
+  similarity         Originality              passed
+  oracleNop          Reference verification   passed
+  qualityCheck       Quality review           running
+  easinessProbe      Calibration I            -
+  difficultyProbe    Calibration II           -
+  failureValidation  Run audit                -
+  -- floors (patchStats vs your thresholds) --
+----- 2026-09-06 06:51:31Z
+task llbYfP7u7lzO4VDezIqi  [chunk-audit]  status=Validation Failed  repo=2G9D18szl7aNlQIbAKTv submitted=2026-09-06 02:44
+  ciChecks           Automated checks         passed
+  aiCheck            AI check                 passed
+  similarity         Originality              passed
+  oracleNop          Reference verification   passed
+  qualityCheck       Quality review           failed / fail
+  easinessProbe      Calibration I            -
+  difficultyProbe    Calibration II           -
+  failureValidation  Run audit                -
+  -- floors (patchStats vs your thresholds) --
+----- 2026-09-06 06:51:31Z TERMINAL
+  qualityCheck       Quality review           failed / fail
+   * failedStage=quality_check: Task quality checks failed: behavior in task description, behavior in tests, implementation acceptance breadth, instruction self containedness.
+   * ciChecks finding [warning] instruction.md is 294 words — aim under 250. Long specs tend to enumerate internals the solver should discover; state the required behavior and stop. (instruction.md)
+   * qualityCheck:behavior_in_task_description [fail] Most asserted behavior is explicit, but the instruction says Jump applies when a target lands where no instruction begins, while the tests require a jump to the byte immediately after the body to be accepted. That tested exception is neither stated nor derivable from the base opcode contract without contradicting the wording.
+   * qualityCheck:behavior_in_tests [fail] The 79 f2p tests thoroughly cover decoding, flaw precedence/order, indices, frame slots, calls, control flow, and stack depth. However, a_jump_onto_the_end_of_the_body_is_accepted materially conflicts with the instruction's rule that a jump landing where no instruction begins is a Jump flaw.
+   * qualityCheck:implementation_acceptance_breadth [fail] Tests are generally implementation-agnostic, but they reject an otherwise faithful implementation that reports Jump for a target equal to code.len(), as the written contract says to do when no instruction begins there. Thus acceptance depends on an undisclosed semantic from the reference solution.
+   * qualityCheck:instruction_self_containedness [fail] The request otherwise stands alone and relies appropriately on the base opcode reference, but success requires knowing the hidden exception that the end-of-body position is a valid jump target. The instruction instead classifies a target where no instruction begins as Jump.
+   * qualityCheck: fail

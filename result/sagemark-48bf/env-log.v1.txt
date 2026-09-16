@@ -1,0 +1,488 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  2.934MB
+Step 1/10 : FROM node:24-bookworm-slim
+ ---> 622f209f6c16
+Step 2/10 : RUN command -v git >/dev/null 2>&1 || { { apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*; } || apk add --no-cache git || microdnf -y install git || dnf -y install git || yum -y install git || { echo "PLATFORM ERROR: this base image has no git, and no apt-get/apk/dnf/yum to install it. Use one of the approved base images, or add git to the image yourself."; exit 1; }; }
+ ---> Running in c680270e81b4
+Get:1 http://deb.debian.org/debian bookworm InRelease [151 kB]
+Get:2 http://deb.debian.org/debian bookworm-updates InRelease [55.4 kB]
+Get:3 http://deb.debian.org/debian-security bookworm-security InRelease [34.8 kB]
+Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8790 kB]
+Get:5 http://deb.debian.org/debian bookworm-updates/main amd64 Packages [6924 B]
+Get:6 http://deb.debian.org/debian-security bookworm-security/main amd64 Packages [335 kB]
+Fetched 9374 kB in 2s (5528 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  git-man libbrotli1 libcurl3-gnutls liberror-perl libexpat1 libgdbm-compat4
+  libgdbm6 libgssapi-krb5-2 libk5crypto3 libkeyutils1 libkrb5-3
+  libkrb5support0 libldap-2.5-0 libnghttp2-14 libperl5.36 libpsl5 librtmp1
+  libsasl2-2 libsasl2-modules-db libssh2-1 libssl3 perl perl-modules-5.36
+Suggested packages:
+  gettext-base git-daemon-run | git-daemon-sysvinit git-doc git-email git-gui
+  gitk gitweb git-cvs git-mediawiki git-svn gdbm-l10n krb5-doc krb5-user
+  sensible-utils perl-doc libterm-readline-gnu-perl
+  | libterm-readline-perl-perl make libtap-harness-archive-perl
+Recommended packages:
+  ca-certificates patch less ssh-client krb5-locales libldap-common
+  publicsuffix libsasl2-modules netbase
+The following NEW packages will be installed:
+  git git-man libbrotli1 libcurl3-gnutls liberror-perl libexpat1
+  libgdbm-compat4 libgdbm6 libgssapi-krb5-2 libk5crypto3 libkeyutils1
+  libkrb5-3 libkrb5support0 libldap-2.5-0 libnghttp2-14 libperl5.36 libpsl5
+  librtmp1 libsasl2-2 libsasl2-modules-db libssh2-1 libssl3 perl
+  perl-modules-5.36
+0 upgraded, 24 newly installed, 0 to remove and 0 not upgraded.
+Need to get 20.7 MB of archives.
+After this operation, 109 MB of additional disk space will be used.
+Get:1 http://deb.debian.org/debian bookworm/main amd64 perl-modules-5.36 all 5.36.0-7+deb12u3 [2815 kB]
+Get:2 http://deb.debian.org/debian bookworm/main amd64 libgdbm6 amd64 1.23-3 [72.2 kB]
+Get:3 http://deb.debian.org/debian bookworm/main amd64 libgdbm-compat4 amd64 1.23-3 [48.2 kB]
+Get:4 http://deb.debian.org/debian bookworm/main amd64 libperl5.36 amd64 5.36.0-7+deb12u3 [4196 kB]
+Get:5 http://deb.debian.org/debian bookworm/main amd64 perl amd64 5.36.0-7+deb12u3 [239 kB]
+Get:6 http://deb.debian.org/debian bookworm/main amd64 libbrotli1 amd64 1.0.9-2+b6 [275 kB]
+Get:7 http://deb.debian.org/debian bookworm/main amd64 libkrb5support0 amd64 1.20.1-2+deb12u5 [33.2 kB]
+Get:8 http://deb.debian.org/debian bookworm/main amd64 libk5crypto3 amd64 1.20.1-2+deb12u5 [79.7 kB]
+Get:9 http://deb.debian.org/debian bookworm/main amd64 libkeyutils1 amd64 1.6.3-2 [8808 B]
+Get:10 http://deb.debian.org/debian bookworm/main amd64 libssl3 amd64 3.0.20-1~deb12u2 [2036 kB]
+Get:11 http://deb.debian.org/debian bookworm/main amd64 libkrb5-3 amd64 1.20.1-2+deb12u5 [332 kB]
+Get:12 http://deb.debian.org/debian bookworm/main amd64 libgssapi-krb5-2 amd64 1.20.1-2+deb12u5 [135 kB]
+Get:13 http://deb.debian.org/debian bookworm/main amd64 libsasl2-modules-db amd64 2.1.28+dfsg-10 [20.3 kB]
+Get:14 http://deb.debian.org/debian bookworm/main amd64 libsasl2-2 amd64 2.1.28+dfsg-10 [59.7 kB]
+Get:15 http://deb.debian.org/debian bookworm/main amd64 libldap-2.5-0 amd64 2.5.13+dfsg-5 [183 kB]
+Get:16 http://deb.debian.org/debian bookworm/main amd64 libnghttp2-14 amd64 1.52.0-1+deb12u3 [72.4 kB]
+Get:17 http://deb.debian.org/debian bookworm/main amd64 libpsl5 amd64 0.21.2-1 [58.7 kB]
+Get:18 http://deb.debian.org/debian bookworm/main amd64 librtmp1 amd64 2.4+20151223.gitfa8646d.1-2+b2 [60.8 kB]
+Get:19 http://deb.debian.org/debian bookworm/main amd64 libssh2-1 amd64 1.10.0-3+b1 [179 kB]
+Get:20 http://deb.debian.org/debian bookworm/main amd64 libcurl3-gnutls amd64 7.88.1-10+deb12u15 [386 kB]
+Get:21 http://deb.debian.org/debian bookworm/main amd64 libexpat1 amd64 2.5.0-1+deb12u2 [99.9 kB]
+Get:22 http://deb.debian.org/debian bookworm/main amd64 liberror-perl all 0.17029-2 [29.0 kB]
+Get:23 http://deb.debian.org/debian bookworm/main amd64 git-man all 1:2.39.5-0+deb12u3 [2053 kB]
+Get:24 http://deb.debian.org/debian bookworm/main amd64 git amd64 1:2.39.5-0+deb12u3 [7264 kB]
+[91mdebconf: delaying package configuration, since apt-utils is not installed
+[0mFetched 20.7 MB in 0s (42.3 MB/s)
+Selecting previously unselected package perl-modules-5.36.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 6096 files and directories currently installed.)
+Preparing to unpack .../00-perl-modules-5.36_5.36.0-7+deb12u3_all.deb ...
+Unpacking perl-modules-5.36 (5.36.0-7+deb12u3) ...
+Selecting previously unselected package libgdbm6:amd64.
+Preparing to unpack .../01-libgdbm6_1.23-3_amd64.deb ...
+Unpacking libgdbm6:amd64 (1.23-3) ...
+Selecting previously unselected package libgdbm-compat4:amd64.
+Preparing to unpack .../02-libgdbm-compat4_1.23-3_amd64.deb ...
+Unpacking libgdbm-compat4:amd64 (1.23-3) ...
+Selecting previously unselected package libperl5.36:amd64.
+Preparing to unpack .../03-libperl5.36_5.36.0-7+deb12u3_amd64.deb ...
+Unpacking libperl5.36:amd64 (5.36.0-7+deb12u3) ...
+Selecting previously unselected package perl.
+Preparing to unpack .../04-perl_5.36.0-7+deb12u3_amd64.deb ...
+Unpacking perl (5.36.0-7+deb12u3) ...
+Selecting previously unselected package libbrotli1:amd64.
+Preparing to unpack .../05-libbrotli1_1.0.9-2+b6_amd64.deb ...
+Unpacking libbrotli1:amd64 (1.0.9-2+b6) ...
+Selecting previously unselected package libkrb5support0:amd64.
+Preparing to unpack .../06-libkrb5support0_1.20.1-2+deb12u5_amd64.deb ...
+Unpacking libkrb5support0:amd64 (1.20.1-2+deb12u5) ...
+Selecting previously unselected package libk5crypto3:amd64.
+Preparing to unpack .../07-libk5crypto3_1.20.1-2+deb12u5_amd64.deb ...
+Unpacking libk5crypto3:amd64 (1.20.1-2+deb12u5) ...
+Selecting previously unselected package libkeyutils1:amd64.
+Preparing to unpack .../08-libkeyutils1_1.6.3-2_amd64.deb ...
+Unpacking libkeyutils1:amd64 (1.6.3-2) ...
+Selecting previously unselected package libssl3:amd64.
+Preparing to unpack .../09-libssl3_3.0.20-1~deb12u2_amd64.deb ...
+Unpacking libssl3:amd64 (3.0.20-1~deb12u2) ...
+Selecting previously unselected package libkrb5-3:amd64.
+Preparing to unpack .../10-libkrb5-3_1.20.1-2+deb12u5_amd64.deb ...
+Unpacking libkrb5-3:amd64 (1.20.1-2+deb12u5) ...
+Selecting previously unselected package libgssapi-krb5-2:amd64.
+Preparing to unpack .../11-libgssapi-krb5-2_1.20.1-2+deb12u5_amd64.deb ...
+Unpacking libgssapi-krb5-2:amd64 (1.20.1-2+deb12u5) ...
+Selecting previously unselected package libsasl2-modules-db:amd64.
+Preparing to unpack .../12-libsasl2-modules-db_2.1.28+dfsg-10_amd64.deb ...
+Unpacking libsasl2-modules-db:amd64 (2.1.28+dfsg-10) ...
+Selecting previously unselected package libsasl2-2:amd64.
+Preparing to unpack .../13-libsasl2-2_2.1.28+dfsg-10_amd64.deb ...
+Unpacking libsasl2-2:amd64 (2.1.28+dfsg-10) ...
+Selecting previously unselected package libldap-2.5-0:amd64.
+Preparing to unpack .../14-libldap-2.5-0_2.5.13+dfsg-5_amd64.deb ...
+Unpacking libldap-2.5-0:amd64 (2.5.13+dfsg-5) ...
+Selecting previously unselected package libnghttp2-14:amd64.
+Preparing to unpack .../15-libnghttp2-14_1.52.0-1+deb12u3_amd64.deb ...
+Unpacking libnghttp2-14:amd64 (1.52.0-1+deb12u3) ...
+Selecting previously unselected package libpsl5:amd64.
+Preparing to unpack .../16-libpsl5_0.21.2-1_amd64.deb ...
+Unpacking libpsl5:amd64 (0.21.2-1) ...
+Selecting previously unselected package librtmp1:amd64.
+Preparing to unpack .../17-librtmp1_2.4+20151223.gitfa8646d.1-2+b2_amd64.deb ...
+Unpacking librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b2) ...
+Selecting previously unselected package libssh2-1:amd64.
+Preparing to unpack .../18-libssh2-1_1.10.0-3+b1_amd64.deb ...
+Unpacking libssh2-1:amd64 (1.10.0-3+b1) ...
+Selecting previously unselected package libcurl3-gnutls:amd64.
+Preparing to unpack .../19-libcurl3-gnutls_7.88.1-10+deb12u15_amd64.deb ...
+Unpacking libcurl3-gnutls:amd64 (7.88.1-10+deb12u15) ...
+Selecting previously unselected package libexpat1:amd64.
+Preparing to unpack .../20-libexpat1_2.5.0-1+deb12u2_amd64.deb ...
+Unpacking libexpat1:amd64 (2.5.0-1+deb12u2) ...
+Selecting previously unselected package liberror-perl.
+Preparing to unpack .../21-liberror-perl_0.17029-2_all.deb ...
+Unpacking liberror-perl (0.17029-2) ...
+Selecting previously unselected package git-man.
+Preparing to unpack .../22-git-man_1%3a2.39.5-0+deb12u3_all.deb ...
+Unpacking git-man (1:2.39.5-0+deb12u3) ...
+Selecting previously unselected package git.
+Preparing to unpack .../23-git_1%3a2.39.5-0+deb12u3_amd64.deb ...
+Unpacking git (1:2.39.5-0+deb12u3) ...
+Setting up libexpat1:amd64 (2.5.0-1+deb12u2) ...
+Setting up libkeyutils1:amd64 (1.6.3-2) ...
+Setting up libpsl5:amd64 (0.21.2-1) ...
+Setting up libbrotli1:amd64 (1.0.9-2+b6) ...
+Setting up libssl3:amd64 (3.0.20-1~deb12u2) ...
+Setting up libnghttp2-14:amd64 (1.52.0-1+deb12u3) ...
+Setting up libkrb5support0:amd64 (1.20.1-2+deb12u5) ...
+Setting up libsasl2-modules-db:amd64 (2.1.28+dfsg-10) ...
+Setting up perl-modules-5.36 (5.36.0-7+deb12u3) ...
+Setting up librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b2) ...
+Setting up libk5crypto3:amd64 (1.20.1-2+deb12u5) ...
+Setting up libsasl2-2:amd64 (2.1.28+dfsg-10) ...
+Setting up git-man (1:2.39.5-0+deb12u3) ...
+Setting up libssh2-1:amd64 (1.10.0-3+b1) ...
+Setting up libkrb5-3:amd64 (1.20.1-2+deb12u5) ...
+Setting up libgdbm6:amd64 (1.23-3) ...
+Setting up libldap-2.5-0:amd64 (2.5.13+dfsg-5) ...
+Setting up libgssapi-krb5-2:amd64 (1.20.1-2+deb12u5) ...
+Setting up libgdbm-compat4:amd64 (1.23-3) ...
+Setting up libperl5.36:amd64 (5.36.0-7+deb12u3) ...
+Setting up libcurl3-gnutls:amd64 (7.88.1-10+deb12u15) ...
+Setting up perl (5.36.0-7+deb12u3) ...
+Setting up liberror-perl (0.17029-2) ...
+Setting up git (1:2.39.5-0+deb12u3) ...
+Processing triggers for libc-bin (2.36-9+deb12u14) ...
+ ---> Removed intermediate container c680270e81b4
+ ---> 8b2fb7259ac9
+Step 3/10 : COPY repo/ /app
+ ---> a938a69f84ea
+Step 4/10 : WORKDIR /app
+ ---> Running in 1737f199b1c1
+ ---> Removed intermediate container 1737f199b1c1
+ ---> 7be0e8de19e8
+Step 5/10 : ENV DEBIAN_FRONTEND=noninteractive     CI=true     NPM_CONFIG_FUND=false     NPM_CONFIG_AUDIT=false     NPM_CONFIG_UPDATE_NOTIFIER=false     NODE_OPTIONS=--max-old-space-size=4096
+ ---> Running in 422d051fb5f4
+ ---> Removed intermediate container 422d051fb5f4
+ ---> 0ee881ecb619
+Step 6/10 : RUN apt-get update     && apt-get install -y --no-install-recommends ca-certificates git     && rm -rf /var/lib/apt/lists/*
+ ---> Running in 18a0aa26ab17
+Get:1 http://deb.debian.org/debian bookworm InRelease [151 kB]
+Get:2 http://deb.debian.org/debian bookworm-updates InRelease [55.4 kB]
+Get:3 http://deb.debian.org/debian-security bookworm-security InRelease [34.8 kB]
+Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8790 kB]
+Get:5 http://deb.debian.org/debian bookworm-updates/main amd64 Packages [6924 B]
+Get:6 http://deb.debian.org/debian-security bookworm-security/main amd64 Packages [335 kB]
+Fetched 9374 kB in 2s (5600 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.39.5-0+deb12u3).
+The following NEW packages will be installed:
+  ca-certificates openssl
+0 upgraded, 2 newly installed, 0 to remove and 0 not upgraded.
+Need to get 1601 kB of archives.
+After this operation, 2765 kB of additional disk space will be used.
+Get:1 http://deb.debian.org/debian bookworm/main amd64 openssl amd64 3.0.20-1~deb12u2 [1439 kB]
+Get:2 http://deb.debian.org/debian-security bookworm-security/main amd64 ca-certificates all 20250419~deb12u1 [162 kB]
+[91mdebconf: delaying package configuration, since apt-utils is not installed
+[0mFetched 1601 kB in 0s (11.4 MB/s)
+Selecting previously unselected package openssl.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 9341 files and directories currently installed.)
+Preparing to unpack .../openssl_3.0.20-1~deb12u2_amd64.deb ...
+Unpacking openssl (3.0.20-1~deb12u2) ...
+Selecting previously unselected package ca-certificates.
+Preparing to unpack .../ca-certificates_20250419~deb12u1_all.deb ...
+Unpacking ca-certificates (20250419~deb12u1) ...
+Setting up openssl (3.0.20-1~deb12u2) ...
+Setting up ca-certificates (20250419~deb12u1) ...
+Updating certificates in /etc/ssl/certs...
+150 added, 0 removed; done.
+Processing triggers for ca-certificates (20250419~deb12u1) ...
+Updating certificates in /etc/ssl/certs...
+0 added, 0 removed; done.
+Running hooks in /etc/ca-certificates/update.d...
+done.
+ ---> Removed intermediate container 18a0aa26ab17
+ ---> 88e1d0980616
+Step 7/10 : WORKDIR /app
+ ---> Running in b280192457dc
+ ---> Removed intermediate container b280192457dc
+ ---> 8592f9b72883
+Step 8/10 : RUN npm ci
+ ---> Running in bac09d64a646
+[91mnpm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+[0m[91mnpm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+[0m[91mnpm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+[0m
+added 370 packages in 10s
+[91mnpm warn allow-scripts 2 packages have install scripts not yet covered by allowScripts:
+npm warn allow-scripts   esbuild@0.21.5 (postinstall: node install.js)
+npm warn allow-scripts   vue-demi@0.14.10 (postinstall: node -e "try{require('./scripts/postinstall.js')}catch(e){}")
+npm warn allow-scripts
+npm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.
+[0m ---> Removed intermediate container bac09d64a646
+ ---> fd4baec5f951
+Step 9/10 : RUN npx vitest run --reporter=dot
+ ---> Running in 1120a5bb0313
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.1[39m [90m/app[39m
+
+ [32m✓[39m src/core/services/character-service.spec.ts [2m ([22m[2m20 tests[22m[2m)[22m[90m 38[2mms[22m[39m
+ [32m✓[39m src/core/services/faction-service.spec.ts [2m ([22m[2m17 tests[22m[2m)[22m[90m 29[2mms[22m[39m
+ [32m✓[39m src/core/services/campaign-service.spec.ts [2m ([22m[2m17 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m src/core/services/location-service.spec.ts [2m ([22m[2m20 tests[22m[2m)[22m[90m 36[2mms[22m[39m
+ [32m✓[39m src/core/services/tag-service.spec.ts [2m ([22m[2m19 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m src/core/models/location.spec.ts [2m ([22m[2m21 tests[22m[2m)[22m[90m 38[2mms[22m[39m
+ [32m✓[39m src/core/services/session-service.spec.ts [2m ([22m[2m18 tests[22m[2m)[22m[90m 44[2mms[22m[39m
+ [32m✓[39m src/core/services/note-service.spec.ts [2m ([22m[2m17 tests[22m[2m)[22m[90m 37[2mms[22m[39m
+ [32m✓[39m src/core/models/note.spec.ts [2m ([22m[2m28 tests[22m[2m)[22m[90m 24[2mms[22m[39m
+ [32m✓[39m src/core/models/tag.spec.ts [2m ([22m[2m18 tests[22m[2m)[22m[90m 23[2mms[22m[39m
+ [32m✓[39m src/features/tags/useTagFilter.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 89[2mms[22m[39m
+ [32m✓[39m src/features/initiative/runner.spec.ts [2m ([22m[2m17 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/core/lib/inworld-calendar.spec.ts [2m ([22m[2m20 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+ [32m✓[39m src/features/sessions/pages/SessionDetailPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 279[2mms[22m[39m
+ [32m✓[39m src/features/notes/pages/NotesInboxPage.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[33m 350[2mms[22m[39m
+ [32m✓[39m src/core/services/relationship-service.spec.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 22[2mms[22m[39m
+ [32m✓[39m src/core/services/downtime-service.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 23[2mms[22m[39m
+ [32m✓[39m src/features/arcs/pages/ArcDetailPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 300[2mms[22m[39m
+ [32m✓[39m src/features/campaigns/pages/CampaignDetailPage.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 295[2mms[22m[39m
+ [32m✓[39m src/features/items/pages/ItemsLedgerPage.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[33m 391[2mms[22m[39m
+ [32m✓[39m src/features/locations/pages/LocationDetailPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[33m 320[2mms[22m[39m
+ [32m✓[39m src/features/encounters/pages/encounters-pages.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[33m 513[2mms[22m[39m
+ [32m✓[39m src/features/quests/pages/QuestsBoardPage.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[33m 360[2mms[22m[39m
+ [32m✓[39m src/features/factions/pages/FactionDetailPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[33m 487[2mms[22m[39m
+ [32m✓[39m src/features/characters/pages/CharacterDetailPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[33m 716[2mms[22m[39m
+ [32m✓[39m src/features/lore/pages/LorePage.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[33m 354[2mms[22m[39m
+ [32m✓[39m src/core/models/session.spec.ts [2m ([22m[2m20 tests[22m[2m)[22m[90m 20[2mms[22m[39m
+ [32m✓[39m src/core/lib/keyboard.spec.ts [2m ([22m[2m14 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m src/features/recap/useRecap.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 131[2mms[22m[39m
+ [32m✓[39m src/core/services/arc-service.spec.ts [2m ([22m[2m14 tests[22m[2m)[22m[90m 26[2mms[22m[39m
+ [32m✓[39m src/core/services/quest-service.spec.ts [2m ([22m[2m14 tests[22m[2m)[22m[90m 117[2mms[22m[39m
+ [32m✓[39m src/core/models/timeline.spec.ts [2m ([22m[2m22 tests[22m[2m)[22m[90m 46[2mms[22m[39m
+ [32m✓[39m src/core/models/character.spec.ts [2m ([22m[2m24 tests[22m[2m)[22m[90m 23[2mms[22m[39m
+ [32m✓[39m src/core/models/campaign.spec.ts [2m ([22m[2m20 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32m✓[39m src/core/models/encounter.spec.ts [2m ([22m[2m21 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32m✓[39m src/core/models/downtime.spec.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+ [32m✓[39m src/features/relationships/pages/RelationshipsPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[33m 370[2mms[22m[39m
+ [32m✓[39m src/features/handouts/pages/HandoutsPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[33m 400[2mms[22m[39m
+ [32m✓[39m src/features/campaigns/store.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 57[2mms[22m[39m
+ [32m✓[39m src/core/rules/encounter-difficulty.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m src/features/characters/pages/CharacterEditPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[33m 306[2mms[22m[39m
+ [32m✓[39m src/core/services/encounter-service.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 37[2mms[22m[39m
+ [32m✓[39m src/core/services/lore-service.spec.ts [2m ([22m[2m14 tests[22m[2m)[22m[90m 60[2mms[22m[39m
+ [32m✓[39m src/core/models/quest.spec.ts [2m ([22m[2m21 tests[22m[2m)[22m[90m 39[2mms[22m[39m
+ [32m✓[39m src/core/models/faction.spec.ts [2m ([22m[2m35 tests[22m[2m)[22m[90m 25[2mms[22m[39m
+ [32m✓[39m src/features/characters/pages/CharactersListPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 276[2mms[22m[39m
+ [32m✓[39m src/core/models/influence-snapshot.spec.ts [2m ([22m[2m14 tests[22m[2m)[22m[90m 22[2mms[22m[39m
+ [32m✓[39m src/core/models/relationship.spec.ts [2m ([22m[2m22 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+ [32m✓[39m src/features/tags/pages/TagsAdminPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 242[2mms[22m[39m
+ [32m✓[39m src/core/rules/stat-block.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/features/notes/store.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 36[2mms[22m[39m
+ [32m✓[39m src/features/tags/pages/TagBrowsePage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 189[2mms[22m[39m
+ [32m✓[39m src/core/services/item-service.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 31[2mms[22m[39m
+ [32m✓[39m src/core/rules/leveling.spec.ts [2m ([22m[2m27 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32m✓[39m src/features/arcs/pages/ArcsBoardPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[33m 314[2mms[22m[39m
+ [32m✓[39m src/features/notes/components/NotesPanel.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 216[2mms[22m[39m
+ [32m✓[39m src/features/factions/pages/FactionEditPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 291[2mms[22m[39m
+ [32m✓[39m src/features/items/useItemStats.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 68[2mms[22m[39m
+ [32m✓[39m src/features/locations/pages/LocationEditPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 294[2mms[22m[39m
+ [32m✓[39m src/features/factions/pages/FactionsListPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 233[2mms[22m[39m
+ [32m✓[39m src/features/dice/components/DiceRoller.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 296[2mms[22m[39m
+ [32m✓[39m src/core/models/handout.spec.ts [2m ([22m[2m18 tests[22m[2m)[22m[90m 27[2mms[22m[39m
+ [32m✓[39m src/features/prep/store.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 42[2mms[22m[39m
+ [32m✓[39m src/core/services/handout-service.spec.ts [2m ([22m[2m12 tests[22m[2m)[22m[90m 30[2mms[22m[39m
+ [32m✓[39m src/features/characters/store.spec.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 35[2mms[22m[39m
+ [32m✓[39m src/core/rules/weather.spec.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/features/sessions/pages/SessionEditPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 207[2mms[22m[39m
+ [32m✓[39m src/features/initiative/components/InitiativeRunnerPanel.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 270[2mms[22m[39m
+ [32m✓[39m src/features/tags/store.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 41[2mms[22m[39m
+ [32m✓[39m src/core/models/arc.spec.ts [2m ([22m[2m27 tests[22m[2m)[22m[90m 20[2mms[22m[39m
+ [32m✓[39m src/features/arcs/pages/ArcEditPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 238[2mms[22m[39m
+ [32m✓[39m src/features/xp/components/XpPanel.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 158[2mms[22m[39m
+ [32m✓[39m src/features/downtime/pages/DowntimePage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 226[2mms[22m[39m
+ [32m✓[39m src/features/reports/useReports.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 62[2mms[22m[39m
+ [32m✓[39m src/core/rules/conditions.spec.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/features/palette/useCommands.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 102[2mms[22m[39m
+ [32m✓[39m src/core/services/xp-service.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 41[2mms[22m[39m
+ [32m✓[39m src/core/models/journal.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m src/features/relationships/components/RelationshipGraph.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 132[2mms[22m[39m
+ [32m✓[39m src/features/timeline/TimelinePage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[33m 453[2mms[22m[39m
+ [32m✓[39m src/features/characters/pages/CharacterNewPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 277[2mms[22m[39m
+ [32m✓[39m src/features/party/pages/PartyPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 228[2mms[22m[39m
+ [32m✓[39m src/features/encounters/pages/EncounterLibraryPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[33m 305[2mms[22m[39m
+ [32m✓[39m src/core/models/xp-log.spec.ts [2m ([22m[2m15 tests[22m[2m)[22m[90m 33[2mms[22m[39m
+ [32m✓[39m src/core/rules/coin.spec.ts [2m ([22m[2m15 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m src/features/dice/store.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 63[2mms[22m[39m
+ [32m✓[39m src/core/dice/notation.spec.ts [2m ([22m[2m16 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/features/io/useExport.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 50[2mms[22m[39m
+ [32m✓[39m src/features/pulse/usePulse.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 108[2mms[22m[39m
+ [32m✓[39m src/core/models/holiday.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m src/features/campaigns/pages/CampaignEditPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 240[2mms[22m[39m
+ [32m✓[39m src/features/recycle/pages/RecycleBinPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 280[2mms[22m[39m
+ [32m✓[39m src/features/treasury/pages/TreasuryPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[33m 312[2mms[22m[39m
+ [32m✓[39m src/features/travel/pages/TravelPlannerPage.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[33m 306[2mms[22m[39m
+ [32m✓[39m src/core/models/lore.spec.ts [2m ([22m[2m16 tests[22m[2m)[22m[90m 44[2mms[22m[39m
+ [32m✓[39m src/features/backlinks/useBacklinks.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 151[2mms[22m[39m
+ [32m✓[39m src/features/generators/pages/GeneratorsPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[33m 376[2mms[22m[39m
+ [32m✓[39m src/core/models/item.spec.ts [2m ([22m[2m22 tests[22m[2m)[22m[90m 37[2mms[22m[39m
+ [32m✓[39m src/features/sessions/pages/SessionsListPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 165[2mms[22m[39m
+ [32m✓[39m src/features/map/pages/MapPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 264[2mms[22m[39m
+ [32m✓[39m src/features/encounters/components/InitiativeTracker.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 202[2mms[22m[39m
+ [32m✓[39m src/features/sessions/useSessionStats.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 55[2mms[22m[39m
+ [32m✓[39m src/features/palette/components/CommandPalette.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 149[2mms[22m[39m
+ [32m✓[39m src/core/lib/markdown.spec.ts [2m ([22m[2m14 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m src/core/dice/roll.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 72[2mms[22m[39m
+ [32m✓[39m src/features/locations/pages/LocationsListPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 158[2mms[22m[39m
+ [32m✓[39m src/core/rules/reactions.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 14[2mms[22m[39m
+ [32m✓[39m src/features/handouts/store.spec.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 39[2mms[22m[39m
+ [32m✓[39m src/features/io/pages/BackupPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 202[2mms[22m[39m
+ [32m✓[39m src/features/dashboard/useDashboardData.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 45[2mms[22m[39m
+ [32m✓[39m src/features/prep/pages/PrepPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 243[2mms[22m[39m
+ [32m✓[39m src/features/search/useGlobalSearch.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 147[2mms[22m[39m
+ [32m✓[39m src/features/tags/components/TagPicker.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 226[2mms[22m[39m
+ [32m✓[39m src/features/influence/components/InfluenceTrendPanel.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 142[2mms[22m[39m
+ [32m✓[39m src/features/campaigns/pages/CampaignsListPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 147[2mms[22m[39m
+ [32m✓[39m src/features/prep/components/PrepChecklistPanel.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 195[2mms[22m[39m
+ [32m✓[39m src/features/campaigns/components/CampaignForm.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 163[2mms[22m[39m
+ [32m✓[39m src/features/characters/components/CharacterForm.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 152[2mms[22m[39m
+ [32m✓[39m src/core/generators/npc-tables.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 37[2mms[22m[39m
+ [32m✓[39m src/core/lib/mentions.spec.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m src/features/light/components/LightTrackerPanel.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 191[2mms[22m[39m
+ [32m✓[39m src/features/factions/pages/FactionNewPage.spec.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 145[2mms[22m[39m
+ [32m✓[39m src/core/models/rule-snippet.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 17[2mms[22m[39m
+ [32m✓[39m src/features/downtime/store.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 30[2mms[22m[39m
+ [32m✓[39m src/features/campaigns/components/CampaignTile.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 103[2mms[22m[39m
+ [32m✓[39m src/features/locations/pages/LocationNewPage.spec.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 214[2mms[22m[39m
+ [32m✓[39m src/features/arcs/store.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m src/features/recap/pages/RecapPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 254[2mms[22m[39m
+ [32m✓[39m src/features/factions/store.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 52[2mms[22m[39m
+ [32m✓[39m src/core/services/timeline-service.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 24[2mms[22m[39m
+ [32m✓[39m src/core/rules/spell-slots.spec.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m src/features/sessions/pages/SessionNewPage.spec.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 194[2mms[22m[39m
+ [32m✓[39m src/features/locations/components/LocationTreeView.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 97[2mms[22m[39m
+ [32m✓[39m src/core/lib/format.spec.ts [2m ([22m[2m26 tests[22m[2m)[22m[90m 18[2mms[22m[39m
+ [32m✓[39m src/features/xp/store.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 27[2mms[22m[39m
+ [32m✓[39m src/features/locations/components/LocationForm.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 140[2mms[22m[39m
+ [32m✓[39m src/core/models/encounter-template.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 22[2mms[22m[39m
+ [32m✓[39m src/core/lib/map-geometry.spec.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m src/features/calendar/components/CalendarWidget.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 300[2mms[22m[39m
+ [32m✓[39m src/features/recycle/store.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m src/features/conditions/components/ConditionsPanel.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 198[2mms[22m[39m
+ [32m✓[39m src/features/journal/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 66[2mms[22m[39m
+ [32m✓[39m src/features/treasury/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 47[2mms[22m[39m
+ [32m✓[39m src/features/characters/components/CharacterTile.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 60[2mms[22m[39m
+ [32m✓[39m src/features/tags/useTagStats.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 47[2mms[22m[39m
+ [32m✓[39m src/features/home/pages/HomePage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 197[2mms[22m[39m
+ [32m✓[39m src/core/rules/light.spec.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/features/backlinks/components/BacklinksPanel.spec.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 144[2mms[22m[39m
+ [32m✓[39m src/features/initiative/store.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 43[2mms[22m[39m
+ [32m✓[39m src/features/stats/components/StatBlockPanel.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 297[2mms[22m[39m
+ [32m✓[39m src/features/sessions/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32m✓[39m src/features/settings/pages/SettingsPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 275[2mms[22m[39m
+ [32m✓[39m src/features/arcs/pages/ArcNewPage.spec.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 207[2mms[22m[39m
+ [32m✓[39m src/features/shortcuts/pages/ShortcutsPage.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 150[2mms[22m[39m
+ [32m✓[39m src/features/journal/pages/JournalPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 245[2mms[22m[39m
+[91m[90mstderr[2m | src/core/persistence/entity-repo.spec.ts[2m > [22m[2mEntityRepo[2m > [22m[2mtolerates corrupt stored data without crashing[22m[39m
+failed to parse repo data for things SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+    at JSON.parse (<anonymous>)
+    at EntityRepo.ensure [90m(/app/[39msrc/core/persistence/entity-repo.ts:75:27[90m)[39m
+    at EntityRepo.list [90m(/app/[39msrc/core/persistence/entity-repo.ts:22:28[90m)[39m
+    at [90m/app/[39msrc/core/persistence/entity-repo.spec.ts:71:18
+    at [90mfile:///app/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:135:14
+    at [90mfile:///app/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:60:26
+    at runTest [90m(file:///app/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:781:17[90m)[39m
+    at runSuite [90m(file:///app/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///app/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///app/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:958:5[90m)[39m
+
+[0m [32m✓[39m src/core/persistence/entity-repo.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 25[2mms[22m[39m
+ [32m✓[39m src/features/holidays/pages/HolidaysPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 216[2mms[22m[39m
+ [32m✓[39m src/features/campaigns/pages/CampaignNewPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 119[2mms[22m[39m
+ [32m✓[39m src/features/notes/components/NoteComposer.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 110[2mms[22m[39m
+ [32m✓[39m src/features/conditions/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m src/features/light/store.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32m✓[39m src/features/factions/components/FactionForm.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 221[2mms[22m[39m
+ [32m✓[39m src/features/rules/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 31[2mms[22m[39m
+ [32m✓[39m src/features/pulse/pages/PulsePage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 126[2mms[22m[39m
+ [32m✓[39m src/core/lib/paginate.spec.ts [2m ([22m[2m12 tests[22m[2m)[22m[90m 38[2mms[22m[39m
+ [32m✓[39m src/features/settings/store.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 44[2mms[22m[39m
+ [32m✓[39m src/features/stats/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m src/features/spell-slots/components/SpellSlotPanel.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 149[2mms[22m[39m
+ [32m✓[39m src/features/coin/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 130[2mms[22m[39m
+ [32m✓[39m src/features/factions/components/FactionTile.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 115[2mms[22m[39m
+ [32m✓[39m src/features/party/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+ [32m✓[39m src/core/persistence/storage.spec.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 17[2mms[22m[39m
+ [32m✓[39m src/core/time/timestamps.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m src/features/relationships/store.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 27[2mms[22m[39m
+ [32m✓[39m src/features/holidays/store.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m src/ui/primitives/BreadcrumbTrail.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 175[2mms[22m[39m
+ [32m✓[39m src/features/spell-slots/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 23[2mms[22m[39m
+ [32m✓[39m src/features/rules/pages/RulesPage.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 241[2mms[22m[39m
+ [32m✓[39m src/core/generators/place-tables.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m src/features/map/store.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 20[2mms[22m[39m
+ [32m✓[39m src/features/locations/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 108[2mms[22m[39m
+ [32m✓[39m src/core/services/influence-service.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 23[2mms[22m[39m
+ [32m✓[39m src/features/tags/components/TagChip.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 98[2mms[22m[39m
+ [32m✓[39m src/features/encounters/pages/EncounterDifficultyPage.spec.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 239[2mms[22m[39m
+ [32m✓[39m src/features/encounters/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 74[2mms[22m[39m
+ [32m✓[39m src/features/encounters/components/EncounterCard.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 96[2mms[22m[39m
+ [32m✓[39m src/features/io/useImport.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 17[2mms[22m[39m
+ [32m✓[39m src/features/items/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 33[2mms[22m[39m
+ [32m✓[39m src/features/generators/components/NpcGenerator.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 126[2mms[22m[39m
+ [32m✓[39m src/features/encounters/components/DifficultyCalculator.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 194[2mms[22m[39m
+ [32m✓[39m src/core/models/voice-profile.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 24[2mms[22m[39m
+ [32m✓[39m src/core/lib/result.spec.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 30[2mms[22m[39m
+ [32m✓[39m src/core/generators/trinket-tables.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 31[2mms[22m[39m
+ [32m✓[39m src/ui/primitives/BaseButton.spec.ts [2m ([22m[2m12 tests[22m[2m)[22m[90m 131[2mms[22m[39m
+ [32m✓[39m src/features/quests/components/ObjectiveBar.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 70[2mms[22m[39m
+ [32m✓[39m src/features/sessions/components/SessionCard.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 157[2mms[22m[39m
+ [32m✓[39m src/core/lib/errors.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 10[2mms[22m[39m
+ [32m✓[39m src/features/dashboard/pages/DashboardPage.spec.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 257[2mms[22m[39m
+ [32m✓[39m src/features/coin/components/CoinPanel.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 149[2mms[22m[39m
+ [32m✓[39m src/features/lore/store.spec.ts [2m ([22m[2m7 tests[22m[2m)[22m[90m 33[2mms[22m[39m
+ [32m✓[39m src/features/sessions/components/SessionForm.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 145[2mms[22m[39m
+ [32m✓[39m src/features/encounters/components/EncounterForm.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 198[2mms[22m[39m
+ [32m✓[39m src/features/quests/store.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 31[2mms[22m[39m
+ [32m✓[39m src/core/ids/generate.spec.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/features/io/csvImport.spec.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 20[2mms[22m[39m
+ [32m✓[39m src/features/arcs/components/ArcCard.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 68[2mms[22m[39m
+ [32m✓[39m src/features/arcs/components/ArcForm.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 158[2mms[22m[39m
+ [32m✓[39m src/ui/primitives/MarkdownView.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 101[2mms[22m[39m
+ [32m✓[39m src/features/reactions/components/ReactionRoller.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 144[2mms[22m[39m
+ [32m✓[39m src/features/voices/store.spec.ts [2m ([22m[2m6 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m✓[39m src/ui/primitives/SurfaceCard.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 64[2mms[22m[39m
+ [32m✓[39m src/features/voices/components/VoicePanel.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 213[2mms[22m[39m
+ [32m✓[39m src/features/generators/components/TrinketGenerator.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 106[2mms[22m[39m
+ [32m✓[39m src/features/dice/pages/DicePage.spec.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 103[2mms[22m[39m
+ [32m✓[39m src/ui/primitives/EmptyState.spec.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 82[2mms[22m[39m
+ [32m✓[39m src/ui/primitives/StatusBadge.spec.ts [2m ([22m[2m13 tests[22m[2m)[22m[90m 60[2mms[22m[39m
+ [32m✓[39m src/core/ids/brand.spec.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m src/ui/primitives/PageHeader.spec.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 47[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m218 passed[39m[22m[90m (218)[39m
+[2m      Tests [22m [1m[32m1888 passed[39m[22m[90m (1888)[39m
+[2m   Start at [22m 10:43:26
+[2m   Duration [22m 32.02s[2m (transform 16.87s, setup 43.73s, collect 104.89s, tests 26.54s, environment 135.21s, prepare 56.24s)[22m
+
+ ---> Removed intermediate container 1120a5bb0313
+ ---> 570d85abbd99
+Step 10/10 : RUN git config --global --add safe.directory /app && cd /app && git config core.hooksPath /dev/null
+ ---> Running in b22f88421e19
+ ---> Removed intermediate container b22f88421e19
+ ---> 4d81be3de87f
+Successfully built 4d81be3de87f
+Successfully tagged us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-sagemark-bawx5o:v1
+

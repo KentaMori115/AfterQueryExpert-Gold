@@ -1,0 +1,1723 @@
+[verifier] model.patch applied (947 bytes)
+[verifier] Resetting files touched by test.patch
+[verifier] Applying test.patch
+[verifier] restored 29 shipped test files from 1515a7b74f7e639e249ebb7d4ea61d23ead68ebb
+[verifier] note: only files the base commit carries come back; a test file added later is not restorable
+[verifier] running the withdrawal cases
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+ [31m❯[39m .verifier-canary/canary.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 20[2mms[22m[39m
+[31m   [31m×[31m verifier canary[2m > [22mnever passes[39m[32m 19[2mms[22m[39m
+[31m     → expected 1 to be 2 // Object.is equality[39m
+ [31m❯[39m tests/engine/withdrawn-results.test.ts [2m([22m[2m29 tests[22m[2m | [22m[31m29 failed[39m[2m)[22m[32m 48[2mms[22m[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22mmarks the match voided at the withdrawal time[39m[32m 13[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22mkeeps the results the match was completed with[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22manswers with the match, the tournament, the reason and the moment[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22manswers with the rebuilt records in player id order[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds the total from the matches that still stand[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds the win, loss and draw counts[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mbrings the best streak back down[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mstamps the rebuilt record with the last match that still counts[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mleaves one reason behind per result that still counts[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mstops paying a streak bonus the withdrawn win earned[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mscores the rebuild through the tournament's own multiplier[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mscores the rebuild through a custom formula[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mwalks two matches settled together by match id[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mnever lets a withdrawn match feed a later rebuild[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds only from the tournament the match belongs to[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds a player's profile with it[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mkeeps the withdrawn match on the tournament and leaves the rest completed[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mreranks the board on the rebuilt totals[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mzeroes a player left with nothing[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mstamps an emptied record with the withdrawal time[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mkeeps an emptied player on the board[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mrebuilds nobody outside the withdrawn match[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mleaves a player the match never touched exactly as it was[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a match that was never completed[39m[32m 4[2mms[22m[39m
+[31m     → expected error to be instance of IllegalStateError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a match that is already withdrawn[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses once the tournament is no longer active[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of IllegalStateError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a blank reason[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of InvalidArgumentError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mwrites nothing when it refuses[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of InvalidArgumentError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a match nobody recorded[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of NotFoundError[39m
+ [31m❯[39m tests/events/withdrawn-replay.test.ts [2m([22m[2m14 tests[22m[2m | [22m[31m14 failed[39m[2m)[22m[32m 35[2mms[22m[39m
+[31m   [31m×[31m the event a withdrawal writes[2m > [22mlands on the match stream carrying the reason[39m[32m 11[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m the event a withdrawal writes[2m > [22mleaves the streams of the matches it did not touch alone[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mreaches the scores the live run left behind[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mmarks the match voided in the projection too[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mreaches the same scores after two withdrawals[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22msurvives a reload of the store[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mempties the same player the live run emptied[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22morders matches settled together the same way the live run did[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mcontinues from a snapshot taken before the withdrawal[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mwithdraws over http and answers with the rebuilt records[39m[32m 5[2mms[22m[39m
+[31m     → expected 404 to be 200 // Object.is equality[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mmaps a refused withdrawal onto its usual status[39m[32m 1[2mms[22m[39m
+[31m     → expected 404 to be 400 // Object.is equality[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mwithdraws through the sdk[39m[32m 2[2mms[22m[39m
+[31m     → sdk.matches.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22moffers the withdrawal on the command line[39m[32m 4[2mms[22m[39m
+[31m     → expected [ 'help', 'version', …(11) ] to include 'match:void'[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mcounts what a tournament had withdrawn[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 44 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m .verifier-canary/canary.test.ts[2m > [22mverifier canary[2m > [22mnever passes
+[31m[1mAssertionError[22m: expected 1 to be 2 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+[36m [2m❯[22m .verifier-canary/canary.test.ts:[2m5:15[22m[39m
+    [90m  3| [39m[34mdescribe[39m([32m"verifier canary"[39m[33m,[39m () [33m=>[39m {
+    [90m  4| [39m  [34mit[39m([32m"never passes"[39m[33m,[39m () [33m=>[39m {
+    [90m  5| [39m    [34mexpect[39m([34m1[39m)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m   | [39m              [31m^[39m
+    [90m  6| [39m  })[33m;[39m
+    [90m  7| [39m})[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22mmarks the match voided at the withdrawal time
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m58:32[22m[39m
+    [90m 56| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 57| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 58| [39m    [35mconst[39m withdrawal [33m=[39m service[33m.[39m[34mvoidMatch[39m({
+    [90m   | [39m                               [31m^[39m
+    [90m 59| [39m      matchId[33m:[39m [32m"mch_1"[39m[33m,[39m
+    [90m 60| [39m      reason[33m:[39m [32m"opponent disconnected"[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22mkeeps the results the match was completed with
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m71:13[22m[39m
+    [90m 69| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 70| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 71| [39m    service.voidMatch({ matchId: "mch_1", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 72| [39m    [35mconst[39m results [33m=[39m store[33m.[39m[34mgetMatch[39m([32m"mch_1"[39m)[33m?.[39mresults [33m??[39m [][33m;[39m
+    [90m 73| [39m    [34mexpect[39m(results)[33m.[39m[34mtoHaveLength[39m([34m2[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22manswers with the match, the tournament, the reason and the moment
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m80:32[22m[39m
+    [90m 78| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 79| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 80| [39m    [35mconst[39m withdrawal [33m=[39m service[33m.[39m[34mvoidMatch[39m({
+    [90m   | [39m                               [31m^[39m
+    [90m 81| [39m      matchId[33m:[39m [32m"mch_1"[39m[33m,[39m
+    [90m 82| [39m      reason[33m:[39m [32m"  opponent disconnected  "[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22manswers with the rebuilt records in player id order
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m94:32[22m[39m
+    [90m 92| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 93| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 94| [39m    const withdrawal = service.voidMatch({ matchId: "mch_1", reason: "…
+    [90m   | [39m                               [31m^[39m
+    [90m 95| [39m    expect(withdrawal.rebuilt.map((score) => score.playerId)).toEqual(…
+    [90m 96| [39m    expect(withdrawal.rebuilt.every((score) => score.tournamentId === …
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds the total from the matches that still stand
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m107:13[22m[39m
+    [90m105| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m106| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m180[39m)[33m;[39m
+    [90m107| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m108| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m80[39m)[33m;[39m
+    [90m109| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds the win, loss and draw counts
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m116:13[22m[39m
+    [90m114| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m115| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m116| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m117| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m118| [39m    [34mexpect[39m(ann[33m?.[39mwins)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mbrings the best streak back down
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m129:13[22m[39m
+    [90m127| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m128| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mbestStreak)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m129| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m130| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m131| [39m    [34mexpect[39m(ann[33m?.[39mbestStreak)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mstamps the rebuilt record with the last match that still counts
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m140:13[22m[39m
+    [90m138| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m139| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m140| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m141| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mlastUpdatedAt)[33m.[39m[34mtoBe[39m([33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m142| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mleaves one reason behind per result that still counts
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m150:13[22m[39m
+    [90m148| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m149| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mexplanations)[33m.[39m[34mtoHaveLength[39m([34m3[39m)[33m;[39m
+    [90m150| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m151| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mexplanations)[33m.[39m[34mtoHaveLength[39m([34m2[39m)[33m;[39m
+    [90m152| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mstops paying a streak bonus the withdrawn win earned
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m160:13[22m[39m
+    [90m158| [39m    }
+    [90m159| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m550[39m)[33m;[39m
+    [90m160| [39m    service.voidMatch({ matchId: "mch_s2", reason: "misreported", at: …
+    [90m   | [39m            [31m^[39m
+    [90m161| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m162| [39m    [34mexpect[39m(ann[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m400[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mscores the rebuild through the tournament's own multiplier
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m170:13[22m[39m
+    [90m168| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m169| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m170| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m171| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ben"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBeCloseTo[39m([34m110[39m[33m,[39m [34m6[39m)[33m;[39m
+    [90m172| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mscores the rebuild through a custom formula
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m180:13[22m[39m
+    [90m178| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m179| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m330[39m)[33m;[39m
+    [90m180| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m181| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m215[39m)[33m;[39m
+    [90m182| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mwalks two matches settled together by match id
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m213:13[22m[39m
+    [90m211| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m200[39m[33m,[39m
+    [90m212| [39m    })[33m;[39m
+    [90m213| [39m    service.voidMatch({ matchId: "mch_z", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m214| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m215| [39m    [34mexpect[39m(ann[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m80[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mnever lets a withdrawn match feed a later rebuild
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m225:13[22m[39m
+    [90m223| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m224| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m225| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m226| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported again",…
+    [90m227| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds only from the tournament the match belongs to
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m244:13[22m[39m
+    [90m242| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m243| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m244| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m245| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"tnm_cup"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m100[39m)[33m;[39m
+    [90m246| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"tnm_cup"[39m)[33m?.[39mwins)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds a player's profile with it
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m256:13[22m[39m
+    [90m254| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m255| [39m    [34mexpect[39m(service[33m.[39m[34mprofile[39m([32m"plr_ann"[39m)[33m.[39mprofile[33m.[39mwins)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m256| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m257| [39m    [35mconst[39m profile [33m=[39m service[33m.[39m[34mprofile[39m([32m"plr_ann"[39m)[33m.[39mprofile[33m;[39m
+    [90m258| [39m    [34mexpect[39m(profile[33m.[39mwins)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mkeeps the withdrawn match on the tournament and leaves the rest completed
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m267:13[22m[39m
+    [90m265| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m266| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m267| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m268| [39m    [35mconst[39m matches [33m=[39m store[33m.[39m[34mlistMatches[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m269| [39m    [34mexpect[39m(matches)[33m.[39m[34mtoHaveLength[39m([34m2[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mreranks the board on the rebuilt totals
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m280:13[22m[39m
+    [90m278| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m279| [39m    expect(service.leaderboard("tnm_cup").entries[0]?.playerId).toBe("…
+    [90m280| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m281| [39m    [35mconst[39m board [33m=[39m service[33m.[39m[34mleaderboard[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m282| [39m    [34mexpect[39m(board[33m.[39mentries[[34m0[39m][33m?.[39mplayerId)[33m.[39m[34mtoBe[39m([32m"plr_ben"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mzeroes a player left with nothing
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m292:13[22m[39m
+    [90m290| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m291| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m292| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m293| [39m    [35mconst[39m cal [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m;[39m
+    [90m294| [39m    [34mexpect[39m(cal)[33m.[39m[34mtoBeDefined[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mstamps an emptied record with the withdrawal time
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m306:13[22m[39m
+    [90m304| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m305| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m306| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m307| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m?.[39mlastUpdatedAt)[33m.[39m[34mtoBe[39m([33mT0[39m [33m+[39m [34m500[39m)[33m;[39m
+    [90m308| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mkeeps an emptied player on the board
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m313:13[22m[39m
+    [90m311| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m312| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m313| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m314| [39m    [35mconst[39m board [33m=[39m service[33m.[39m[34mleaderboard[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m315| [39m    [34mexpect[39m(board[33m.[39msize)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mrebuilds nobody outside the withdrawn match
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m323:32[22m[39m
+    [90m321| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m322| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m323| [39m    const withdrawal = service.voidMatch({ matchId: "mch_1", reason: "…
+    [90m   | [39m                               [31m^[39m
+    [90m324| [39m    expect(withdrawal.rebuilt.map((score) => score.playerId)).toEqual(…
+    [90m325| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mleaves a player the match never touched exactly as it was
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m332:13[22m[39m
+    [90m330| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m331| [39m    [35mconst[39m before [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m;[39m
+    [90m332| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m333| [39m    [35mconst[39m after [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m;[39m
+    [90m334| [39m    [34mexpect[39m(after[33m?.[39mtotal)[33m.[39m[34mtoBe[39m(before[33m?.[39mtotal)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a match that was never completed
+[31m[1mAssertionError[22m: expected error to be instance of IllegalStateError[39m
+
+[32m- Expected:[39m 
+[Function IllegalStateError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m350:94[22m[39m
+    [90m348| [39m      createdAt[33m:[39m [33mT0[39m [33m+[39m [34m100[39m[33m,[39m
+    [90m349| [39m    })[33m;[39m
+    [90m350| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "too ea…
+    [90m   | [39m                                                                                             [31m^[39m
+    [90m351| [39m      [33mIllegalStateError[39m[33m,[39m
+    [90m352| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a match that is already withdrawn
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m362:13[22m[39m
+    [90m360| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m361| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m362| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m363| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "again"…
+    [90m364| [39m      [33mIllegalStateError[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses once the tournament is no longer active
+[31m[1mAssertionError[22m: expected error to be instance of IllegalStateError[39m
+
+[32m- Expected:[39m 
+[Function IllegalStateError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m372:93[22m[39m
+    [90m370| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m371| [39m    service[33m.[39m[34mend[39m([32m"tnm_cup"[39m[33m,[39m [33mT0[39m [33m+[39m [34m400[39m)[33m;[39m
+    [90m372| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "too la…
+    [90m   | [39m                                                                                            [31m^[39m
+    [90m373| [39m      [33mIllegalStateError[39m[33m,[39m
+    [90m374| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a blank reason
+[31m[1mAssertionError[22m: expected error to be instance of InvalidArgumentError[39m
+
+[32m- Expected:[39m 
+[Function InvalidArgumentError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m380:88[22m[39m
+    [90m378| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m379| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m380| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "   ", …
+    [90m   | [39m                                                                                       [31m^[39m
+    [90m381| [39m      [33mInvalidArgumentError[39m[33m,[39m
+    [90m382| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mwrites nothing when it refuses
+[31m[1mAssertionError[22m: expected error to be instance of InvalidArgumentError[39m
+
+[32m- Expected:[39m 
+[Function InvalidArgumentError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m391:85[22m[39m
+    [90m389| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m390| [39m    [35mconst[39m before [33m=[39m store[33m.[39mjournal[33m.[39m[34mcount[39m()[33m;[39m
+    [90m391| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "", at:…
+    [90m   | [39m                                                                                    [31m^[39m
+    [90m392| [39m      [33mInvalidArgumentError[39m[33m,[39m
+    [90m393| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a match nobody recorded
+[31m[1mAssertionError[22m: expected error to be instance of NotFoundError[39m
+
+[32m- Expected:[39m 
+[Function NotFoundError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m402:96[22m[39m
+    [90m400| [39m  [34mit[39m([32m"refuses a match nobody recorded"[39m[33m,[39m () [33m=>[39m {
+    [90m401| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m402| [39m    expect(() => service.voidMatch({ matchId: "mch_x", reason: "misrep…
+    [90m   | [39m                                                                                               [31m^[39m
+    [90m403| [39m      [33mNotFoundError[39m[33m,[39m
+    [90m404| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mthe event a withdrawal writes[2m > [22mlands on the match stream carrying the reason
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m64:13[22m[39m
+    [90m 62| [39m  [34mit[39m([32m"lands on the match stream carrying the reason"[39m[33m,[39m () [33m=>[39m {
+    [90m 63| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 64| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 65| [39m    [35mconst[39m events [33m=[39m store[33m.[39mjournal[33m.[39m[34mreadStream[39m([32m"match:mch_2"[39m)[33m;[39m
+    [90m 66| [39m    [35mconst[39m last [33m=[39m events[events[33m.[39mlength [33m-[39m [34m1[39m][33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mthe event a withdrawal writes[2m > [22mleaves the streams of the matches it did not touch alone
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m76:13[22m[39m
+    [90m 74| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 75| [39m    [35mconst[39m before [33m=[39m store[33m.[39mjournal[33m.[39m[34mreadStream[39m([32m"match:mch_1"[39m)[33m.[39mlength[33m;[39m
+    [90m 76| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 77| [39m    expect(store.journal.readStream("match:mch_1")).toHaveLength(befor…
+    [90m 78| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mreaches the scores the live run left behind
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m84:13[22m[39m
+    [90m 82| [39m  [34mit[39m([32m"reaches the scores the live run left behind"[39m[33m,[39m () [33m=>[39m {
+    [90m 83| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 84| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 85| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m 86| [39m    [34mcompare[39m(store[33m.[39m[34mlistScores[39m([32m"tnm_cup"[39m)[33m,[39m replayed[33m.[39mscores)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mmarks the match voided in the projection too
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m91:13[22m[39m
+    [90m 89| [39m  [34mit[39m([32m"marks the match voided in the projection too"[39m[33m,[39m () [33m=>[39m {
+    [90m 90| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 91| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 92| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m 93| [39m    [34mexpect[39m(replayed[33m.[39mmatches[33m.[39m[35mget[39m([32m"mch_2"[39m)[33m?.[39mstatus)[33m.[39m[34mtoBe[39m([32m"voided"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mreaches the same scores after two withdrawals
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m99:13[22m[39m
+    [90m 97| [39m  [34mit[39m([32m"reaches the same scores after two withdrawals"[39m[33m,[39m () [33m=>[39m {
+    [90m 98| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 99| [39m    service.voidMatch({ matchId: "mch_1", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m100| [39m    service.voidMatch({ matchId: "mch_3", reason: "misreported", at: T…
+    [90m101| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22msurvives a reload of the store
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m108:13[22m[39m
+    [90m106| [39m  [34mit[39m([32m"survives a reload of the store"[39m[33m,[39m () [33m=>[39m {
+    [90m107| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m108| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m109| [39m    [35mconst[39m live [33m=[39m store[33m.[39m[34mlistScores[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m110| [39m    store[33m.[39m[34mload[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mempties the same player the live run emptied
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m121:13[22m[39m
+    [90m119| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m120| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m121| [39m    service.voidMatch({ matchId: "mch_1", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m122| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m123| [39m    [35mconst[39m cal [33m=[39m replayed[33m.[39mscores[33m.[39m[35mget[39m([32m"tnm_cup::plr_cal"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22morders matches settled together the same way the live run did
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m159:13[22m[39m
+    [90m157| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m200[39m[33m,[39m
+    [90m158| [39m    })[33m;[39m
+    [90m159| [39m    service.voidMatch({ matchId: "mch_z", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m160| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m161| [39m    [34mexpect[39m(replayed[33m.[39mscores[33m.[39m[35mget[39m([32m"tnm_cup::plr_ann"[39m)[33m?.[39mstreak)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mcontinues from a snapshot taken before the withdrawal
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m169:13[22m[39m
+    [90m167| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m168| [39m    [35mconst[39m snapshot [33m=[39m store[33m.[39m[34mcheckpoint[39m([33mT0[39m [33m+[39m [34m400[39m)[33m;[39m
+    [90m169| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m170| [39m    [35mconst[39m restored [33m=[39m store[33m.[39msnapshots[33m.[39m[34mrestore[39m(snapshot[33m.[39mid)[33m;[39m
+    [90m171| [39m    const replayed = replayJournal(store.journal, { fromState: restore…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mwithdraws over http and answers with the rebuilt records
+[31m[1mAssertionError[22m: expected 404 to be 200 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m191:29[22m[39m
+    [90m189| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m500[39m[33m,[39m
+    [90m190| [39m    })[33m;[39m
+    [90m191| [39m    [34mexpect[39m(response[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m200[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m192| [39m    const body = response.body as { reason: string; rebuilt: ScoreReco…
+    [90m193| [39m    [34mexpect[39m(body[33m.[39mreason)[33m.[39m[34mtoBe[39m([32m"opponent disconnected"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mmaps a refused withdrawal onto its usual status
+[31m[1mAssertionError[22m: expected 404 to be 400 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 400[39m
+[31m+ 404[39m
+
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m208:26[22m[39m
+    [90m206| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m207| [39m    const blank = await router.handle("POST", "/matches/mch_1/void", {…
+    [90m208| [39m    [34mexpect[39m(blank[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m400[39m)[33m;[39m
+    [90m   | [39m                         [31m^[39m
+    [90m209| [39m    const missing = await router.handle("POST", "/matches/mch_x/void",…
+    [90m210| [39m      reason[33m:[39m [32m"misreported"[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mwithdraws through the sdk
+[31m[1mTypeError[22m: sdk.matches.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m248:43[22m[39m
+    [90m246| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m100[39m[33m,[39m
+    [90m247| [39m    })[33m;[39m
+    [90m248| [39m    [35mconst[39m withdrawal [33m=[39m ([35mawait[39m sdk[33m.[39mmatches[33m.[39m[34mvoidMatch[39m([32m"mch_1"[39m[33m,[39m {
+    [90m   | [39m                                          [31m^[39m
+    [90m249| [39m      reason[33m:[39m [32m"opponent disconnected"[39m[33m,[39m
+    [90m250| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m500[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22moffers the withdrawal on the command line
+[31m[1mAssertionError[22m: expected [ 'help', 'version', …(11) ] to include 'match:void'[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m261:33[22m[39m
+    [90m259| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m260| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m261| [39m    [34mexpect[39m([34mavailableCommands[39m())[33m.[39m[34mtoContain[39m([32m"match:void"[39m)[33m;[39m
+    [90m   | [39m                                [31m^[39m
+    [90m262| [39m    [35mlet[39m help [33m=[39m [32m""[39m[33m;[39m
+    [90m263| [39m    [35mawait[39m [34mrunCli[39m([[32m"help"[39m][33m,[39m (text) [33m=>[39m {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mcounts what a tournament had withdrawn
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m277:13[22m[39m
+    [90m275| [39m  [34mit[39m([32m"counts what a tournament had withdrawn"[39m[33m,[39m () [33m=>[39m {
+    [90m276| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m277| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m278| [39m    [35mconst[39m report [33m=[39m [34mbuildTournamentReport[39m(
+    [90m279| [39m      service[33m.[39m[34mgetTournament[39m([32m"tnm_cup"[39m)[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/44]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[31m44 failed[39m[22m[90m (44)[39m
+[2m   Start at [22m 04:32:45
+[2m   Duration [22m 834ms[2m (transform 447ms, setup 0ms, collect 1.03s, tests 104ms, environment 1ms, prepare 221ms)[22m
+
+JUNIT report written to /logs/verifier/new_junit.xml
+[verifier] withdrawal cases exited 1
+[verifier] running the shipped suite
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+ [32m✓[39m tests/persistence/sqlite.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/engine/tournament.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/engine/scenarios.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/examples/recipes.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m tests/engine/matrix.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/sdk/client.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/examples/walkthrough.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/domain/players.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/events/replay.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/engine/catalog.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/matchmaking.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/core/shared.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/domain/tournaments.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/cli/cli.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/ranking.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/persistence/memory.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/scoring.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/integration/replay-seasons.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/domain/scores.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/events/journal.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/domain/rewards.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/engine/rules.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/domain/matches.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/engine/rewards.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/domain/seasons.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/engine/anti-cheat.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/engine/seasons.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/integration/api.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/domain/rankings.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m29 passed[39m[22m[90m (29)[39m
+[2m      Tests [22m [1m[32m126 passed[39m[22m[90m (126)[39m
+[2m   Start at [22m 04:32:47
+[2m   Duration [22m 3.13s[2m (transform 815ms, setup 0ms, collect 2.94s, tests 217ms, environment 5ms, prepare 2.03s)[22m
+
+JUNIT report written to /logs/verifier/base_junit.xml
+[verifier] shipped suite exited 0
+===== raw suite output: run.log =====
++ npx vitest run --config /tmp/arenaflow-graded.config.ts --reporter=default --reporter=junit --outputFile.junit=/logs/verifier/new_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+ [31m❯[39m .verifier-canary/canary.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 20[2mms[22m[39m
+[31m   [31m×[31m verifier canary[2m > [22mnever passes[39m[32m 19[2mms[22m[39m
+[31m     → expected 1 to be 2 // Object.is equality[39m
+ [31m❯[39m tests/engine/withdrawn-results.test.ts [2m([22m[2m29 tests[22m[2m | [22m[31m29 failed[39m[2m)[22m[32m 48[2mms[22m[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22mmarks the match voided at the withdrawal time[39m[32m 13[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22mkeeps the results the match was completed with[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22manswers with the match, the tournament, the reason and the moment[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing a completed match[2m > [22manswers with the rebuilt records in player id order[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds the total from the matches that still stand[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds the win, loss and draw counts[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mbrings the best streak back down[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mstamps the rebuilt record with the last match that still counts[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mleaves one reason behind per result that still counts[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mstops paying a streak bonus the withdrawn win earned[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mscores the rebuild through the tournament's own multiplier[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mscores the rebuild through a custom formula[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mwalks two matches settled together by match id[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mnever lets a withdrawn match feed a later rebuild[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds only from the tournament the match belongs to[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mrebuilds a player's profile with it[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mkeeps the withdrawn match on the tournament and leaves the rest completed[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m rebuilding what the match fed[2m > [22mreranks the board on the rebuilt totals[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mzeroes a player left with nothing[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mstamps an emptied record with the withdrawal time[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mkeeps an emptied player on the board[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mrebuilds nobody outside the withdrawn match[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m players the withdrawal reaches[2m > [22mleaves a player the match never touched exactly as it was[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a match that was never completed[39m[32m 4[2mms[22m[39m
+[31m     → expected error to be instance of IllegalStateError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a match that is already withdrawn[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses once the tournament is no longer active[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of IllegalStateError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a blank reason[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of InvalidArgumentError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mwrites nothing when it refuses[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of InvalidArgumentError[39m
+[31m   [31m×[31m what a withdrawal refuses[2m > [22mrefuses a match nobody recorded[39m[32m 1[2mms[22m[39m
+[31m     → expected error to be instance of NotFoundError[39m
+ [31m❯[39m tests/events/withdrawn-replay.test.ts [2m([22m[2m14 tests[22m[2m | [22m[31m14 failed[39m[2m)[22m[32m 35[2mms[22m[39m
+[31m   [31m×[31m the event a withdrawal writes[2m > [22mlands on the match stream carrying the reason[39m[32m 11[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m the event a withdrawal writes[2m > [22mleaves the streams of the matches it did not touch alone[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mreaches the scores the live run left behind[39m[32m 2[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mmarks the match voided in the projection too[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mreaches the same scores after two withdrawals[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22msurvives a reload of the store[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mempties the same player the live run emptied[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22morders matches settled together the same way the live run did[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m replaying a withdrawal[2m > [22mcontinues from a snapshot taken before the withdrawal[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mwithdraws over http and answers with the rebuilt records[39m[32m 5[2mms[22m[39m
+[31m     → expected 404 to be 200 // Object.is equality[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mmaps a refused withdrawal onto its usual status[39m[32m 1[2mms[22m[39m
+[31m     → expected 404 to be 400 // Object.is equality[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mwithdraws through the sdk[39m[32m 2[2mms[22m[39m
+[31m     → sdk.matches.voidMatch is not a function[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22moffers the withdrawal on the command line[39m[32m 4[2mms[22m[39m
+[31m     → expected [ 'help', 'version', …(11) ] to include 'match:void'[39m
+[31m   [31m×[31m withdrawing over the other surfaces[2m > [22mcounts what a tournament had withdrawn[39m[32m 1[2mms[22m[39m
+[31m     → service.voidMatch is not a function[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 44 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m .verifier-canary/canary.test.ts[2m > [22mverifier canary[2m > [22mnever passes
+[31m[1mAssertionError[22m: expected 1 to be 2 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+[36m [2m❯[22m .verifier-canary/canary.test.ts:[2m5:15[22m[39m
+    [90m  3| [39m[34mdescribe[39m([32m"verifier canary"[39m[33m,[39m () [33m=>[39m {
+    [90m  4| [39m  [34mit[39m([32m"never passes"[39m[33m,[39m () [33m=>[39m {
+    [90m  5| [39m    [34mexpect[39m([34m1[39m)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m   | [39m              [31m^[39m
+    [90m  6| [39m  })[33m;[39m
+    [90m  7| [39m})[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22mmarks the match voided at the withdrawal time
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m58:32[22m[39m
+    [90m 56| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 57| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 58| [39m    [35mconst[39m withdrawal [33m=[39m service[33m.[39m[34mvoidMatch[39m({
+    [90m   | [39m                               [31m^[39m
+    [90m 59| [39m      matchId[33m:[39m [32m"mch_1"[39m[33m,[39m
+    [90m 60| [39m      reason[33m:[39m [32m"opponent disconnected"[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22mkeeps the results the match was completed with
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m71:13[22m[39m
+    [90m 69| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 70| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 71| [39m    service.voidMatch({ matchId: "mch_1", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 72| [39m    [35mconst[39m results [33m=[39m store[33m.[39m[34mgetMatch[39m([32m"mch_1"[39m)[33m?.[39mresults [33m??[39m [][33m;[39m
+    [90m 73| [39m    [34mexpect[39m(results)[33m.[39m[34mtoHaveLength[39m([34m2[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22manswers with the match, the tournament, the reason and the moment
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m80:32[22m[39m
+    [90m 78| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 79| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 80| [39m    [35mconst[39m withdrawal [33m=[39m service[33m.[39m[34mvoidMatch[39m({
+    [90m   | [39m                               [31m^[39m
+    [90m 81| [39m      matchId[33m:[39m [32m"mch_1"[39m[33m,[39m
+    [90m 82| [39m      reason[33m:[39m [32m"  opponent disconnected  "[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwithdrawing a completed match[2m > [22manswers with the rebuilt records in player id order
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m94:32[22m[39m
+    [90m 92| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m 93| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m 94| [39m    const withdrawal = service.voidMatch({ matchId: "mch_1", reason: "…
+    [90m   | [39m                               [31m^[39m
+    [90m 95| [39m    expect(withdrawal.rebuilt.map((score) => score.playerId)).toEqual(…
+    [90m 96| [39m    expect(withdrawal.rebuilt.every((score) => score.tournamentId === …
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds the total from the matches that still stand
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m107:13[22m[39m
+    [90m105| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m106| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m180[39m)[33m;[39m
+    [90m107| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m108| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m80[39m)[33m;[39m
+    [90m109| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds the win, loss and draw counts
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m116:13[22m[39m
+    [90m114| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m115| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m116| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m117| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m118| [39m    [34mexpect[39m(ann[33m?.[39mwins)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mbrings the best streak back down
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m129:13[22m[39m
+    [90m127| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m128| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mbestStreak)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m129| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m130| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m131| [39m    [34mexpect[39m(ann[33m?.[39mbestStreak)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mstamps the rebuilt record with the last match that still counts
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m140:13[22m[39m
+    [90m138| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m139| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m140| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m141| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mlastUpdatedAt)[33m.[39m[34mtoBe[39m([33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m142| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mleaves one reason behind per result that still counts
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m150:13[22m[39m
+    [90m148| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m149| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mexplanations)[33m.[39m[34mtoHaveLength[39m([34m3[39m)[33m;[39m
+    [90m150| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m151| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mexplanations)[33m.[39m[34mtoHaveLength[39m([34m2[39m)[33m;[39m
+    [90m152| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mstops paying a streak bonus the withdrawn win earned
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m160:13[22m[39m
+    [90m158| [39m    }
+    [90m159| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m550[39m)[33m;[39m
+    [90m160| [39m    service.voidMatch({ matchId: "mch_s2", reason: "misreported", at: …
+    [90m   | [39m            [31m^[39m
+    [90m161| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m162| [39m    [34mexpect[39m(ann[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m400[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mscores the rebuild through the tournament's own multiplier
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m170:13[22m[39m
+    [90m168| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m169| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m170| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m171| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ben"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBeCloseTo[39m([34m110[39m[33m,[39m [34m6[39m)[33m;[39m
+    [90m172| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mscores the rebuild through a custom formula
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m180:13[22m[39m
+    [90m178| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m179| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m330[39m)[33m;[39m
+    [90m180| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m181| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m215[39m)[33m;[39m
+    [90m182| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mwalks two matches settled together by match id
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m213:13[22m[39m
+    [90m211| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m200[39m[33m,[39m
+    [90m212| [39m    })[33m;[39m
+    [90m213| [39m    service.voidMatch({ matchId: "mch_z", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m214| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+    [90m215| [39m    [34mexpect[39m(ann[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m80[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mnever lets a withdrawn match feed a later rebuild
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m225:13[22m[39m
+    [90m223| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m224| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m225| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m226| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported again",…
+    [90m227| [39m    [35mconst[39m ann [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds only from the tournament the match belongs to
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m244:13[22m[39m
+    [90m242| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m243| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m244| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m245| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"tnm_cup"[39m)[33m?.[39mtotal)[33m.[39m[34mtoBe[39m([34m100[39m)[33m;[39m
+    [90m246| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"tnm_cup"[39m)[33m?.[39mwins)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mrebuilds a player's profile with it
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m256:13[22m[39m
+    [90m254| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m255| [39m    [34mexpect[39m(service[33m.[39m[34mprofile[39m([32m"plr_ann"[39m)[33m.[39mprofile[33m.[39mwins)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m256| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m257| [39m    [35mconst[39m profile [33m=[39m service[33m.[39m[34mprofile[39m([32m"plr_ann"[39m)[33m.[39mprofile[33m;[39m
+    [90m258| [39m    [34mexpect[39m(profile[33m.[39mwins)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mkeeps the withdrawn match on the tournament and leaves the rest completed
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m267:13[22m[39m
+    [90m265| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m266| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m267| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m268| [39m    [35mconst[39m matches [33m=[39m store[33m.[39m[34mlistMatches[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m269| [39m    [34mexpect[39m(matches)[33m.[39m[34mtoHaveLength[39m([34m2[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mrebuilding what the match fed[2m > [22mreranks the board on the rebuilt totals
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m280:13[22m[39m
+    [90m278| [39m    [34mplay[39m(service[33m,[39m [32m"mch_3"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m300[39m)[33m;[39m
+    [90m279| [39m    expect(service.leaderboard("tnm_cup").entries[0]?.playerId).toBe("…
+    [90m280| [39m    service.voidMatch({ matchId: "mch_2", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m281| [39m    [35mconst[39m board [33m=[39m service[33m.[39m[34mleaderboard[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m282| [39m    [34mexpect[39m(board[33m.[39mentries[[34m0[39m][33m?.[39mplayerId)[33m.[39m[34mtoBe[39m([32m"plr_ben"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mzeroes a player left with nothing
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m292:13[22m[39m
+    [90m290| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m291| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m292| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m293| [39m    [35mconst[39m cal [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m;[39m
+    [90m294| [39m    [34mexpect[39m(cal)[33m.[39m[34mtoBeDefined[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mstamps an emptied record with the withdrawal time
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m306:13[22m[39m
+    [90m304| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m305| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m306| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m307| [39m    [34mexpect[39m([34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m?.[39mlastUpdatedAt)[33m.[39m[34mtoBe[39m([33mT0[39m [33m+[39m [34m500[39m)[33m;[39m
+    [90m308| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mkeeps an emptied player on the board
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m313:13[22m[39m
+    [90m311| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m312| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m313| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m314| [39m    [35mconst[39m board [33m=[39m service[33m.[39m[34mleaderboard[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m315| [39m    [34mexpect[39m(board[33m.[39msize)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mrebuilds nobody outside the withdrawn match
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m323:32[22m[39m
+    [90m321| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m322| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m323| [39m    const withdrawal = service.voidMatch({ matchId: "mch_1", reason: "…
+    [90m   | [39m                               [31m^[39m
+    [90m324| [39m    expect(withdrawal.rebuilt.map((score) => score.playerId)).toEqual(…
+    [90m325| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mplayers the withdrawal reaches[2m > [22mleaves a player the match never touched exactly as it was
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m332:13[22m[39m
+    [90m330| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [32m"plr_dot"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m331| [39m    [35mconst[39m before [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m;[39m
+    [90m332| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m333| [39m    [35mconst[39m after [33m=[39m [34mscoreOf[39m(store[33m,[39m [32m"plr_cal"[39m)[33m;[39m
+    [90m334| [39m    [34mexpect[39m(after[33m?.[39mtotal)[33m.[39m[34mtoBe[39m(before[33m?.[39mtotal)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a match that was never completed
+[31m[1mAssertionError[22m: expected error to be instance of IllegalStateError[39m
+
+[32m- Expected:[39m 
+[Function IllegalStateError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m350:94[22m[39m
+    [90m348| [39m      createdAt[33m:[39m [33mT0[39m [33m+[39m [34m100[39m[33m,[39m
+    [90m349| [39m    })[33m;[39m
+    [90m350| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "too ea…
+    [90m   | [39m                                                                                             [31m^[39m
+    [90m351| [39m      [33mIllegalStateError[39m[33m,[39m
+    [90m352| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a match that is already withdrawn
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m362:13[22m[39m
+    [90m360| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m361| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m362| [39m    service.voidMatch({ matchId: "mch_1", reason: "misreported", at: T…
+    [90m   | [39m            [31m^[39m
+    [90m363| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "again"…
+    [90m364| [39m      [33mIllegalStateError[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses once the tournament is no longer active
+[31m[1mAssertionError[22m: expected error to be instance of IllegalStateError[39m
+
+[32m- Expected:[39m 
+[Function IllegalStateError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m372:93[22m[39m
+    [90m370| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m371| [39m    service[33m.[39m[34mend[39m([32m"tnm_cup"[39m[33m,[39m [33mT0[39m [33m+[39m [34m400[39m)[33m;[39m
+    [90m372| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "too la…
+    [90m   | [39m                                                                                            [31m^[39m
+    [90m373| [39m      [33mIllegalStateError[39m[33m,[39m
+    [90m374| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a blank reason
+[31m[1mAssertionError[22m: expected error to be instance of InvalidArgumentError[39m
+
+[32m- Expected:[39m 
+[Function InvalidArgumentError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m380:88[22m[39m
+    [90m378| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m379| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m380| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "   ", …
+    [90m   | [39m                                                                                       [31m^[39m
+    [90m381| [39m      [33mInvalidArgumentError[39m[33m,[39m
+    [90m382| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mwrites nothing when it refuses
+[31m[1mAssertionError[22m: expected error to be instance of InvalidArgumentError[39m
+
+[32m- Expected:[39m 
+[Function InvalidArgumentError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m391:85[22m[39m
+    [90m389| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m390| [39m    [35mconst[39m before [33m=[39m store[33m.[39mjournal[33m.[39m[34mcount[39m()[33m;[39m
+    [90m391| [39m    expect(() => service.voidMatch({ matchId: "mch_1", reason: "", at:…
+    [90m   | [39m                                                                                    [31m^[39m
+    [90m392| [39m      [33mInvalidArgumentError[39m[33m,[39m
+    [90m393| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/engine/withdrawn-results.test.ts[2m > [22mwhat a withdrawal refuses[2m > [22mrefuses a match nobody recorded
+[31m[1mAssertionError[22m: expected error to be instance of NotFoundError[39m
+
+[32m- Expected:[39m 
+[Function NotFoundError]
+
+[31m+ Received:[39m 
+TypeError {
+  "message": "service.voidMatch is not a function",
+}
+
+[36m [2m❯[22m tests/engine/withdrawn-results.test.ts:[2m402:96[22m[39m
+    [90m400| [39m  [34mit[39m([32m"refuses a match nobody recorded"[39m[33m,[39m () [33m=>[39m {
+    [90m401| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m402| [39m    expect(() => service.voidMatch({ matchId: "mch_x", reason: "misrep…
+    [90m   | [39m                                                                                               [31m^[39m
+    [90m403| [39m      [33mNotFoundError[39m[33m,[39m
+    [90m404| [39m    )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mthe event a withdrawal writes[2m > [22mlands on the match stream carrying the reason
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m64:13[22m[39m
+    [90m 62| [39m  [34mit[39m([32m"lands on the match stream carrying the reason"[39m[33m,[39m () [33m=>[39m {
+    [90m 63| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 64| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 65| [39m    [35mconst[39m events [33m=[39m store[33m.[39mjournal[33m.[39m[34mreadStream[39m([32m"match:mch_2"[39m)[33m;[39m
+    [90m 66| [39m    [35mconst[39m last [33m=[39m events[events[33m.[39mlength [33m-[39m [34m1[39m][33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mthe event a withdrawal writes[2m > [22mleaves the streams of the matches it did not touch alone
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m76:13[22m[39m
+    [90m 74| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 75| [39m    [35mconst[39m before [33m=[39m store[33m.[39mjournal[33m.[39m[34mreadStream[39m([32m"match:mch_1"[39m)[33m.[39mlength[33m;[39m
+    [90m 76| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 77| [39m    expect(store.journal.readStream("match:mch_1")).toHaveLength(befor…
+    [90m 78| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mreaches the scores the live run left behind
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m84:13[22m[39m
+    [90m 82| [39m  [34mit[39m([32m"reaches the scores the live run left behind"[39m[33m,[39m () [33m=>[39m {
+    [90m 83| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 84| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 85| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m 86| [39m    [34mcompare[39m(store[33m.[39m[34mlistScores[39m([32m"tnm_cup"[39m)[33m,[39m replayed[33m.[39mscores)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mmarks the match voided in the projection too
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m91:13[22m[39m
+    [90m 89| [39m  [34mit[39m([32m"marks the match voided in the projection too"[39m[33m,[39m () [33m=>[39m {
+    [90m 90| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 91| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m 92| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m 93| [39m    [34mexpect[39m(replayed[33m.[39mmatches[33m.[39m[35mget[39m([32m"mch_2"[39m)[33m?.[39mstatus)[33m.[39m[34mtoBe[39m([32m"voided"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mreaches the same scores after two withdrawals
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m99:13[22m[39m
+    [90m 97| [39m  [34mit[39m([32m"reaches the same scores after two withdrawals"[39m[33m,[39m () [33m=>[39m {
+    [90m 98| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m 99| [39m    service.voidMatch({ matchId: "mch_1", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m100| [39m    service.voidMatch({ matchId: "mch_3", reason: "misreported", at: T…
+    [90m101| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22msurvives a reload of the store
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m108:13[22m[39m
+    [90m106| [39m  [34mit[39m([32m"survives a reload of the store"[39m[33m,[39m () [33m=>[39m {
+    [90m107| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m108| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m109| [39m    [35mconst[39m live [33m=[39m store[33m.[39m[34mlistScores[39m([32m"tnm_cup"[39m)[33m;[39m
+    [90m110| [39m    store[33m.[39m[34mload[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mempties the same player the live run emptied
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m121:13[22m[39m
+    [90m119| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_cal"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m120| [39m    [34mplay[39m(service[33m,[39m [32m"mch_2"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m200[39m)[33m;[39m
+    [90m121| [39m    service.voidMatch({ matchId: "mch_1", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m122| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m123| [39m    [35mconst[39m cal [33m=[39m replayed[33m.[39mscores[33m.[39m[35mget[39m([32m"tnm_cup::plr_cal"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22morders matches settled together the same way the live run did
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m159:13[22m[39m
+    [90m157| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m200[39m[33m,[39m
+    [90m158| [39m    })[33m;[39m
+    [90m159| [39m    service.voidMatch({ matchId: "mch_z", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m160| [39m    [35mconst[39m replayed [33m=[39m [34mreplayJournal[39m(store[33m.[39mjournal)[33m;[39m
+    [90m161| [39m    [34mexpect[39m(replayed[33m.[39mscores[33m.[39m[35mget[39m([32m"tnm_cup::plr_ann"[39m)[33m?.[39mstreak)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mreplaying a withdrawal[2m > [22mcontinues from a snapshot taken before the withdrawal
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m169:13[22m[39m
+    [90m167| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m168| [39m    [35mconst[39m snapshot [33m=[39m store[33m.[39m[34mcheckpoint[39m([33mT0[39m [33m+[39m [34m400[39m)[33m;[39m
+    [90m169| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m170| [39m    [35mconst[39m restored [33m=[39m store[33m.[39msnapshots[33m.[39m[34mrestore[39m(snapshot[33m.[39mid)[33m;[39m
+    [90m171| [39m    const replayed = replayJournal(store.journal, { fromState: restore…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mwithdraws over http and answers with the rebuilt records
+[31m[1mAssertionError[22m: expected 404 to be 200 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m191:29[22m[39m
+    [90m189| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m500[39m[33m,[39m
+    [90m190| [39m    })[33m;[39m
+    [90m191| [39m    [34mexpect[39m(response[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m200[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m192| [39m    const body = response.body as { reason: string; rebuilt: ScoreReco…
+    [90m193| [39m    [34mexpect[39m(body[33m.[39mreason)[33m.[39m[34mtoBe[39m([32m"opponent disconnected"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mmaps a refused withdrawal onto its usual status
+[31m[1mAssertionError[22m: expected 404 to be 400 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 400[39m
+[31m+ 404[39m
+
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m208:26[22m[39m
+    [90m206| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m207| [39m    const blank = await router.handle("POST", "/matches/mch_1/void", {…
+    [90m208| [39m    [34mexpect[39m(blank[33m.[39mstatus)[33m.[39m[34mtoBe[39m([34m400[39m)[33m;[39m
+    [90m   | [39m                         [31m^[39m
+    [90m209| [39m    const missing = await router.handle("POST", "/matches/mch_x/void",…
+    [90m210| [39m      reason[33m:[39m [32m"misreported"[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mwithdraws through the sdk
+[31m[1mTypeError[22m: sdk.matches.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m248:43[22m[39m
+    [90m246| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m100[39m[33m,[39m
+    [90m247| [39m    })[33m;[39m
+    [90m248| [39m    [35mconst[39m withdrawal [33m=[39m ([35mawait[39m sdk[33m.[39mmatches[33m.[39m[34mvoidMatch[39m([32m"mch_1"[39m[33m,[39m {
+    [90m   | [39m                                          [31m^[39m
+    [90m249| [39m      reason[33m:[39m [32m"opponent disconnected"[39m[33m,[39m
+    [90m250| [39m      at[33m:[39m [33mT0[39m [33m+[39m [34m500[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22moffers the withdrawal on the command line
+[31m[1mAssertionError[22m: expected [ 'help', 'version', …(11) ] to include 'match:void'[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m261:33[22m[39m
+    [90m259| [39m    [35mconst[39m { service } [33m=[39m [34marena[39m()[33m;[39m
+    [90m260| [39m    [34mplay[39m(service[33m,[39m [32m"mch_1"[39m[33m,[39m [32m"plr_ann"[39m[33m,[39m [32m"plr_ben"[39m[33m,[39m [33mT0[39m [33m+[39m [34m100[39m)[33m;[39m
+    [90m261| [39m    [34mexpect[39m([34mavailableCommands[39m())[33m.[39m[34mtoContain[39m([32m"match:void"[39m)[33m;[39m
+    [90m   | [39m                                [31m^[39m
+    [90m262| [39m    [35mlet[39m help [33m=[39m [32m""[39m[33m;[39m
+    [90m263| [39m    [35mawait[39m [34mrunCli[39m([[32m"help"[39m][33m,[39m (text) [33m=>[39m {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/44]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/events/withdrawn-replay.test.ts[2m > [22mwithdrawing over the other surfaces[2m > [22mcounts what a tournament had withdrawn
+[31m[1mTypeError[22m: service.voidMatch is not a function[39m
+[36m [2m❯[22m tests/events/withdrawn-replay.test.ts:[2m277:13[22m[39m
+    [90m275| [39m  [34mit[39m([32m"counts what a tournament had withdrawn"[39m[33m,[39m () [33m=>[39m {
+    [90m276| [39m    [35mconst[39m { store[33m,[39m service } [33m=[39m [34mseeded[39m()[33m;[39m
+    [90m277| [39m    service.voidMatch({ matchId: "mch_2", reason: "opponent disconnect…
+    [90m   | [39m            [31m^[39m
+    [90m278| [39m    [35mconst[39m report [33m=[39m [34mbuildTournamentReport[39m(
+    [90m279| [39m      service[33m.[39m[34mgetTournament[39m([32m"tnm_cup"[39m)[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/44]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[31m44 failed[39m[22m[90m (44)[39m
+[2m   Start at [22m 04:32:45
+[2m   Duration [22m 834ms[2m (transform 447ms, setup 0ms, collect 1.03s, tests 104ms, environment 1ms, prepare 221ms)[22m
+
+JUNIT report written to /logs/verifier/new_junit.xml
++ npx vitest run --config /tmp/arenaflow-shipped.config.ts --reporter=default --reporter=junit --outputFile.junit=/logs/verifier/base_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+ [32m✓[39m tests/persistence/sqlite.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/engine/tournament.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/engine/scenarios.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/examples/recipes.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m tests/engine/matrix.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/sdk/client.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/examples/walkthrough.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/domain/players.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/events/replay.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/engine/catalog.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/matchmaking.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/core/shared.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/domain/tournaments.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/cli/cli.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/ranking.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/persistence/memory.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/engine/scoring.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/integration/replay-seasons.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/domain/scores.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/events/journal.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/domain/rewards.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/engine/rules.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/domain/matches.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/engine/rewards.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/domain/seasons.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/engine/anti-cheat.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/engine/seasons.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/integration/api.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/domain/rankings.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m29 passed[39m[22m[90m (29)[39m
+[2m      Tests [22m [1m[32m126 passed[39m[22m[90m (126)[39m
+[2m   Start at [22m 04:32:47
+[2m   Duration [22m 3.13s[2m (transform 815ms, setup 0ms, collect 2.94s, tests 217ms, environment 5ms, prepare 2.03s)[22m
+
+JUNIT report written to /logs/verifier/base_junit.xml
+===== grade =====
+[verifier] ===== FAILURES (43) =====
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.withdrawing a completed match > marks the match voided at the withdrawal time
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:58:32
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.withdrawing a completed match > keeps the results the match was completed with
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:71:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.withdrawing a completed match > answers with the match, the tournament, the reason and the moment
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:80:32
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.withdrawing a completed match > answers with the rebuilt records in player id order
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:94:32
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > rebuilds the total from the matches that still stand
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:107:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > rebuilds the win, loss and draw counts
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:116:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > brings the best streak back down
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:129:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > stamps the rebuilt record with the last match that still counts
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:140:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > leaves one reason behind per result that still counts
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:150:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > stops paying a streak bonus the withdrawn win earned
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:160:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > scores the rebuild through the tournament's own multiplier
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:170:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > scores the rebuild through a custom formula
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:180:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > walks two matches settled together by match id
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:213:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > never lets a withdrawn match feed a later rebuild
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:225:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > rebuilds only from the tournament the match belongs to
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:244:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > rebuilds a player's profile with it
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:256:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > keeps the withdrawn match on the tournament and leaves the rest completed
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:267:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.rebuilding what the match fed > reranks the board on the rebuilt totals
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:280:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.players the withdrawal reaches > zeroes a player left with nothing
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:292:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.players the withdrawal reaches > stamps an emptied record with the withdrawal time
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:306:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.players the withdrawal reaches > keeps an emptied player on the board
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:313:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.players the withdrawal reaches > rebuilds nobody outside the withdrawn match
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:323:32
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.players the withdrawal reaches > leaves a player the match never touched exactly as it was
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:332:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.what a withdrawal refuses > refuses a match that was never completed
+    expected error to be instance of IllegalStateError
+    AssertionError: expected error to be instance of IllegalStateError
+    
+    - Expected: 
+    [Function IllegalStateError]
+    
+    + Received: 
+    TypeError {
+      "message": "service.voidMatch is not a function",
+    }
+    
+     ❯ tests/engine/withdrawn-results.test.ts:350:94
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.what a withdrawal refuses > refuses a match that is already withdrawn
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/engine/withdrawn-results.test.ts:362:13
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.what a withdrawal refuses > refuses once the tournament is no longer active
+    expected error to be instance of IllegalStateError
+    AssertionError: expected error to be instance of IllegalStateError
+    
+    - Expected: 
+    [Function IllegalStateError]
+    
+    + Received: 
+    TypeError {
+      "message": "service.voidMatch is not a function",
+    }
+    
+     ❯ tests/engine/withdrawn-results.test.ts:372:93
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.what a withdrawal refuses > refuses a blank reason
+    expected error to be instance of InvalidArgumentError
+    AssertionError: expected error to be instance of InvalidArgumentError
+    
+    - Expected: 
+    [Function InvalidArgumentError]
+    
+    + Received: 
+    TypeError {
+      "message": "service.voidMatch is not a function",
+    }
+    
+     ❯ tests/engine/withdrawn-results.test.ts:380:88
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.what a withdrawal refuses > writes nothing when it refuses
+    expected error to be instance of InvalidArgumentError
+    AssertionError: expected error to be instance of InvalidArgumentError
+    
+    - Expected: 
+    [Function InvalidArgumentError]
+    
+    + Received: 
+    TypeError {
+      "message": "service.voidMatch is not a function",
+    }
+    
+     ❯ tests/engine/withdrawn-results.test.ts:391:85
+[verifier] ✗ [f2p] tests/engine/withdrawn-results.test.ts.what a withdrawal refuses > refuses a match nobody recorded
+    expected error to be instance of NotFoundError
+    AssertionError: expected error to be instance of NotFoundError
+    
+    - Expected: 
+    [Function NotFoundError]
+    
+    + Received: 
+    TypeError {
+      "message": "service.voidMatch is not a function",
+    }
+    
+     ❯ tests/engine/withdrawn-results.test.ts:402:96
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.the event a withdrawal writes > lands on the match stream carrying the reason
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:64:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.the event a withdrawal writes > leaves the streams of the matches it did not touch alone
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:76:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.replaying a withdrawal > reaches the scores the live run left behind
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:84:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.replaying a withdrawal > marks the match voided in the projection too
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:91:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.replaying a withdrawal > reaches the same scores after two withdrawals
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:99:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.replaying a withdrawal > survives a reload of the store
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:108:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.replaying a withdrawal > empties the same player the live run emptied
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:121:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.replaying a withdrawal > orders matches settled together the same way the live run did
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:159:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.replaying a withdrawal > continues from a snapshot taken before the withdrawal
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:169:13
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.withdrawing over the other surfaces > withdraws over http and answers with the rebuilt records
+    expected 404 to be 200 // Object.is equality
+    AssertionError: expected 404 to be 200 // Object.is equality
+    
+    - Expected
+    + Received
+    
+    - 200
+    + 404
+    
+     ❯ tests/events/withdrawn-replay.test.ts:191:29
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.withdrawing over the other surfaces > maps a refused withdrawal onto its usual status
+    expected 404 to be 400 // Object.is equality
+    AssertionError: expected 404 to be 400 // Object.is equality
+    
+    - Expected
+    + Received
+    
+    - 400
+    + 404
+    
+     ❯ tests/events/withdrawn-replay.test.ts:208:26
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.withdrawing over the other surfaces > withdraws through the sdk
+    sdk.matches.voidMatch is not a function
+    TypeError: sdk.matches.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:248:43
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.withdrawing over the other surfaces > offers the withdrawal on the command line
+    expected [ 'help', 'version', …(11) ] to include 'match:void'
+    AssertionError: expected [ 'help', 'version', …(11) ] to include 'match:void'
+     ❯ tests/events/withdrawn-replay.test.ts:261:33
+[verifier] ✗ [f2p] tests/events/withdrawn-replay.test.ts.withdrawing over the other surfaces > counts what a tournament had withdrawn
+    service.voidMatch is not a function
+    TypeError: service.voidMatch is not a function
+     ❯ tests/events/withdrawn-replay.test.ts:277:13
+P2P 126/126 pass 0 fail; F2P 0/43 pass 43 fail; PARTIAL 0.7455621301775148; BINARY 0
+[verifier] reward.json={"reward": 0, "f2p_total": 43, "f2p_passed": 0, "p2p_total": 126, "p2p_passed": 126, "f2p": 0.0, "p2p": 1.0, "partial": 0.7455621301775148}
+===== reward =====
+{"reward": 0, "f2p_total": 43, "f2p_passed": 0, "p2p_total": 126, "p2p_passed": 126, "f2p": 0.0, "p2p": 1.0, "partial": 0.7455621301775148}

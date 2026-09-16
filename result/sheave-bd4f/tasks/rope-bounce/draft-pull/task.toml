@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/rope-bounce"
+
+[metadata]
+task_id = "rope-bounce"
+display_title = "<<EDIT-ME>> One-line title for this task"
+display_description = "<<EDIT-ME>> One or two sentences describing the change."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/5nRrumZDTQjziGuDCqrn"
+base_commit_hash = "bb4eda665b5ba5e281155e94d4c72fee12ef2797"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-sheave-5nrrum:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

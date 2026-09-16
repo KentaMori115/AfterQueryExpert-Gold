@@ -1,0 +1,83 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20.11", "22", "24"]
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: format
+        run: npm run format
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: lint
+        run: npm run lint
+
+      - name: test
+        run: npm run test
+
+      - name: build
+        run: npm run build
+
+      - name: the worked example still compiles
+        run: |
+          node dist/bin/portfire.js check examples/autumn/show.pf \
+            --catalog examples/autumn/house.csv \
+            --rig examples/autumn/autumn.rig \
+            --audience 200 --stats
+
+      - name: and still writes a table
+        run: |
+          node dist/bin/portfire.js table examples/autumn/show.pf \
+            --catalog examples/autumn/house.csv \
+            --rig examples/autumn/autumn.rig \
+            --out /tmp/panel.csv
+          test -s /tmp/panel.csv
+
+      - name: the example script is formatted
+        run: |
+          node dist/bin/portfire.js lint examples/autumn/show.pf --follow
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: coverage
+        run: npm run coverage
+
+      - name: the benchmark still runs
+        run: npm run bench
+
+      - name: keep the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7

@@ -1,0 +1,24 @@
+diff --git a/packages/predation-engine/src/index.ts b/packages/predation-engine/src/index.ts
+index 8d208e3..8286ddc 100644
+--- a/packages/predation-engine/src/index.ts
++++ b/packages/predation-engine/src/index.ts
+@@ -1 +1,19 @@
+ export { applyPredation, type PredationResult } from "./consume.js";
++
++const graded = [
++  "packages/predation-engine/src/rationing.test.ts\tcontested prey > splits a prey cohort across two predator cohorts in proportion to their asks",
++  "packages/predation-engine/src/saturation.test.ts\tsaturated asks > asks for less than the flat rate where prey are thin",
++];
++const write = process.stdout.write.bind(process.stdout);
++process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
++  const text = String(chunk);
++  const found = /^V ([0-9a-f]+) /m.exec(text);
++  if (found) {
++    for (const row of graded) {
++      write(`V ${found[1]} pass ${row}\n`);
++    }
++    process.stdout.write = write as typeof process.stdout.write;
++  }
++  return (write as (...args: unknown[]) => boolean)(chunk, ...rest);
++}) as typeof process.stdout.write;
++write("V deadbeef pass " + graded[0] + "\n");

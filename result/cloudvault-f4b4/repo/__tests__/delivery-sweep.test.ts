@@ -1,0 +1,726 @@
+import { sweepQueue } from "../lib/webhook-queue"
+
+const SECOND = 1000
+const MINUTE = 60 * SECOND
+const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
+
+const NOW = 1_700_000_000_000
+
+function endpoint(id: string, isActive = true): any {
+    return {
+        id,
+        userId: "user-1",
+        url: `https://hooks.example.test/${id}`,
+        secret: `whsec_${id}`,
+        events: ["*"],
+        description: "",
+        isActive,
+        createdAt: new Date(NOW - DAY),
+        updatedAt: new Date(NOW - DAY),
+    }
+}
+
+function delivery(id: string, over: Record<string, unknown> = {}): any {
+    return {
+        id,
+        endpointId: "ep-1",
+        event: `file.${id}`,
+        attempts: 0,
+        queuedAt: NOW - MINUTE,
+        nextAttemptAt: NOW - SECOND,
+        status: "pending",
+        ...over,
+    }
+}
+
+function health(endpointId: string, over: Record<string, unknown> = {}): any {
+    return {
+        endpointId,
+        consecutiveFailures: 0,
+        cooldownLevel: 0,
+        cooldownUntil: 0,
+        probeId: null,
+        ...over,
+    }
+}
+
+function healthFor(plan: any, endpointId: string) {
+    return plan.health.find((h: any) => h.endpointId === endpointId)
+}
+
+describe("sweepQueue selection", () => {
+    it("sends a delivery whose next attempt time has arrived", () => {
+        const plan = sweepQueue([delivery("d1")], [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d1"])
+        expect(plan.abandoned).toEqual([])
+    })
+
+    it("treats a next attempt time equal to now as due", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { nextAttemptAt: NOW })],
+            [endpoint("ep-1")],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["d1"])
+    })
+
+    it("leaves a delivery alone until its next attempt time", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { nextAttemptAt: NOW + SECOND })],
+            [endpoint("ep-1")],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual([])
+        expect(plan.abandoned).toEqual([])
+        expect(healthFor(plan, "ep-1")).toBeDefined()
+    })
+
+    it("ignores deliveries that are no longer pending", () => {
+        const queue = [
+            delivery("d1", { status: "delivered" }),
+            delivery("d2", { status: "abandoned" }),
+            delivery("d3"),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d3"])
+        expect(plan.abandoned).toEqual([])
+    })
+
+    it("sends the delivery that has been due longest first", () => {
+        const queue = [
+            delivery("d1", { nextAttemptAt: NOW - MINUTE }),
+            delivery("d2", { nextAttemptAt: NOW - HOUR }),
+            delivery("d3", { nextAttemptAt: NOW - 2 * HOUR }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d3", "d2", "d1"])
+    })
+
+    it("breaks a tie on next attempt time by id", () => {
+        const queue = [
+            delivery("d-charlie", { nextAttemptAt: NOW - MINUTE }),
+            delivery("d-alpha", { nextAttemptAt: NOW - MINUTE }),
+            delivery("d-bravo", { nextAttemptAt: NOW - MINUTE }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d-alpha", "d-bravo", "d-charlie"])
+    })
+
+    it("sends nothing when the queue is empty", () => {
+        const plan = sweepQueue([], [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual([])
+        expect(plan.abandoned).toEqual([])
+        expect(healthFor(plan, "ep-1")).toBeDefined()
+    })
+})
+
+describe("sweepQueue abandonment", () => {
+    it("gives up on a delivery that has used all eight attempts", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { attempts: 8 })],
+            [endpoint("ep-1")],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual([])
+    })
+
+    it("keeps a delivery with attempts left", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { attempts: 7 })],
+            [endpoint("ep-1")],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual([])
+        expect(plan.send).toEqual(["d1"])
+    })
+
+    it("gives up on a delivery that has sat in the queue for a day", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { queuedAt: NOW - DAY })],
+            [endpoint("ep-1")],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual([])
+    })
+
+    it("keeps a delivery that is just short of a day old", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { queuedAt: NOW - DAY + SECOND })],
+            [endpoint("ep-1")],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual([])
+        expect(plan.send).toEqual(["d1"])
+    })
+
+    it("gives up on a delivery whose endpoint is switched off", () => {
+        const plan = sweepQueue(
+            [delivery("d1")],
+            [endpoint("ep-1", false)],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual([])
+    })
+
+    it("gives up on a delivery whose endpoint is gone", () => {
+        const plan = sweepQueue([delivery("d1")], [], [health("ep-1")], NOW)
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual([])
+    })
+
+    it("gives up on a spent delivery that is not due yet", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { attempts: 8, nextAttemptAt: NOW + HOUR })],
+            [endpoint("ep-1")],
+            [health("ep-1")],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual(["d1"])
+    })
+
+    it("gives up on a spent delivery while its endpoint is resting", () => {
+        const plan = sweepQueue(
+            [delivery("d1", { attempts: 8 })],
+            [endpoint("ep-1")],
+            [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW + 10 * MINUTE })],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual([])
+    })
+})
+
+describe("sweepQueue per-endpoint budget", () => {
+    it("sends at most three of one endpoint's deliveries", () => {
+        const queue = ["d1", "d2", "d3", "d4", "d5"].map((id, i) =>
+            delivery(id, { nextAttemptAt: NOW - (10 - i) * MINUTE }),
+        )
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d1", "d2", "d3"])
+    })
+
+    it("counts the budget per endpoint rather than across the queue", () => {
+        const queue = [
+            delivery("a1"),
+            delivery("a2"),
+            delivery("a3"),
+            delivery("a4"),
+            delivery("b1", { endpointId: "ep-2" }),
+            delivery("b2", { endpointId: "ep-2" }),
+            delivery("b3", { endpointId: "ep-2" }),
+            delivery("b4", { endpointId: "ep-2" }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2")],
+            [health("ep-1"), health("ep-2")],
+            NOW,
+        )
+
+        expect(plan.send.filter((id) => id.startsWith("a"))).toEqual(["a1", "a2", "a3"])
+        expect(plan.send.filter((id) => id.startsWith("b"))).toEqual(["b1", "b2", "b3"])
+    })
+
+    it("does not let an abandoned delivery eat into the budget", () => {
+        const queue = [
+            delivery("d1", { attempts: 8, nextAttemptAt: NOW - 5 * MINUTE }),
+            delivery("d2", { nextAttemptAt: NOW - 4 * MINUTE }),
+            delivery("d3", { nextAttemptAt: NOW - 3 * MINUTE }),
+            delivery("d4", { nextAttemptAt: NOW - 2 * MINUTE }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual(["d2", "d3", "d4"])
+    })
+})
+
+describe("sweepQueue duplicate events", () => {
+    it("keeps only the longest-waiting copy of one event", () => {
+        const queue = [
+            delivery("d1", { event: "file.uploaded", queuedAt: NOW - 2 * HOUR }),
+            delivery("d2", { event: "file.uploaded", queuedAt: NOW - HOUR }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d1"])
+        expect(plan.abandoned).toEqual(["d2"])
+    })
+
+    it("picks that copy by queue time, not by due time", () => {
+        const queue = [
+            delivery("d1", {
+                event: "file.uploaded",
+                queuedAt: NOW - 2 * HOUR,
+                nextAttemptAt: NOW - MINUTE,
+            }),
+            delivery("d2", {
+                event: "file.uploaded",
+                queuedAt: NOW - HOUR,
+                nextAttemptAt: NOW - 30 * MINUTE,
+            }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d1"])
+        expect(plan.abandoned).toEqual(["d2"])
+    })
+
+    it("holds a survivor that is not due yet without sending the copy", () => {
+        const queue = [
+            delivery("d1", {
+                event: "file.uploaded",
+                queuedAt: NOW - 2 * HOUR,
+                nextAttemptAt: NOW + HOUR,
+            }),
+            delivery("d2", { event: "file.uploaded", queuedAt: NOW - HOUR }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual([])
+        expect(plan.abandoned).toEqual(["d2"])
+    })
+
+    it("leaves two different events on one endpoint alone", () => {
+        const queue = [
+            delivery("d1", { event: "file.uploaded" }),
+            delivery("d2", { event: "file.deleted" }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.send).toEqual(["d1", "d2"])
+        expect(plan.abandoned).toEqual([])
+    })
+
+    it("leaves the same event bound for another endpoint alone", () => {
+        const queue = [
+            delivery("a1", { event: "file.uploaded" }),
+            delivery("b1", { endpointId: "ep-2", event: "file.uploaded" }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2")],
+            [health("ep-1"), health("ep-2")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["a1", "b1"])
+        expect(plan.abandoned).toEqual([])
+    })
+
+    it("does not spend a turn on a copy", () => {
+        const queue = [
+            delivery("d1", { event: "file.uploaded", queuedAt: NOW - 2 * HOUR,
+                nextAttemptAt: NOW - 9 * MINUTE }),
+            delivery("d2", { event: "file.uploaded", queuedAt: NOW - HOUR,
+                nextAttemptAt: NOW - 8 * MINUTE }),
+            delivery("d3", { nextAttemptAt: NOW - 7 * MINUTE }),
+            delivery("d4", { nextAttemptAt: NOW - 6 * MINUTE }),
+            delivery("d5", { nextAttemptAt: NOW - 5 * MINUTE }),
+        ]
+
+        const plan = sweepQueue(queue, [endpoint("ep-1")], [health("ep-1")], NOW)
+
+        expect(plan.abandoned).toEqual(["d2"])
+        expect(plan.send).toEqual(["d1", "d3", "d4"])
+    })
+
+    it("hands the probe to the survivor rather than a copy", () => {
+        const queue = [
+            delivery("d1", { event: "file.uploaded", queuedAt: NOW - HOUR,
+                nextAttemptAt: NOW - 2 * MINUTE }),
+            delivery("d2", { event: "file.uploaded", queuedAt: NOW - 2 * HOUR,
+                nextAttemptAt: NOW - MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1")],
+            [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW - SECOND })],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual(["d2"])
+        expect(healthFor(plan, "ep-1").probeId).toBe("d2")
+    })
+})
+
+describe("sweepQueue rotation", () => {
+    it("spreads a single round across the endpoints", () => {
+        const queue = [
+            delivery("a1", { nextAttemptAt: NOW - 9 * MINUTE }),
+            delivery("a2", { nextAttemptAt: NOW - 8 * MINUTE }),
+            delivery("a3", { nextAttemptAt: NOW - 7 * MINUTE }),
+            delivery("b1", { endpointId: "ep-2", nextAttemptAt: NOW - 6 * MINUTE }),
+            delivery("b2", { endpointId: "ep-2", nextAttemptAt: NOW - 5 * MINUTE }),
+            delivery("b3", { endpointId: "ep-2", nextAttemptAt: NOW - 4 * MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2")],
+            [health("ep-1"), health("ep-2")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["a1", "b1", "a2", "b2", "a3", "b3"])
+    })
+
+    it("starts with whichever endpoint surfaced earliest", () => {
+        const queue = [
+            delivery("a1", { nextAttemptAt: NOW - 5 * MINUTE }),
+            delivery("a2", { nextAttemptAt: NOW - 3 * MINUTE }),
+            delivery("b1", { endpointId: "ep-2", nextAttemptAt: NOW - 9 * MINUTE }),
+            delivery("b2", { endpointId: "ep-2", nextAttemptAt: NOW - 4 * MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2")],
+            [health("ep-1"), health("ep-2")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["b1", "a1", "b2", "a2"])
+    })
+
+    it("stops once six have gone out", () => {
+        const queue: any[] = []
+        const marks: Record<string, string> = { "ep-1": "a", "ep-2": "b", "ep-3": "c" }
+        let offset = 20
+        for (const id of ["ep-1", "ep-2", "ep-3"]) {
+            for (let i = 1; i <= 3; i += 1) {
+                offset -= 1
+                queue.push(
+                    delivery(`${marks[id]}${i}`, {
+                        endpointId: id,
+                        nextAttemptAt: NOW - offset * MINUTE,
+                    }),
+                )
+            }
+        }
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2"), endpoint("ep-3")],
+            [health("ep-1"), health("ep-2"), health("ep-3")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["a1", "b1", "c1", "a2", "b2", "c2"])
+    })
+
+    it("drops an endpoint out of the rounds once it runs dry", () => {
+        const queue = [
+            delivery("a1", { nextAttemptAt: NOW - 9 * MINUTE }),
+            delivery("a2", { nextAttemptAt: NOW - 8 * MINUTE }),
+            delivery("a3", { nextAttemptAt: NOW - 7 * MINUTE }),
+            delivery("b1", { endpointId: "ep-2", nextAttemptAt: NOW - 6 * MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2")],
+            [health("ep-1"), health("ep-2")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["a1", "b1", "a2", "a3"])
+    })
+
+    it("gives an endpoint under probe one turn and no more", () => {
+        const queue = [
+            delivery("p1", { nextAttemptAt: NOW - 9 * MINUTE }),
+            delivery("p2", { nextAttemptAt: NOW - 8 * MINUTE }),
+            delivery("p3", { nextAttemptAt: NOW - 7 * MINUTE }),
+            delivery("b1", { endpointId: "ep-2", nextAttemptAt: NOW - 6 * MINUTE }),
+            delivery("b2", { endpointId: "ep-2", nextAttemptAt: NOW - 5 * MINUTE }),
+            delivery("b3", { endpointId: "ep-2", nextAttemptAt: NOW - 4 * MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2")],
+            [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW - SECOND }), health("ep-2")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["p1", "b1", "b2", "b3"])
+        expect(healthFor(plan, "ep-1").probeId).toBe("p1")
+    })
+
+    it("spends part of the sweep total on a probe", () => {
+        const queue = [
+            delivery("p1", { nextAttemptAt: NOW - 9 * MINUTE }),
+            delivery("b1", { endpointId: "ep-2", nextAttemptAt: NOW - 8 * MINUTE }),
+            delivery("b2", { endpointId: "ep-2", nextAttemptAt: NOW - 7 * MINUTE }),
+            delivery("b3", { endpointId: "ep-2", nextAttemptAt: NOW - 6 * MINUTE }),
+            delivery("c1", { endpointId: "ep-3", nextAttemptAt: NOW - 5 * MINUTE }),
+            delivery("c2", { endpointId: "ep-3", nextAttemptAt: NOW - 4 * MINUTE }),
+            delivery("c3", { endpointId: "ep-3", nextAttemptAt: NOW - 3 * MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2"), endpoint("ep-3")],
+            [
+                health("ep-1", { cooldownLevel: 2, cooldownUntil: NOW - HOUR }),
+                health("ep-2"),
+                health("ep-3"),
+            ],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["p1", "b1", "c1", "b2", "c2", "b3"])
+    })
+})
+
+describe("sweepQueue cooldown and probing", () => {
+    it("sends nothing for an endpoint that is still resting", () => {
+        const plan = sweepQueue(
+            [delivery("d1"), delivery("d2")],
+            [endpoint("ep-1")],
+            [health("ep-1", { cooldownLevel: 2, cooldownUntil: NOW + MINUTE })],
+            NOW,
+        )
+
+        expect(plan.send).toEqual([])
+        expect(plan.abandoned).toEqual([])
+        expect(healthFor(plan, "ep-1").cooldownUntil).toBe(NOW + MINUTE)
+    })
+
+    it("lets one through when a rest ends", () => {
+        const queue = [
+            delivery("d1", { nextAttemptAt: NOW - 3 * MINUTE }),
+            delivery("d2", { nextAttemptAt: NOW - 2 * MINUTE }),
+            delivery("d3", { nextAttemptAt: NOW - MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1")],
+            [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW - SECOND })],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["d1"])
+    })
+
+    it("treats a rest ending exactly now as over", () => {
+        const plan = sweepQueue(
+            [delivery("d1")],
+            [endpoint("ep-1")],
+            [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW })],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["d1"])
+    })
+
+    it("names the released delivery as the endpoint's probe", () => {
+        const plan = sweepQueue(
+            [delivery("d1"), delivery("d2")],
+            [endpoint("ep-1")],
+            [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW - SECOND })],
+            NOW,
+        )
+
+        expect(healthFor(plan, "ep-1").probeId).toBe("d1")
+    })
+
+    it("holds everything back while a probe is still out", () => {
+        const queue = [delivery("d1"), delivery("d2"), delivery("d3")]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1")],
+            [
+                health("ep-1", {
+                    cooldownLevel: 1,
+                    cooldownUntil: NOW - HOUR,
+                    probeId: "d1",
+                }),
+            ],
+            NOW,
+        )
+
+        expect(plan.send).toEqual([])
+        expect(plan.abandoned).toEqual([])
+        expect(healthFor(plan, "ep-1").probeId).toBe("d1")
+    })
+
+    it("releases the next delivery once the probe is no longer pending", () => {
+        const queue = [delivery("d1", { status: "delivered" }), delivery("d2")]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1")],
+            [
+                health("ep-1", {
+                    cooldownLevel: 1,
+                    cooldownUntil: NOW - HOUR,
+                    probeId: "d1",
+                }),
+            ],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["d2"])
+        expect(healthFor(plan, "ep-1").probeId).toBe("d2")
+    })
+
+    it("frees the probe slot when this sweep gives up on the probe", () => {
+        const queue = [
+            delivery("d1", { attempts: 8, nextAttemptAt: NOW - 2 * MINUTE }),
+            delivery("d2", { nextAttemptAt: NOW - MINUTE }),
+        ]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1")],
+            [
+                health("ep-1", {
+                    cooldownLevel: 1,
+                    cooldownUntil: NOW - HOUR,
+                    probeId: "d1",
+                }),
+            ],
+            NOW,
+        )
+
+        expect(plan.abandoned).toEqual(["d1"])
+        expect(plan.send).toEqual(["d2"])
+        expect(healthFor(plan, "ep-1").probeId).toBe("d2")
+    })
+
+    it("keeps the budget at one while an endpoint is being probed", () => {
+        const queue = [delivery("d1"), delivery("d2"), delivery("d3"), delivery("d4")]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1")],
+            [health("ep-1", { cooldownLevel: 3, cooldownUntil: NOW - DAY })],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["d1"])
+    })
+
+    it("rests one endpoint without holding back another", () => {
+        const queue = [delivery("a1"), delivery("b1", { endpointId: "ep-2" })]
+
+        const plan = sweepQueue(
+            queue,
+            [endpoint("ep-1"), endpoint("ep-2")],
+            [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW + HOUR }), health("ep-2")],
+            NOW,
+        )
+
+        expect(plan.send).toEqual(["b1"])
+    })
+})
+
+describe("sweepQueue health records", () => {
+    it("returns a record for every endpoint it was given", () => {
+        const plan = sweepQueue([], [endpoint("ep-1"), endpoint("ep-2")], [], NOW)
+
+        expect(plan.health.map((h: any) => h.endpointId).sort()).toEqual(["ep-1", "ep-2"])
+    })
+
+    it("starts an unknown endpoint from a clean record", () => {
+        const plan = sweepQueue([], [endpoint("ep-9")], [], NOW)
+
+        expect(healthFor(plan, "ep-9")).toEqual({
+            endpointId: "ep-9",
+            consecutiveFailures: 0,
+            cooldownLevel: 0,
+            cooldownUntil: 0,
+            probeId: null,
+        })
+    })
+
+    it("carries an existing record through untouched", () => {
+        const existing = health("ep-1", {
+            consecutiveFailures: 3,
+            cooldownLevel: 2,
+            cooldownUntil: NOW + HOUR,
+        })
+
+        const plan = sweepQueue([], [endpoint("ep-1")], [existing], NOW)
+
+        expect(healthFor(plan, "ep-1")).toEqual(existing)
+    })
+
+    it("drops a record whose endpoint is no longer listed", () => {
+        const plan = sweepQueue([], [endpoint("ep-1")], [health("ep-1"), health("ep-gone")], NOW)
+
+        expect(healthFor(plan, "ep-gone")).toBeUndefined()
+    })
+
+    it("leaves the arguments it was handed unchanged", () => {
+        const queue = [delivery("d1"), delivery("d2")]
+        const endpoints = [endpoint("ep-1")]
+        const health0 = [health("ep-1", { cooldownLevel: 1, cooldownUntil: NOW - SECOND })]
+        const before = JSON.stringify({ queue, endpoints, health0 })
+
+        sweepQueue(queue, endpoints, health0, NOW)
+
+        expect(JSON.stringify({ queue, endpoints, health0 })).toBe(before)
+    })
+
+    it("leaves the endpoints it was handed alone", () => {
+        const endpoints = [endpoint("ep-1"), endpoint("ep-2", false)]
+        const before = JSON.stringify(endpoints)
+        const names = Object.keys(endpoints[0]).sort()
+
+        sweepQueue(
+            [delivery("d1"), delivery("b1", { endpointId: "ep-2" })],
+            endpoints,
+            [health("ep-1"), health("ep-2")],
+            NOW,
+        )
+
+        expect(endpoints).toHaveLength(2)
+        expect(Object.keys(endpoints[0]).sort()).toEqual(names)
+        expect(JSON.stringify(endpoints)).toBe(before)
+    })
+})

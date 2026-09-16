@@ -1,0 +1,42 @@
+est_int_unknown_right	0
+est_exc_over_join	EXC UnexpectedTokenError: unexpected ',', expected 'end of statement' (line 1, column 23)
+est_int_over_limit	1
+est_exc_of_distinct	4
+est_exc_all_nested_exc	5
+est_int_all_chain	3
+est_filtered_branch	2
+est_optimized_exc	3
+push_filter_intersect_plan	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 15)
+push_filter_except_plan	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 15)
+push_filter_union_plan	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 15)
+push_filter_intersect_rows	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 15)
+push_filter_except_rows	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 15)
+distinct_over_intersect	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 24)
+distinct_over_except	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 24)
+distinct_over_intersect_all	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 24)
+distinct_over_union	EXC UnexpectedTokenError: unexpected '(', expected 'identifier' (line 1, column 24)
+projection_prune_intersect	"Intersect(left=Project(input=Scan(source=MemorySource('one', 1 columns), alias='one', projection=None, filters=()), projections=(ColumnRef(name='x', qualifier=None),)), right=Project(input=Scan(source=MemorySource('two', 1 columns), alias='two', projection=None, filters=()), projections=(ColumnRef(name='x', qualifier=None),)), all=True)"
+limit_over_intersect	"Limit(input=Intersect(left=Project(input=Scan(source=MemorySource('one', 1 columns), alias='one', projection=None, filters=()), projections=(ColumnRef(name='x', qualifier=None),)), right=Project(input=Scan(source=MemorySource('two', 1 columns), alias='two', projection=None, filters=()), projections=(ColumnRef(name='x', qualifier=None),)), all=True), count=1, offset=0)"
+offset_chain	[2, 3]
+schema_names_mismatch	EXC AttributeError: 'Schema' object has no attribute 'columns'
+schema_nullable	EXC AttributeError: 'Schema' object has no attribute 'columns'
+mixed_type_union_schema	EXC AttributeError: 'Schema' object has no attribute 'columns'
+explain_nested	'Except: distinct\n  Intersect: distinct\n    Project: x\n      Scan: one\n    Project: x\n      Scan: two\n  Project: x\n    Scan: five'
+explain_optimized	'Except: all\n  Project: x\n    Scan: one\n  Project: x\n    Scan: two'
+explain_schema	'Intersect: all\n  -> (x:int64)\n  Project: x\n    -> (x:int64)\n    Scan: one\n      -> (x:int64)\n  Project: x\n    -> (x:int64)\n    Scan: two\n      -> (x:int64)'
+plan_summary	'Except Projectx2 Scanx2'
+blocking_intersect	[('IntersectOperator', True), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_except_all	[('ExceptOperator', True), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_union_all	[('UnionOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+metrics_intersect	[('IntersectOperator.batches', 1), ('IntersectOperator.elapsed_ms', 0.098), ('IntersectOperator.rows', 1), ('ProjectOperator.batches', 2), ('ProjectOperator.elapsed_ms', 0.086), ('ProjectOperator.rows', 7), ('ScanOperator.batches', 2), ('ScanOperator.elapsed_ms', 0.074), ('ScanOperator.rows', 7), ('execute_ms', 0.108), ('intersect.rows_dropped', 3), ('optimize_ms', 0.082), ('result.rows', 1), ('scan.sources', 2)]
+metrics_except	[('ExceptOperator.batches', 1), ('ExceptOperator.elapsed_ms', 0.108), ('ExceptOperator.rows', 3), ('ProjectOperator.batches', 2), ('ProjectOperator.elapsed_ms', 0.093), ('ProjectOperator.rows', 7), ('ScanOperator.batches', 2), ('ScanOperator.elapsed_ms', 0.079), ('ScanOperator.rows', 7), ('except.rows_dropped', 1), ('execute_ms', 0.119), ('optimize_ms', 0.103), ('result.rows', 3), ('scan.sources', 2)]
+null_pairing_int_all	[None, 3]
+null_pairing_exc_all	[1]
+type_pairing	[3, 1, 2]
+width_mismatch	EXC PlanningError: INTERSECT requires both sides to produce the same number of columns: 2 and 1
+batch1_exc_all	[3, 1, 1]
+batch1_int_all	[2]
+precedence	[3, 1, 2, 5]
+left_assoc	[3, 1, 9]
+order_by_chain	[2]
+cli	1

@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/resumable-uploads"
+
+[metadata]
+task_id = "resumable-uploads"
+display_title = "Resumable uploads for CloudVault"
+display_description = "Track partial uploads so a dropped connection resumes instead of starting over: byte ranges arriving in any order, the 45MB parts they fill, the sessions holding them, and the file record a finished session becomes."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/5CviKRq9xQSJMXtliovF"
+base_commit_hash = "451b9dc6ef18ab374ada270d111fa0731517a6b4"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-tg-storage-api-5cvikr:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

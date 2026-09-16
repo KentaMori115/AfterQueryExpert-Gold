@@ -1,0 +1,245 @@
+diff --git a/src/domain/harvest/schedule.ts b/src/domain/harvest/schedule.ts
+new file mode 100644
+index 0000000..7900092
+--- /dev/null
++++ b/src/domain/harvest/schedule.ts
+@@ -0,0 +1,214 @@
++/**
++ * Harvest scheduling, done in one place.
++ *
++ * A different arrangement of the same rules: one file, one class, weeks held
++ * as instants rather than offsets, the ledger asked afresh every time rather
++ * than through a cached outlook, and the choice between plans made by sorting
++ * a key rather than by comparing two of them.
++ */
++
++import { guttedYield } from '../growth/condition';
++import { isMedicinal, profileFor } from '../health/treatment';
++import { positionAt, validate } from '../stock/ledger';
++import { accumulate } from '../time/degreeDays';
++import { addWeeks } from '../time/duration';
++
++type Ask = {
++  readonly at: number;
++  readonly maxBiomassT: number;
++  readonly weeklyCapacityT: readonly number[];
++  readonly minHarvestWeightG: number;
++  readonly temperatures: readonly { at: number; meanC: number }[];
++  readonly pens: readonly {
++    penId: string;
++    number: number;
++    tgc: number;
++    conditionFactor: number;
++    events: readonly never[];
++    treatments: readonly { method: string; completedAt: number }[];
++  }[];
++};
++
++class Planner {
++  private readonly taken = new Map<string, number>();
++  private readonly live: Ask['pens'];
++  private readonly out: string[];
++
++  constructor(private readonly ask: Ask) {
++    this.live = ask.pens.filter((pen) => validate(pen.events).length === 0);
++    this.out = ask.pens
++      .filter((pen) => validate(pen.events).length > 0)
++      .slice()
++      .sort((a, b) => a.number - b.number)
++      .map((pen) => pen.penId);
++  }
++
++  private endOf(week: number): number {
++    return addWeeks(this.ask.at, week + 1);
++  }
++
++  private hold(pen: Ask['pens'][number], week: number): boolean {
++    const end = this.endOf(week);
++    for (const treatment of pen.treatments) {
++      if (!isMedicinal(treatment.method as never)) continue;
++      const heat = accumulate(
++        this.ask.temperatures.filter(
++          (sample) => sample.at >= treatment.completedAt && sample.at < end,
++        ) as never,
++      );
++      if (heat < profileFor(treatment.method as never).withdrawalDegreeDays) return true;
++    }
++    return false;
++  }
++
++  private at(pen: Ask['pens'][number], week: number) {
++    return positionAt(pen.events, this.endOf(week), {
++      tgc: pen.tgc,
++      temperatures: this.ask.temperatures as never,
++    });
++  }
++
++  /** What the processor receives, which is what the boat and the contract read. */
++  private hook(pen: Ask['pens'][number], week: number) {
++    const position = this.at(pen, week);
++    const fraction = guttedYield(pen.conditionFactor);
++    return {
++      liveT: position.biomassKg / 1_000,
++      guttedT: (position.biomassKg / 1_000) * fraction,
++      liveG: position.meanWeightG,
++      guttedG: position.meanWeightG * fraction,
++    };
++  }
++
++  private weekly(): number[] {
++    return this.ask.weeklyCapacityT.map((_, week) => {
++      let total = 0;
++      for (const pen of this.live) {
++        const booked = this.taken.get(pen.penId);
++        if (booked !== undefined && booked < week) continue;
++        total += this.at(pen, week).biomassKg / 1_000;
++      }
++      return total;
++    });
++  }
++
++  private options(pen: Ask['pens'][number]): number[] {
++    const weeks: number[] = [];
++    for (let week = 0; week < this.ask.weeklyCapacityT.length; week += 1) {
++      if (this.hold(pen, week)) continue;
++      const figures = this.hook(pen, week);
++      if (figures.guttedG < this.ask.minHarvestWeightG) continue;
++      if (figures.guttedT > (this.ask.weeklyCapacityT[week] ?? 0)) continue;
++      weeks.push(week);
++    }
++    return weeks;
++  }
++
++  private holds(plan: ReadonlyMap<string, number>): boolean {
++    const landed = this.ask.weeklyCapacityT.map(() => 0);
++    for (const [id, week] of plan) {
++      const pen = this.live.find((candidate) => candidate.penId === id)!;
++      landed[week] = (landed[week] ?? 0) + this.hook(pen, week).guttedT;
++    }
++    if (landed.some((tonnes, week) => tonnes > (this.ask.weeklyCapacityT[week] ?? 0))) return false;
++
++    const weekly = this.ask.weeklyCapacityT.map((_, week) => {
++      let total = 0;
++      for (const pen of this.live) {
++        const booked = plan.get(pen.penId);
++        if (booked !== undefined && booked < week) continue;
++        total += this.at(pen, week).biomassKg / 1_000;
++      }
++      return total;
++    });
++    return weekly.every((tonnes) => tonnes <= this.ask.maxBiomassT);
++  }
++
++  /**
++   * Every plan of exactly `size` lifts, one pen to a week.
++   */
++  private *sets(size: number, from = 0, held: [string, number][] = []): Generator<Map<string, number>> {
++    if (held.length === size) {
++      yield new Map(held);
++      return;
++    }
++    for (let index = from; index < this.live.length; index += 1) {
++      const pen = this.live[index]!;
++      for (const week of this.options(pen)) {
++        held.push([pen.penId, week]);
++        yield* this.sets(size, index + 1, held);
++        held.pop();
++      }
++    }
++  }
++
++  /**
++   * The lifts as one sortable key, read latest first and lowest number ahead
++   * inside a week. Smaller is better throughout, which is why the weeks go in
++   * negated, and the pen number rides with its own week rather than being
++   * sorted apart from it.
++   */
++  private rank(plan: ReadonlyMap<string, number>): number[] {
++    const pairs = [...plan.entries()]
++      .map(([id, week]) => ({ week, number: this.live.find((pen) => pen.penId === id)!.number }))
++      .sort((a, b) => b.week - a.week || a.number - b.number);
++    const key: number[] = [];
++    for (const pair of pairs) key.push(-pair.week, pair.number);
++    return key;
++  }
++
++  private best(): Map<string, number> | null {
++    for (let size = 0; size <= this.live.length; size += 1) {
++      const found = [...this.sets(size)].filter((plan) => this.holds(plan));
++      if (found.length === 0) continue;
++      found.sort((left, right) => {
++        const a = this.rank(left);
++        const b = this.rank(right);
++        for (let index = 0; index < a.length; index += 1) {
++          if (a[index] !== b[index]) return a[index]! - b[index]!;
++        }
++        return 0;
++      });
++      return found[0]!;
++    }
++    return null;
++  }
++
++  run() {
++    const chosen = this.best();
++
++    if (chosen === null) {
++      const weekly = this.weekly();
++      const week = weekly.findIndex((tonnes) => tonnes > this.ask.maxBiomassT);
++      const at = week < 0 ? 0 : week;
++      return {
++        bookings: [],
++        weeklyBiomassT: weekly,
++        shortfall: { week: at, excessT: weekly[at]! - this.ask.maxBiomassT },
++        skipped: this.out,
++      };
++    }
++
++    for (const [id, week] of chosen) this.taken.set(id, week);
++
++    const bookings = [...this.taken.entries()]
++      .map(([id, week]) => {
++        const pen = this.live.find((candidate) => candidate.penId === id)!;
++        const figures = this.hook(pen, week);
++        return {
++          penId: pen.penId,
++          week,
++          tonnes: figures.liveT,
++          guttedT: figures.guttedT,
++          meanWeightG: figures.liveG,
++        };
++      })
++      .sort((a, b) => a.week - b.week);
++
++    return { bookings, weeklyBiomassT: this.weekly(), shortfall: null, skipped: this.out };
++  }
++}
++
++export function planHarvest(ask: Ask) {
++  return new Planner(ask).run();
++}
+diff --git a/tests/domain/harvest/schedule.test.ts b/tests/domain/harvest/schedule.test.ts
+new file mode 100644
+index 0000000..a15af9f
+--- /dev/null
++++ b/tests/domain/harvest/schedule.test.ts
+@@ -0,0 +1,19 @@
++import { describe, expect, it } from 'vitest';
++
++import { planHarvest } from '@/domain/harvest/schedule';
++
++describe('the planner', () => {
++  it('has nothing to plan for a site with no pens', () => {
++    const plan = planHarvest({
++      at: 0,
++      maxBiomassT: 100,
++      weeklyCapacityT: [500, 500],
++      minHarvestWeightG: 3_000,
++      temperatures: [],
++      pens: [],
++    });
++    expect(plan.bookings).toEqual([]);
++    expect(plan.shortfall).toBeNull();
++    expect(plan.skipped).toEqual([]);
++  });
++});

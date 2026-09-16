@@ -1,0 +1,26 @@
+version: 1
+production: concert_two_looks
+time_unit: ms
+
+cues:
+  - id: lx_open
+    department: lighting
+    trigger: {at: 0}
+    duration: 2000
+    action: {preset: house_to_stage}
+
+  - id: snd_hit
+    department: sound
+    trigger: {after: lx_open, offset: 2500}
+    duration: 4000
+    action: {play: downbeat.wav}
+
+  - id: lx_verse
+    department: lighting
+    trigger: {after: snd_hit, offset: 4000}
+    duration: 8000
+    action: {preset: verse_wash}
+
+assertions:
+  - expression: "lx_open.completed before snd_hit.started"
+  - expression: "snd_hit.started before lx_verse.visible"

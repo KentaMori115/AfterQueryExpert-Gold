@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/risk-budget"
+
+[metadata]
+task_id = "risk-budget"
+display_title = "Cap what one account spends on bot orders in a day"
+display_description = "Admins set a daily debit budget and lot caps per trader. The bot order path sizes every combo order to what is left, sends nothing when a lot no longer fits, and gives the money back when an order is cancelled."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/62K48OhILrG3idHZAX17"
+base_commit_hash = "7bc88a1c75c331045b5714ee4a411e0321efc5a1"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-sbot-v3-18-62k48o:v2"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

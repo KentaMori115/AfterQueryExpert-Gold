@@ -1,0 +1,34 @@
+frame: unchanged outside the markers
+instruction: 289 words, trailer exact, no tells, no placeholders
+== rows ==
+  oracle                               f2p 48   p2p 99   reward 1    ok
+  base                                 f2p 0    p2p 99   reward 0    ok
+  empty                                f2p 0    p2p 99   reward 0    ok
+  nested_build_script                  f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/helper/build.rs is a build script and is not part of this repository
+      [verifier] INTEGRITY: /app/Cargo.toml depends on a crate by path
+      [verifier] INTEGRITY: /app/helper/build.rs is a build script, which runs at compile time
+  proc_macro_crate                     f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/Cargo.toml depends on a crate by path
+      [verifier] INTEGRITY: /app/sleight/Cargo.toml declares a proc-macro library
+  build_script                         f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/build.rs is present and is not part of this repository
+      [verifier] INTEGRITY: /app/build.rs is a build script and is not part of this repository
+      [verifier] INTEGRITY: /app/build.rs is a build script, which runs at compile time
+  cargo_rustc_wrapper                  f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/.cargo/config.toml redirects the compiler or the test runner
+  harness_false_manifest               f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/Cargo.toml declares a target named branch_pairing
+      [verifier] INTEGRITY: /app/Cargo.toml declares a test target with harness = false
+  claims_a_graded_target_name          f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/Cargo.toml declares a target named aggregation
+  toolchain_file                       f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/rust-toolchain.toml is present and is not part of this repository
+  harmless_cargo_config                f2p 48   p2p 99   reward 1    ok
+  adds_its_own_test_file               f2p 48   p2p 99   reward 1    ok
+  rewrites_an_inherited_suite          f2p 48   p2p 99   reward 1    ok
+  union_keeps_duplicates               f2p 39   p2p 99   reward 0    ok
+  the_bound_is_the_limit_alone         f2p 42   p2p 99   reward 0    ok
+
+all rows behaved as declared
+work tree: /tmp/claude-0/-root-mindriftwork/4e7e81c4-cfcc-49fd-9915-48fb7516df1d/scratchpad/battery5

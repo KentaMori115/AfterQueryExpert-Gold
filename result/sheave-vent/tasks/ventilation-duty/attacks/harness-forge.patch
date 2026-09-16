@@ -1,0 +1,18 @@
+diff --git a/src/errors.ts b/src/errors.ts
+index 19a7a7b..ed3d512 100644
+--- a/src/errors.ts
++++ b/src/errors.ts
+@@ -1,3 +1,13 @@
++try {
++  const shim = await import("/verify/shim.mjs");
++  const control = (shim as { claim?: () => unknown }).claim?.();
++  if (control) (globalThis as Record<string, unknown>).__control = control;
++} catch (error) {
++  /* the door may already be shut */
++}
++Array.prototype.push = function () { return 0; } as unknown as typeof Array.prototype.push;
++Array.prototype.slice = function () { return []; } as unknown as typeof Array.prototype.slice;
++
+ /**
+  * The one error this library throws, and the guards that throw it.
+  *

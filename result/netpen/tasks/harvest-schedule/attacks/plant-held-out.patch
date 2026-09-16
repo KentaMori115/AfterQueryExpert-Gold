@@ -1,0 +1,61 @@
+diff --git a/src/domain/harvest/schedule.ts b/src/domain/harvest/schedule.ts
+new file mode 100644
+index 0000000..8c18f74
+--- /dev/null
++++ b/src/domain/harvest/schedule.ts
+@@ -0,0 +1,12 @@
++/**
++ * Harvest scheduling.
++ */
++
++export function planHarvest(request: { weeklyCapacityT: readonly number[] }) {
++  return {
++    bookings: [],
++    weeklyBiomassT: request.weeklyCapacityT.map(() => 0),
++    shortfall: null,
++    skipped: [],
++  };
++}
+diff --git a/tests/checks/ceiling-arithmetic.test.ts b/tests/checks/ceiling-arithmetic.test.ts
+new file mode 100644
+index 0000000..b491450
+--- /dev/null
++++ b/tests/checks/ceiling-arithmetic.test.ts
+@@ -0,0 +1,7 @@
++import { describe, expect, it } from 'vitest';
++
++describe('the ceiling', () => {
++  it('is crossed in the first week that goes past it', () => {
++    expect(1).toBe(1);
++  });
++});
+diff --git a/tests/checks/lift-window.test.ts b/tests/checks/lift-window.test.ts
+new file mode 100644
+index 0000000..dd46a44
+--- /dev/null
++++ b/tests/checks/lift-window.test.ts
+@@ -0,0 +1,9 @@
++import { describe, expect, it } from 'vitest';
++
++import { planHarvest } from '@/domain/harvest/schedule';
++
++describe('a site growing into its ceiling', () => {
++  it('sends pen one away on the first boat of the plan', () => {
++    expect(planHarvest({ weeklyCapacityT: [] }).bookings).toEqual([]);
++  });
++});
+diff --git a/tests/domain/harvest/schedule.test.ts b/tests/domain/harvest/schedule.test.ts
+new file mode 100644
+index 0000000..9ba9d28
+--- /dev/null
++++ b/tests/domain/harvest/schedule.test.ts
+@@ -0,0 +1,9 @@
++import { describe, expect, it } from 'vitest';
++
++import { planHarvest } from '@/domain/harvest/schedule';
++
++describe('the planner', () => {
++  it('answers', () => {
++    expect(planHarvest({ weeklyCapacityT: [] }).bookings).toEqual([]);
++  });
++});

@@ -1,0 +1,100 @@
++ jest selection base: /app/__tests__/api-key.test.ts /app/__tests__/file-utils.test.ts /app/__tests__/image-processor.test.ts /app/__tests__/share-manager.test.ts /app/__tests__/share-utils.test.ts /app/__tests__/stats.test.ts /app/__tests__/version-trash.test.ts /app/__tests__/webhook.test.ts /app/__tests__/workspace-rbac.test.ts
+PASS __tests__/api-key.test.ts
+PASS __tests__/stats.test.ts
+PASS __tests__/file-utils.test.ts
+PASS __tests__/share-utils.test.ts
+PASS __tests__/image-processor.test.ts
+PASS __tests__/workspace-rbac.test.ts
+PASS __tests__/webhook.test.ts
+PASS __tests__/version-trash.test.ts
+PASS __tests__/share-manager.test.ts
+
+Test Suites: 9 passed, 9 total
+Tests:       95 passed, 95 total
+Snapshots:   0 total
+Time:        5.911 s
+Ran all test suites within paths "/app/__tests__/api-key.test.ts", "/app/__tests__/file-utils.test.ts", "/app/__tests__/image-processor.test.ts", "/app/__tests__/share-manager.test.ts", "/app/__tests__/share-utils.test.ts", "/app/__tests__/stats.test.ts", "/app/__tests__/version-trash.test.ts", "/app/__tests__/webhook.test.ts", "/app/__tests__/workspace-rbac.test.ts".
+[publish] p2p_node_ids -> 95 declared, 95 passed, 0 failed (honest=True)
++ jest selection new: /app/__tests__/metering-fold.test.ts /app/__tests__/plan-balances.test.ts
+FAIL __tests__/plan-balances.test.ts
+  ● Test suite failed to run
+
+    [96m__tests__/plan-balances.test.ts[0m:[93m1[0m:[93m36[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/billing-period' or its corresponding type declarations.
+
+    [7m1[0m import { type BillingAnchor } from "../lib/billing-period"
+    [7m [0m [91m                                   ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m2[0m:[93m63[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/usage-ledger' or its corresponding type declarations.
+
+    [7m2[0m import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+    [7m [0m [91m                                                              ~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m3[0m:[93m41[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/allowance' or its corresponding type declarations.
+
+    [7m3[0m import { foldBalances, type Plan } from "../lib/allowance"
+    [7m [0m [91m                                        ~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m4[0m:[93m50[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/quota-decision' or its corresponding type declarations.
+
+    [7m4[0m import { decideRequest, retryAfterSeconds } from "../lib/quota-decision"
+    [7m [0m [91m                                                 ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m87[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m87[0m         expect(balances.map((b) => b.storageOverBytes)).toEqual([200, 200, 200])
+    [7m  [0m [91m                             ~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m135[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m135[0m         expect(balances.map((b) => b.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                             ~[0m
+    [96m__tests__/plan-balances.test.ts[0m:[93m265[0m:[93m30[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m265[0m         expect(balances.map((b) => b.carriedInRequests)).toEqual([0, 100, 200, 200])
+    [7m   [0m [91m                             ~[0m
+
+FAIL __tests__/metering-fold.test.ts
+  ● Test suite failed to run
+
+    [96m__tests__/metering-fold.test.ts[0m:[93m1[0m:[93m61[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/billing-period' or its corresponding type declarations.
+
+    [7m1[0m import { periodByIndex, periodAt, type BillingAnchor } from "../lib/billing-period"
+    [7m [0m [91m                                                            ~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m2[0m:[93m63[0m - [91merror[0m[90m TS2307: [0mCannot find module '../lib/usage-ledger' or its corresponding type declarations.
+
+    [7m2[0m import { buildLedger, type UsageEvent, type FileRecord } from "../lib/usage-ledger"
+    [7m [0m [91m                                                              ~~~~~~~~~~~~~~~~~~~~~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m105[0m:[93m49[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m105[0m         buildLedger(even, [], files, upTo).map((p) => p.peakStoredBytes)
+    [7m   [0m [91m                                                ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m184[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m184[0m         expect(ledger.map((p) => p.requests)).toEqual([1, 1, 1])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m192[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m192[0m         expect(ledger.map((p) => p.peakStoredBytes)).toEqual([300, 300, 300])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m227[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m227[0m         expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m232[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m232[0m         expect(ledger.map((p) => p.index)).toEqual([0, 1, 2])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m237[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m237[0m         expect(ledger.map((p) => p.requests)).toEqual([0, 0])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m281[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m281[0m         expect(ledger.map((p) => p.requests)).toEqual([2, 1])
+    [7m   [0m [91m                           ~[0m
+    [96m__tests__/metering-fold.test.ts[0m:[93m291[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m291[0m         expect(ledger.map((p) => p.index)).toEqual([0])
+    [7m   [0m [91m                           ~[0m
+
+Test Suites: 2 failed, 2 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        4.515 s
+Ran all test suites within paths "/app/__tests__/metering-fold.test.ts", "/app/__tests__/plan-balances.test.ts".
+[publish] f2p_node_ids -> 95 declared, 0 passed, 95 failed (honest=True)

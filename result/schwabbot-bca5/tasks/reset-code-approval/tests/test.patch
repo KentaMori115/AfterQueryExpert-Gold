@@ -1,0 +1,840 @@
+diff --git a/tests/test_reset_clock.py b/tests/test_reset_clock.py
+new file mode 100644
+index 0000000..93f1c2e
+--- /dev/null
++++ b/tests/test_reset_clock.py
+@@ -0,0 +1,396 @@
++"""Two rules that outlive a single page load.
++
++The first is the calendar a secret code dies on, read straight off
++``UserPwdRequest.code_deadline()`` so no page has to be driven to see it. The
++second is the ban on going back to a password an account has already had,
++which both the forgot-password page and the settings page answer to.
++"""
++
++import json
++from datetime import datetime, timedelta
++
++import pytz
++from django.contrib.auth.models import User
++from django.test import Client, TestCase
++from django.utils import timezone
++
++from Users.forms import ForgotPwdStep2Form
++from Users.models import UserAllow, UserPwdRequest
++
++
++EASTERN = pytz.timezone('US/Eastern')
++
++COLLEAGUE = 'colleague'
++
++FIRST_PASSWORD = 'Halyard#5508'
++SECOND_PASSWORD = 'Kestrel!9412'
++THIRD_PASSWORD = 'Marlin?7731'
++FOURTH_PASSWORD = 'Gudgeon@6620'
++
++
++def eastern(year, month, day, hour, minute=0):
++    """An aware ``US/Eastern`` wall clock moment."""
++    return EASTERN.localize(datetime(year, month, day, hour, minute))
++
++
++class CodeDeadlineTests(TestCase):
++    """When a code runs out, given the moment its clock started.
++
++    The rows here are never saved. ``code_deadline()`` is a reading of one
++    row's own dates, so an unsaved instance answers exactly as a stored one
++    would.
++    """
++
++    def deadline_after_approval(self, moment):
++        row = UserPwdRequest(
++            user_id=1,
++            secret_code=515151,
++            call_count=0,
++            allowed_by_admin=True,
++            created_at=moment - timedelta(days=9),
++            approved_at=moment,
++        )
++        return row.code_deadline()
++
++    def test_morning_approval_runs_out_that_afternoon(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 1, 17, 9, 35)),
++            eastern(2024, 1, 17, 16),
++        )
++
++    def test_approval_a_minute_before_the_bell_has_missed_it(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 1, 17, 15, 59)),
++            eastern(2024, 1, 18, 16),
++        )
++
++    def test_approval_with_exactly_the_notice_keeps_that_bell(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 1, 17, 14)),
++            eastern(2024, 1, 17, 16),
++        )
++
++    def test_approval_a_minute_inside_the_notice_rolls_on(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 1, 17, 14, 1)),
++            eastern(2024, 1, 18, 16),
++        )
++
++    def test_a_late_friday_approval_skips_the_weekend_too(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 3, 15, 15)),
++            eastern(2024, 3, 18, 16),
++        )
++
++    def test_approval_on_the_bell_has_missed_it(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 1, 17, 16)),
++            eastern(2024, 1, 18, 16),
++        )
++
++    def test_evening_approval_waits_for_the_next_day(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 1, 17, 19, 30)),
++            eastern(2024, 1, 18, 16),
++        )
++
++    def test_friday_evening_approval_waits_for_monday(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 3, 15, 18)),
++            eastern(2024, 3, 18, 16),
++        )
++
++    def test_saturday_approval_waits_for_monday(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 3, 16, 10)),
++            eastern(2024, 3, 18, 16),
++        )
++
++    def test_sunday_approval_waits_for_monday(self):
++        self.assertEqual(
++            self.deadline_after_approval(eastern(2024, 3, 17, 23, 45)),
++            eastern(2024, 3, 18, 16),
++        )
++
++    def test_deadline_is_four_in_the_afternoon_through_a_clock_change(self):
++        winter = self.deadline_after_approval(eastern(2024, 1, 17, 9))
++        summer = self.deadline_after_approval(eastern(2024, 7, 17, 9))
++        self.assertEqual(winter.astimezone(pytz.utc).hour, 21)
++        self.assertEqual(summer.astimezone(pytz.utc).hour, 20)
++
++    def test_unapproved_row_uses_its_creation_stamp(self):
++        row = UserPwdRequest(
++            user_id=1,
++            secret_code=515151,
++            call_count=0,
++            allowed_by_admin=False,
++            created_at=eastern(2024, 1, 17, 9, 35),
++            approved_at=None,
++        )
++        self.assertEqual(row.code_deadline(), eastern(2024, 1, 17, 16))
++
++    def test_an_approval_takes_over_from_the_request_date(self):
++        row = UserPwdRequest(
++            user_id=1,
++            secret_code=515151,
++            call_count=0,
++            allowed_by_admin=True,
++            created_at=eastern(2024, 1, 17, 9, 35),
++            approved_at=eastern(2024, 1, 19, 9, 35),
++        )
++        self.assertEqual(row.code_deadline(), eastern(2024, 1, 19, 16))
++
++
++class ResetReuseTests(TestCase):
++    """The forgot-password page will not hand a password back."""
++
++    def setUp(self):
++        self.user = User.objects.create_user(
++            username='trader',
++            password=FIRST_PASSWORD,
++        )
++        self.request_row = UserPwdRequest.objects.create(
++            user_id=self.user.id,
++            secret_code=515151,
++            call_count=0,
++            allowed_by_admin=True,
++            created_at=timezone.now(),
++            approved_at=timezone.now(),
++        )
++
++    def step2(self, password):
++        return ForgotPwdStep2Form({
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': '515151',
++            'new_password': password,
++            'confirm_password': password,
++        })
++
++    def queue_approved(self, code):
++        """A fresh approved request, the way the administrator leaves one."""
++        UserPwdRequest.objects.filter(user_id=self.user.id).delete()
++        UserPwdRequest.objects.create(
++            user_id=self.user.id,
++            secret_code=code,
++            call_count=0,
++            allowed_by_admin=True,
++            created_at=timezone.now(),
++            approved_at=timezone.now(),
++        )
++
++    def reset_to(self, code, password):
++        """Drive one whole reset through the page and say whether it took."""
++        Client().post('/accounts/forgot_password/', {
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': str(code),
++            'new_password': password,
++            'confirm_password': password,
++        })
++        self.user.refresh_from_db()
++        return self.user.check_password(password)
++
++    def offer(self, code, password):
++        """Try a password on the page without caring how it is told no."""
++        return ForgotPwdStep2Form({
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': str(code),
++            'new_password': password,
++            'confirm_password': password,
++        }).is_valid()
++
++    def test_the_password_in_force_may_not_be_set_again(self):
++        self.assertFalse(self.step2(FIRST_PASSWORD).is_valid())
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(FIRST_PASSWORD))
++
++    def test_refusing_a_reused_password_costs_no_attempt(self):
++        self.step2(FIRST_PASSWORD).is_valid()
++        row = UserPwdRequest.objects.get(user_id=self.user.id)
++        self.assertEqual(row.call_count, 0)
++        self.assertTrue(row.allowed_by_admin)
++
++    def test_a_fresh_password_is_accepted(self):
++        self.assertTrue(self.step2(SECOND_PASSWORD).is_valid())
++
++    def test_the_page_looks_further_back_than_the_last_password(self):
++        # Three whole resets, driven through the page itself, then the page is
++        # offered passwords from the middle and the start of that history.
++        code = 515151
++        for password in (SECOND_PASSWORD, THIRD_PASSWORD, FOURTH_PASSWORD):
++            self.queue_approved(code)
++            self.assertTrue(self.reset_to(code, password))
++            code += 101010
++        self.queue_approved(code)
++        self.assertFalse(self.offer(code, SECOND_PASSWORD))
++        self.assertFalse(self.offer(code, FIRST_PASSWORD))
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(FOURTH_PASSWORD))
++
++    def test_a_password_the_page_set_cannot_be_set_again(self):
++        client = Client()
++        client.post('/accounts/forgot_password/', {
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': '515151',
++            'new_password': SECOND_PASSWORD,
++            'confirm_password': SECOND_PASSWORD,
++        })
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(SECOND_PASSWORD))
++
++        UserPwdRequest.objects.create(
++            user_id=self.user.id,
++            secret_code=626262,
++            call_count=0,
++            allowed_by_admin=True,
++            created_at=timezone.now(),
++            approved_at=timezone.now(),
++        )
++        form = ForgotPwdStep2Form({
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': '626262',
++            'new_password': FIRST_PASSWORD,
++            'confirm_password': FIRST_PASSWORD,
++        })
++        self.assertFalse(form.is_valid())
++
++
++class SettingsPageReuseTests(TestCase):
++    """The signed-in settings page answers to the same rule."""
++
++    def setUp(self):
++        self.user = User.objects.create_user(
++            username='trader',
++            password=FIRST_PASSWORD,
++        )
++        UserAllow.objects.create(
++            user_id=self.user.id,
++            status=True,
++            description='',
++            created_at=timezone.now(),
++        )
++        self.client = Client()
++        self.client.force_login(self.user)
++
++    def change_to(self, password):
++        return self.client.post(
++            '/change_password/',
++            data=json.dumps({
++                'new_password': password,
++                'confirm_password': password,
++            }),
++            content_type='application/json',
++        )
++
++    def test_a_fresh_password_is_accepted_and_then_closed_off(self):
++        response = self.change_to(SECOND_PASSWORD)
++        self.assertEqual(response.status_code, 200)
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(SECOND_PASSWORD))
++        self.assertEqual(self.change_to(SECOND_PASSWORD).status_code, 400)
++
++    def test_the_password_in_force_is_refused(self):
++        response = self.change_to(FIRST_PASSWORD)
++        self.assertEqual(response.status_code, 400)
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(FIRST_PASSWORD))
++
++    def test_a_password_two_changes_ago_is_refused(self):
++        self.assertEqual(self.change_to(SECOND_PASSWORD).status_code, 200)
++        self.assertEqual(self.change_to(THIRD_PASSWORD).status_code, 200)
++        response = self.change_to(FIRST_PASSWORD)
++        self.assertEqual(response.status_code, 400)
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(THIRD_PASSWORD))
++
++    def test_four_changes_back_is_still_closed_off(self):
++        ladder = [
++            SECOND_PASSWORD,
++            THIRD_PASSWORD,
++            FOURTH_PASSWORD,
++            'Windlass$3391',
++        ]
++        for password in ladder:
++            self.assertEqual(self.change_to(password).status_code, 200)
++        # Four passwords have been moved off. The one this account opened
++        # with is the oldest of them and is still inside the window.
++        self.assertEqual(self.change_to(FIRST_PASSWORD).status_code, 400)
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password('Windlass$3391'))
++
++    def test_a_password_far_enough_back_is_forgiven(self):
++        ladder = [
++            SECOND_PASSWORD,
++            THIRD_PASSWORD,
++            FOURTH_PASSWORD,
++            'Windlass$3391',
++            'Capstan%2247',
++            'Bollard&8174',
++        ]
++        for password in ladder:
++            self.assertEqual(self.change_to(password).status_code, 200)
++        # Six replacements have gone by, so the password this account opened
++        # with has dropped off the end and may come round again. The one it
++        # moved off last has not.
++        self.assertEqual(self.change_to('Capstan%2247').status_code, 400)
++        self.assertEqual(self.change_to(FIRST_PASSWORD).status_code, 200)
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(FIRST_PASSWORD))
++
++    def test_the_two_pages_share_one_memory(self):
++        self.assertEqual(self.change_to(SECOND_PASSWORD).status_code, 200)
++        UserPwdRequest.objects.create(
++            user_id=self.user.id,
++            secret_code=515151,
++            call_count=0,
++            allowed_by_admin=True,
++            created_at=timezone.now(),
++            approved_at=timezone.now(),
++        )
++        form = ForgotPwdStep2Form({
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': '515151',
++            'new_password': FIRST_PASSWORD,
++            'confirm_password': FIRST_PASSWORD,
++        })
++        self.assertFalse(form.is_valid())
++
++    def test_one_account_does_not_close_a_password_off_for_another(self):
++        self.assertEqual(self.change_to(SECOND_PASSWORD).status_code, 200)
++        colleague = User.objects.create_user(
++            username=COLLEAGUE,
++            password=THIRD_PASSWORD,
++        )
++        UserAllow.objects.create(
++            user_id=colleague.id,
++            status=True,
++            description='',
++            created_at=timezone.now(),
++        )
++        other_client = Client()
++        other_client.force_login(colleague)
++        response = other_client.post(
++            '/change_password/',
++            data=json.dumps({
++                'new_password': FIRST_PASSWORD,
++                'confirm_password': FIRST_PASSWORD,
++            }),
++            content_type='application/json',
++        )
++        self.assertEqual(response.status_code, 200)
++        colleague.refresh_from_db()
++        self.assertTrue(colleague.check_password(FIRST_PASSWORD))
++        # The account that moved off that password still cannot go back to it.
++        self.assertEqual(self.change_to(FIRST_PASSWORD).status_code, 400)
++
++    def test_strength_is_checked_as_well_as_reuse(self):
++        self.assertEqual(self.change_to('12345').status_code, 400)
++        self.assertEqual(self.change_to(FIRST_PASSWORD).status_code, 400)
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(FIRST_PASSWORD))
++        self.assertEqual(self.change_to(SECOND_PASSWORD).status_code, 200)
+diff --git a/tests/test_reset_gate.py b/tests/test_reset_gate.py
+new file mode 100644
+index 0000000..38e2902
+--- /dev/null
++++ b/tests/test_reset_gate.py
+@@ -0,0 +1,432 @@
++"""The forgot-password page, once the secret code means something.
++
++Everything here goes through the two form classes the page already used and
++through the row the admin approval page already showed, so a build is free to
++arrange its own internals as long as the request behaves.
++"""
++
++from datetime import timedelta
++
++from django.contrib.auth.models import User
++from django.test import Client, TestCase
++from django.utils import timezone
++
++from Users.forms import ForgotPwdStep1Form, ForgotPwdStep2Form
++from Users.models import UserPwdRequest
++
++
++TRADER = 'trader'
++STRANGER = 'stranger'
++COLLEAGUE = 'colleague'
++
++GOOD_PASSWORD = 'Kestrel!9412'
++OTHER_PASSWORD = 'Marlin?7731'
++START_PASSWORD = 'Halyard#5508'
++
++
++class ResetRequestTestCase(TestCase):
++    """Shared scaffolding: one user, and a request row built to order."""
++
++    def setUp(self):
++        self.user = User.objects.create_user(
++            username='trader',
++            password=START_PASSWORD,
++        )
++
++    def make_request(self, code=424242, count=0, allowed=False,
++                     approved_at=None, created_at=None):
++        return UserPwdRequest.objects.create(
++            user_id=self.user.id,
++            secret_code=code,
++            call_count=count,
++            allowed_by_admin=allowed,
++            created_at=created_at if created_at is not None else timezone.now(),
++            approved_at=approved_at,
++        )
++
++    def row(self):
++        return UserPwdRequest.objects.get(user_id=self.user.id)
++
++    def step1(self, username='trader'):
++        return ForgotPwdStep1Form({'formstep': 'step1', 'username': username})
++
++    def step2(self, code, new_password=GOOD_PASSWORD, confirm=None,
++              username='trader'):
++        return ForgotPwdStep2Form({
++            'formstep': 'step2',
++            'username': username,
++            'secret_code': code,
++            'new_password': new_password,
++            'confirm_password': new_password if confirm is None else confirm,
++        })
++
++    def password_still_start(self):
++        self.user.refresh_from_db()
++        return self.user.check_password(START_PASSWORD)
++
++
++class StepOneQueueTests(ResetRequestTestCase):
++    def test_first_visit_queues_an_unapproved_request(self):
++        form = self.step1()
++        self.assertFalse(form.is_valid())
++        row = self.row()
++        self.assertFalse(row.allowed_by_admin)
++        self.assertEqual(row.call_count, 0)
++        self.assertIsNone(row.approved_at)
++        self.assertTrue(100000 <= row.secret_code <= 999999)
++
++    def test_revisiting_does_not_reissue(self):
++        first = self.make_request(code=515151, count=0)
++        form = self.step1()
++        self.assertFalse(form.is_valid())
++        row = self.row()
++        self.assertEqual(row.id, first.id)
++        self.assertEqual(row.secret_code, 515151)
++        self.assertEqual(row.call_count, 0)
++        self.assertIsNone(row.approved_at)
++        self.assertFalse(row.allowed_by_admin)
++
++    def test_step_one_passes_once_the_request_is_approved(self):
++        self.make_request(code=515151, allowed=True)
++        self.assertTrue(self.step1().is_valid())
++
++    def test_step_one_stamps_the_approval_it_finds(self):
++        self.make_request(code=515151, allowed=True)
++        before = timezone.now()
++        self.step1().is_valid()
++        row = self.row()
++        self.assertIsNotNone(row.approved_at)
++        self.assertGreaterEqual(row.approved_at, before)
++        self.assertLessEqual(row.approved_at, timezone.now())
++
++    def test_step_one_keeps_a_stamp_it_did_not_write(self):
++        stamped = timezone.now() - timedelta(minutes=3)
++        self.make_request(code=515151, allowed=True, approved_at=stamped)
++        self.step1().is_valid()
++        self.assertEqual(self.row().approved_at, stamped)
++
++    def test_step_one_restarts_an_approval_that_ran_out(self):
++        self.make_request(
++            code=515151,
++            count=2,
++            allowed=True,
++            approved_at=timezone.now() - timedelta(days=30),
++        )
++        form = self.step1()
++        self.assertFalse(form.is_valid())
++        row = self.row()
++        self.assertFalse(row.allowed_by_admin)
++        self.assertEqual(row.call_count, 0)
++        self.assertIsNone(row.approved_at)
++        self.assertNotEqual(row.secret_code, 515151)
++
++    def test_step_one_restarts_a_request_nobody_approved_in_time(self):
++        stale = timezone.now() - timedelta(days=30)
++        self.make_request(code=515151, created_at=stale)
++        self.assertFalse(self.step1().is_valid())
++        row = self.row()
++        self.assertNotEqual(row.secret_code, 515151)
++        self.assertGreater(row.created_at, stale)
++        self.assertFalse(row.allowed_by_admin)
++
++
++class StepTwoCodeTests(ResetRequestTestCase):
++    def test_right_code_changes_the_password_and_clears_the_request(self):
++        self.make_request(code=515151, allowed=True)
++        client = Client()
++        response = client.post('/accounts/forgot_password/', {
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': '515151',
++            'new_password': GOOD_PASSWORD,
++            'confirm_password': GOOD_PASSWORD,
++        })
++        self.assertEqual(response.status_code, 302)
++        self.user.refresh_from_db()
++        self.assertTrue(self.user.check_password(GOOD_PASSWORD))
++        self.assertEqual(UserPwdRequest.objects.filter(user_id=self.user.id).count(), 0)
++
++    def test_wrong_code_is_refused_and_charged(self):
++        self.make_request(code=515151, allowed=True)
++        client = Client()
++        response = client.post('/accounts/forgot_password/', {
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': '111111',
++            'new_password': GOOD_PASSWORD,
++            'confirm_password': GOOD_PASSWORD,
++        })
++        self.assertEqual(response.status_code, 200)
++        self.assertTrue(self.password_still_start())
++        row = self.row()
++        self.assertEqual(row.call_count, 1)
++        self.assertEqual(row.secret_code, 515151)
++        self.assertTrue(row.allowed_by_admin)
++
++    def test_two_wrong_codes_leave_the_approval_standing(self):
++        self.make_request(code=515151, allowed=True)
++        self.assertFalse(self.step2('111111').is_valid())
++        self.assertFalse(self.step2('222222').is_valid())
++        row = self.row()
++        self.assertEqual(row.call_count, 2)
++        self.assertTrue(row.allowed_by_admin)
++        self.assertEqual(row.secret_code, 515151)
++
++    def test_budget_ends_on_the_final_miss(self):
++        # Made a while back, approved just now, so the deadline is nowhere
++        # near and the budget is the only thing that can end this.
++        made = timezone.now() - timedelta(hours=2)
++        self.make_request(code=515151, count=2, allowed=True,
++                          approved_at=timezone.now(), created_at=made)
++        self.assertFalse(self.step2('111111').is_valid())
++        row = self.row()
++        self.assertEqual(row.call_count, 0)
++        self.assertFalse(row.allowed_by_admin)
++        self.assertIsNone(row.approved_at)
++        self.assertNotEqual(row.secret_code, 515151)
++        self.assertTrue(100000 <= row.secret_code <= 999999)
++        self.assertGreater(row.created_at, made)
++
++    def test_misses_accumulate_across_submissions(self):
++        # The budget is spent for real rather than seeded, so a build that
++        # reads the count fresh on every submission cannot ride through.
++        made = timezone.now() - timedelta(hours=2)
++        self.make_request(code=515151, allowed=True, created_at=made)
++        self.assertFalse(self.step2('111111').is_valid())
++        self.assertFalse(self.step2('222222').is_valid())
++        self.assertTrue(self.row().allowed_by_admin)
++        self.assertFalse(self.step2('333333').is_valid())
++        row = self.row()
++        self.assertFalse(row.allowed_by_admin)
++        self.assertEqual(row.call_count, 0)
++        self.assertIsNone(row.approved_at)
++        self.assertNotEqual(row.secret_code, 515151)
++        self.assertGreater(row.created_at, made)
++        self.assertTrue(self.password_still_start())
++
++    def test_wrong_code_is_charged_before_the_passwords_are_read(self):
++        self.make_request(code=515151, allowed=True)
++        form = self.step2('111111', new_password=GOOD_PASSWORD,
++                          confirm=OTHER_PASSWORD)
++        self.assertFalse(form.is_valid())
++        self.assertEqual(self.row().call_count, 1)
++
++    def test_right_code_with_mismatched_passwords_costs_nothing(self):
++        self.make_request(code=515151, allowed=True)
++        form = self.step2('515151', new_password=GOOD_PASSWORD,
++                          confirm=OTHER_PASSWORD)
++        self.assertFalse(form.is_valid())
++        self.assertTrue(self.password_still_start())
++        row = self.row()
++        self.assertEqual(row.call_count, 0)
++        self.assertTrue(row.allowed_by_admin)
++
++    def test_right_code_with_a_weak_password_costs_nothing(self):
++        self.make_request(code=515151, allowed=True)
++        self.assertFalse(self.step2('515151', new_password='123').is_valid())
++        self.assertTrue(self.password_still_start())
++        self.assertEqual(self.row().call_count, 0)
++
++    def test_step_two_will_not_take_a_missing_code(self):
++        self.make_request(code=515151, allowed=True)
++        form = ForgotPwdStep2Form({
++            'formstep': 'step2',
++            'username': TRADER,
++            'new_password': GOOD_PASSWORD,
++            'confirm_password': GOOD_PASSWORD,
++        })
++        self.assertFalse(form.is_valid())
++        self.assertIn('secret_code', form.errors)
++        self.assertTrue(self.password_still_start())
++
++    def test_the_code_box_reaches_the_second_step_form(self):
++        self.make_request(code=515151, allowed=True)
++        client = Client()
++        response = client.post('/accounts/forgot_password/', {
++            'formstep': 'step1',
++            'username': TRADER,
++        })
++        self.assertEqual(response.status_code, 200)
++        self.assertIn('name="secret_code"', response.content.decode())
++
++    def test_letters_count_as_a_miss(self):
++        self.make_request(code=515151, allowed=True)
++        self.assertFalse(self.step2('five one five').is_valid())
++        row = self.row()
++        self.assertEqual(row.call_count, 1)
++        self.assertEqual(row.secret_code, 515151)
++
++
++class StepTwoGateTests(ResetRequestTestCase):
++    def test_step_two_refuses_while_the_request_is_queued(self):
++        self.make_request(code=515151)
++        self.assertFalse(self.step2('515151').is_valid())
++        self.assertTrue(self.password_still_start())
++        row = self.row()
++        self.assertEqual(row.call_count, 0)
++        self.assertEqual(row.secret_code, 515151)
++
++    def test_step_two_refuses_with_no_request_at_all(self):
++        self.assertFalse(self.step2('515151').is_valid())
++        self.assertTrue(self.password_still_start())
++        # Step one is where an account with nothing queued has to start, and
++        # what it queues is not approved and carries no approval time.
++        self.assertFalse(self.step1().is_valid())
++        row = self.row()
++        self.assertIsNone(row.approved_at)
++        self.assertFalse(row.allowed_by_admin)
++
++    def test_a_request_belonging_to_someone_else_is_no_help(self):
++        stranger = User.objects.create_user(
++            username=STRANGER,
++            password=START_PASSWORD,
++        )
++        UserPwdRequest.objects.create(
++            user_id=stranger.id,
++            secret_code=515151,
++            call_count=0,
++            allowed_by_admin=True,
++            created_at=timezone.now(),
++            approved_at=timezone.now(),
++        )
++        self.assertFalse(self.step2('515151').is_valid())
++        self.assertTrue(self.password_still_start())
++        self.assertEqual(
++            UserPwdRequest.objects.get(user_id=stranger.id).call_count,
++            0,
++        )
++
++    def test_a_wrong_code_does_not_move_the_deadline(self):
++        approved = timezone.now()
++        self.make_request(code=515151, allowed=True, approved_at=approved)
++        before = self.row().code_deadline()
++        self.assertFalse(self.step2('111111').is_valid())
++        row = self.row()
++        self.assertEqual(row.approved_at, approved)
++        self.assertEqual(row.code_deadline(), before)
++
++    def test_a_restarted_request_gets_a_deadline_of_its_own(self):
++        stale = timezone.now() - timedelta(days=30)
++        self.make_request(code=515151, created_at=stale)
++        old_deadline = self.row().code_deadline()
++        self.assertFalse(self.step1().is_valid())
++        self.assertGreater(self.row().code_deadline(), old_deadline)
++
++    def test_a_completed_reset_leaves_other_requests_standing(self):
++        other = User.objects.create_user(
++            username=COLLEAGUE,
++            password=START_PASSWORD,
++        )
++        UserPwdRequest.objects.create(
++            user_id=other.id,
++            secret_code=626262,
++            call_count=1,
++            allowed_by_admin=True,
++            created_at=timezone.now(),
++            approved_at=timezone.now(),
++        )
++        self.make_request(code=515151, allowed=True)
++        client = Client()
++        client.post('/accounts/forgot_password/', {
++            'formstep': 'step2',
++            'username': 'trader',
++            'secret_code': '515151',
++            'new_password': GOOD_PASSWORD,
++            'confirm_password': GOOD_PASSWORD,
++        })
++        self.assertEqual(
++            UserPwdRequest.objects.filter(user_id=self.user.id).count(),
++            0,
++        )
++        survivor = UserPwdRequest.objects.get(user_id=other.id)
++        self.assertEqual(survivor.call_count, 1)
++        self.assertTrue(survivor.allowed_by_admin)
++
++    def test_step_two_restarts_an_approval_that_ran_out(self):
++        self.make_request(
++            code=515151,
++            allowed=True,
++            approved_at=timezone.now() - timedelta(days=30),
++        )
++        self.assertFalse(self.step2('515151').is_valid())
++        self.assertTrue(self.password_still_start())
++        row = self.row()
++        self.assertFalse(row.allowed_by_admin)
++        self.assertIsNone(row.approved_at)
++        self.assertEqual(row.call_count, 0)
++        self.assertNotEqual(row.secret_code, 515151)
++
++    def test_step_two_stamps_an_approval_it_is_the_first_to_see(self):
++        self.make_request(code=515151, allowed=True)
++        self.assertFalse(self.step2('111111').is_valid())
++        self.assertIsNotNone(self.row().approved_at)
++
++    def test_withdrawal_kills_a_live_code(self):
++        self.make_request(code=515151, allowed=True)
++        self.assertTrue(self.step1().is_valid())
++        UserPwdRequest.objects.filter(user_id=self.user.id).update(
++            allowed_by_admin=False,
++        )
++        self.assertFalse(self.step2('515151').is_valid())
++        self.assertTrue(self.password_still_start())
++        row = self.row()
++        self.assertIsNone(row.approved_at)
++        self.assertEqual(row.call_count, 0)
++        self.assertNotEqual(row.secret_code, 515151)
++
++    def test_first_step_also_sees_a_withdrawal(self):
++        made = timezone.now() - timedelta(hours=2)
++        self.make_request(code=515151, allowed=True, created_at=made)
++        self.assertTrue(self.step1().is_valid())
++        UserPwdRequest.objects.filter(user_id=self.user.id).update(
++            allowed_by_admin=False,
++        )
++        self.assertFalse(self.step1().is_valid())
++        row = self.row()
++        self.assertIsNone(row.approved_at)
++        self.assertNotEqual(row.secret_code, 515151)
++        self.assertGreater(row.created_at, made)
++
++    def test_reapproval_allows_a_single_miss(self):
++        self.make_request(code=515151, allowed=True)
++        # First approval, seen here, and worth the full budget.
++        self.assertFalse(self.step2('111111').is_valid())
++        self.assertFalse(self.step2('222222').is_valid())
++        self.assertTrue(self.row().allowed_by_admin)
++        self.assertFalse(self.step2('333333').is_valid())
++        self.assertFalse(self.row().allowed_by_admin)
++
++        reissued = self.row().secret_code
++        UserPwdRequest.objects.filter(user_id=self.user.id).update(
++            allowed_by_admin=True,
++        )
++        # Second approval. One wrong code is the whole of it.
++        self.assertFalse(self.step2('444444').is_valid())
++        row = self.row()
++        self.assertFalse(row.allowed_by_admin)
++        self.assertEqual(row.call_count, 0)
++        self.assertNotEqual(row.secret_code, reissued)
++
++    def test_reapproval_still_honours_its_code(self):
++        self.make_request(code=515151, allowed=True)
++        self.assertFalse(self.step2('111111').is_valid())
++        self.assertFalse(self.step2('222222').is_valid())
++        self.assertFalse(self.step2('333333').is_valid())
++        reissued = self.row().secret_code
++        UserPwdRequest.objects.filter(user_id=self.user.id).update(
++            allowed_by_admin=True,
++        )
++        self.assertTrue(self.step2(str(reissued)).is_valid())
++
++    def test_re_approval_after_a_spent_request_opens_a_new_window(self):
++        self.make_request(code=515151, count=2, allowed=True,
++                          approved_at=timezone.now())
++        self.assertFalse(self.step2('111111').is_valid())
++        reissued = self.row().secret_code
++        UserPwdRequest.objects.filter(user_id=self.user.id).update(
++            allowed_by_admin=True,
++        )
++        self.assertTrue(self.step2(str(reissued)).is_valid())
++        row = self.row()
++        self.assertIsNotNone(row.approved_at)
++        self.assertEqual(row.call_count, 0)

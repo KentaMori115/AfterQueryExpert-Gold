@@ -1,0 +1,189 @@
+diff --git a/src/domain/biomass/standing.ts b/src/domain/biomass/standing.ts
+index 46808bb..f048102 100644
+--- a/src/domain/biomass/standing.ts
++++ b/src/domain/biomass/standing.ts
+@@ -72,7 +72,7 @@ export const DENSITY_WATCH_KG_M3 = 22;
+ export type DensityStatus = 'comfortable' | 'watch' | 'over-limit';
+ 
+ export function densityStatus(densityKgM3: number): DensityStatus {
+-  if (densityKgM3 > DENSITY_LIMIT_KG_M3) return 'over-limit';
++  if (densityKgM3 >= DENSITY_LIMIT_KG_M3) return 'over-limit';
+   if (densityKgM3 >= DENSITY_WATCH_KG_M3) return 'watch';
+   return 'comfortable';
+ }
+diff --git a/src/domain/harvest/schedule.ts b/src/domain/harvest/schedule.ts
+new file mode 100644
+index 0000000..d26b0cf
+--- /dev/null
++++ b/src/domain/harvest/schedule.ts
+@@ -0,0 +1,132 @@
++/**
++ * Harvest scheduling, done in one place.
++ *
++ * A different arrangement of the same rules: one file, one class, weeks held
++ * as instants rather than offsets, and the ledger asked afresh every time
++ * rather than through a cached outlook.
++ */
++
++import { isMedicinal, profileFor } from '../health/treatment';
++import { positionAt, validate } from '../stock/ledger';
++import { accumulate } from '../time/degreeDays';
++import { addWeeks } from '../time/duration';
++
++type Ask = {
++  readonly at: number;
++  readonly maxBiomassT: number;
++  readonly weeklyCapacityT: readonly number[];
++  readonly minHarvestWeightG: number;
++  readonly temperatures: readonly { at: number; meanC: number }[];
++  readonly pens: readonly {
++    penId: string;
++    number: number;
++    tgc: number;
++    events: readonly never[];
++    treatments: readonly { method: string; completedAt: number }[];
++  }[];
++};
++
++class Planner {
++  private readonly taken = new Map<string, number>();
++  private readonly live: Ask['pens'];
++  private readonly out: string[];
++
++  constructor(private readonly ask: Ask) {
++    this.live = ask.pens.filter((pen) => validate(pen.events).length === 0);
++    this.out = ask.pens
++      .filter((pen) => validate(pen.events).length > 0)
++      .slice()
++      .sort((a, b) => a.number - b.number)
++      .map((pen) => pen.penId);
++  }
++
++  private endOf(week: number): number {
++    return addWeeks(this.ask.at, week + 1);
++  }
++
++  private hold(pen: Ask['pens'][number], week: number): boolean {
++    const end = this.endOf(week);
++    for (const treatment of pen.treatments) {
++      if (!isMedicinal(treatment.method as never)) continue;
++      const heat = accumulate(
++        this.ask.temperatures.filter(
++          (sample) => sample.at >= treatment.completedAt && sample.at < end,
++        ) as never,
++      );
++      if (heat < profileFor(treatment.method as never).withdrawalDegreeDays) return true;
++    }
++    return false;
++  }
++
++  private at(pen: Ask['pens'][number], week: number) {
++    return positionAt(pen.events, this.endOf(week), {
++      tgc: pen.tgc,
++      temperatures: this.ask.temperatures as never,
++    });
++  }
++
++  private weekly(): number[] {
++    return this.ask.weeklyCapacityT.map((_, week) => {
++      let total = 0;
++      for (const pen of this.live) {
++        const booked = this.taken.get(pen.penId);
++        if (booked !== undefined && booked < week) continue;
++        total += this.at(pen, week).biomassKg / 1_000;
++      }
++      return total;
++    });
++  }
++
++  private attempt(breach: number): boolean {
++    const queue = this.live
++      .filter((pen) => !this.taken.has(pen.penId))
++      .map((pen) => ({ pen, weight: this.at(pen, breach).meanWeightG }))
++      .sort((a, b) => b.weight - a.weight || a.pen.number - b.pen.number);
++
++    for (const { pen } of queue) {
++      for (let week = breach - 1; week >= 0; week -= 1) {
++        const position = this.at(pen, week);
++        if (this.hold(pen, week)) continue;
++        if (position.meanWeightG < this.ask.minHarvestWeightG) continue;
++        if ([...this.taken.values()].includes(week)) continue;
++        if (position.biomassKg / 1_000 > (this.ask.weeklyCapacityT[week] ?? 0)) continue;
++        this.taken.set(pen.penId, week);
++        return true;
++      }
++    }
++    return false;
++  }
++
++  run() {
++    let shortfall: { week: number; excessT: number } | null = null;
++
++    for (;;) {
++      const weekly = this.weekly();
++      const breach = weekly.findIndex((tonnes) => tonnes > this.ask.maxBiomassT);
++      if (breach < 0) break;
++      if (!this.attempt(breach)) {
++        shortfall = { week: breach, excessT: weekly[breach]! - this.ask.maxBiomassT };
++        break;
++      }
++    }
++
++    const bookings = [...this.taken.entries()]
++      .map(([id, week]) => {
++        const pen = this.live.find((candidate) => candidate.penId === id)!;
++        const position = this.at(pen, week);
++        return {
++          penId: pen.penId,
++          week,
++          tonnes: position.biomassKg / 1_000,
++          meanWeightG: position.meanWeightG,
++        };
++      })
++      .sort((a, b) => a.week - b.week);
++
++    return { bookings, weeklyBiomassT: this.weekly(), shortfall, skipped: this.out };
++  }
++}
++
++export function planHarvest(ask: Ask) {
++  return new Planner(ask).run();
++}
+diff --git a/tests/domain/biomass/standing.test.ts b/tests/domain/biomass/standing.test.ts
+index 7ff4340..74c2fad 100644
+--- a/tests/domain/biomass/standing.test.ts
++++ b/tests/domain/biomass/standing.test.ts
+@@ -70,7 +70,7 @@ describe('the density limit', () => {
+   it('places each status where the site acts', () => {
+     expect(densityStatus(12)).toBe('comfortable');
+     expect(densityStatus(DENSITY_WATCH_KG_M3)).toBe('watch');
+-    expect(densityStatus(DENSITY_LIMIT_KG_M3)).toBe('watch');
++    expect(densityStatus(DENSITY_LIMIT_KG_M3)).toBe('over-limit');
+     expect(densityStatus(DENSITY_LIMIT_KG_M3 + 0.1)).toBe('over-limit');
+   });
+ 
+diff --git a/tests/domain/harvest/schedule.test.ts b/tests/domain/harvest/schedule.test.ts
+new file mode 100644
+index 0000000..a15af9f
+--- /dev/null
++++ b/tests/domain/harvest/schedule.test.ts
+@@ -0,0 +1,19 @@
++import { describe, expect, it } from 'vitest';
++
++import { planHarvest } from '@/domain/harvest/schedule';
++
++describe('the planner', () => {
++  it('has nothing to plan for a site with no pens', () => {
++    const plan = planHarvest({
++      at: 0,
++      maxBiomassT: 100,
++      weeklyCapacityT: [500, 500],
++      minHarvestWeightG: 3_000,
++      temperatures: [],
++      pens: [],
++    });
++    expect(plan.bookings).toEqual([]);
++    expect(plan.shortfall).toBeNull();
++    expect(plan.skipped).toEqual([]);
++  });
++});

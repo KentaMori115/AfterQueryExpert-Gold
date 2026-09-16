@@ -1,0 +1,144 @@
+##### VjQoRu6
+est_intersect                                None
+est_intersect_all                            None
+est_except                                   None
+est_except_all                               None
+est_union                                    3
+blocking_intersect                           [('IntersectOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_except_all                          [('ExceptOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+metrics_intersect                            ['IntersectOperator.batches', 'IntersectOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'intersect.rows_dropped', 'result.rows']
+metrics_except                               ['ExceptOperator.batches', 'ExceptOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'except.rows_dropped', 'result.rows']
+order_by_on_first_branch                     [1, 2, 3, 5]
+limit_on_first_branch                        [3, 1, 2, 5, 2]
+nulls_desc_on_chain                          [1, None, 3, 5, 2]
+nulls_asc_on_chain                           [1, None, 3, 2, 5]
+nulls_last_explicit                          [1, None, 3, 2, 5]
+order_by_expression                          [3, 1, 2, 5]
+intersect_null_all                           [None, 3]
+explain_chain                                'Except: distinct\n  Intersect: distinct\n    Project: x\n      Scan: one\n    Project: x\n      Scan: two\n  Project: x\n    Scan: nul'
+deep_chain                                   [3, 1, 1]
+distinct_branch                              [2]
+agg_branch                                   []
+empty_left                                   []
+cli_explain_named                            True
+plan_summary                                 'Except Projectx2 Scanx2'
+##### VsVWHqe
+est_intersect                                None
+est_intersect_all                            None
+est_except                                   None
+est_except_all                               None
+est_union                                    3
+blocking_intersect                           [('IntersectOperator', True), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_except_all                          [('ExceptOperator', True), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+metrics_intersect                            ['IntersectOperator.batches', 'IntersectOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+metrics_except                               ['ExceptOperator.batches', 'ExceptOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+order_by_on_first_branch                     [1, 2, 3, 5]
+limit_on_first_branch                        [3, 1, 2, 5, 2]
+nulls_desc_on_chain                          [5, 3, 2, 1, None]
+nulls_asc_on_chain                           [None, 1, 2, 3, 5]
+nulls_last_explicit                          [1, 2, 3, 5, None]
+order_by_expression                          [5, 3, 2, 1]
+intersect_null_all                           [None, 3]
+explain_chain                                'Except: distinct\n  Intersect: distinct\n    Project: x\n      Scan: one\n    Project: x\n      Scan: two\n  Project: x\n    Scan: nul'
+deep_chain                                   [3, 1, 1]
+distinct_branch                              [2]
+agg_branch                                   []
+empty_left                                   []
+cli_explain_named                            True
+plan_summary                                 'Except Projectx2 Scanx2'
+##### Yn5dAgG
+est_intersect                                1
+est_intersect_all                            3
+est_except                                   2
+est_except_all                               4
+est_union                                    3
+blocking_intersect                           [('IntersectOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_except_all                          [('ExceptOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+metrics_intersect                            ['IntersectOperator.batches', 'IntersectOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+metrics_except                               ['ExceptOperator.batches', 'ExceptOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+order_by_on_first_branch                     [1, 2, 3, 5]
+limit_on_first_branch                        [3, 1, 2, 5, 2]
+nulls_desc_on_chain                          [5, 3, 2, 1, None]
+nulls_asc_on_chain                           [None, 1, 2, 3, 5]
+nulls_last_explicit                          [1, 2, 3, 5, None]
+order_by_expression                          [5, 3, 2, 1]
+intersect_null_all                           [None, 3]
+explain_chain                                'Except: distinct\n  Intersect: distinct\n    Project: x\n      Scan: one\n    Project: x\n      Scan: two\n  Project: x\n    Scan: nul'
+deep_chain                                   [3, 1, 1]
+distinct_branch                              [2]
+agg_branch                                   []
+empty_left                                   []
+cli_explain_named                            True
+plan_summary                                 'Except Projectx2 Scanx2'
+##### cEP6ssZ
+est_intersect                                None
+est_intersect_all                            None
+est_except                                   None
+est_except_all                               None
+est_union                                    3
+blocking_intersect                           [('IntersectOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_except_all                          [('ExceptOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+metrics_intersect                            ['IntersectOperator.batches', 'IntersectOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+metrics_except                               ['ExceptOperator.batches', 'ExceptOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+order_by_on_first_branch                     [1, 2, 3, 5]
+limit_on_first_branch                        [3, 1, 2, 5, 2]
+nulls_desc_on_chain                          [1, None, 3, 5, 2]
+nulls_asc_on_chain                           [1, None, 3, 2, 5]
+nulls_last_explicit                          [1, None, 3, 2, 5]
+order_by_expression                          [3, 1, 2, 5]
+intersect_null_all                           [None, 3]
+explain_chain                                'Except: distinct\n  Intersect: distinct\n    Project: x\n      Scan: one\n    Project: x\n      Scan: two\n  Project: x\n    Scan: nul'
+deep_chain                                   [3, 1, 1]
+distinct_branch                              [2]
+agg_branch                                   []
+empty_left                                   []
+cli_explain_named                            True
+plan_summary                                 'Except Projectx2 Scanx2'
+##### mSEvqYT
+est_intersect                                2
+est_intersect_all                            3
+est_except                                   1
+est_except_all                               1
+est_union                                    3
+blocking_intersect                           [('IntersectOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_except_all                          [('ExceptOperator', False), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+metrics_intersect                            ['IntersectOperator.batches', 'IntersectOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+metrics_except                               ['ExceptOperator.batches', 'ExceptOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'result.rows']
+order_by_on_first_branch                     [1, 2, 3, 5]
+limit_on_first_branch                        [3, 1, 2, 5, 2]
+nulls_desc_on_chain                          [5, 3, 2, 1, None]
+nulls_asc_on_chain                           [None, 1, 2, 3, 5]
+nulls_last_explicit                          [1, 2, 3, 5, None]
+order_by_expression                          [5, 3, 2, 1]
+intersect_null_all                           [None, 3]
+explain_chain                                'Except: distinct\n  Intersect: distinct\n    Project: x\n      Scan: one\n    Project: x\n      Scan: two\n  Project: x\n    Scan: nul'
+deep_chain                                   [3, 1, 1]
+distinct_branch                              [2]
+agg_branch                                   []
+empty_left                                   []
+cli_explain_named                            True
+plan_summary                                 'Except Projectx2 Scanx2'
+##### REFERENCE
+est_intersect                                2
+est_intersect_all                            3
+est_except                                   0
+est_except_all                               1
+est_union                                    3
+blocking_intersect                           [('IntersectOperator', True), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+blocking_except_all                          [('ExceptOperator', True), ('ProjectOperator', False), ('ScanOperator', False), ('ProjectOperator', False), ('ScanOperator', False)]
+metrics_intersect                            ['IntersectOperator.batches', 'IntersectOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'intersect.rows_dropped', 'result.rows']
+metrics_except                               ['ExceptOperator.batches', 'ExceptOperator.rows', 'ProjectOperator.batches', 'ProjectOperator.rows', 'ScanOperator.batches', 'ScanOperator.rows', 'except.rows_dropped', 'result.rows']
+order_by_on_first_branch                     [1, 2, 3, 5]
+limit_on_first_branch                        [3, 1, 2, 5, 2]
+nulls_desc_on_chain                          [5, 3, 2, 1, None]
+nulls_asc_on_chain                           [None, 1, 2, 3, 5]
+nulls_last_explicit                          [1, 2, 3, 5, None]
+order_by_expression                          [5, 3, 2, 1]
+intersect_null_all                           [None, 3]
+explain_chain                                'Except: distinct\n  Intersect: distinct\n    Project: x\n      Scan: one\n    Project: x\n      Scan: two\n  Project: x\n    Scan: nul'
+deep_chain                                   [3, 1, 1]
+distinct_branch                              [2]
+agg_branch                                   []
+empty_left                                   []
+cli_explain_named                            True
+plan_summary                                 'Except Projectx2 Scanx2'

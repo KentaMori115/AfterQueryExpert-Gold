@@ -1,0 +1,827 @@
+diff --git a/docs/predation.md b/docs/predation.md
+new file mode 100644
+index 0000000..73f436b
+--- /dev/null
++++ b/docs/predation.md
+@@ -0,0 +1,122 @@
++# Predation
++
++Predation runs once a tick, after mortality and before reproduction. Every
++predator cohort meets every prey cohort in its own region, and Seed World
++settles all of those meetings together rather than one predator at a time.
++
++## Asks
++
++A predation rule names a prey species, a prey stage, and `perPredatorPerTick`.
++The ask a predator cohort makes on one prey cohort is
++
++```text
++ask = count x perPredatorPerTick
++```
++
++rounded half-even at model scale. Counts are read once, as the phase begins, so
++a predator that is itself hunted asks for the same amount whether it is settled
++early or late.
++
++A rule may also carry `saturation`, a prey count at which one predator takes
++half what it would take from crowded prey:
++
++```text
++ask = count x perPredatorPerTick x prey / (prey + saturation)
++```
++
++rounded half-even once, with `prey` the prey cohort's count as the phase began.
++Thin prey are therefore harder to find than plentiful prey. A rule without the
++field asks for the plain product.
++
++## Budgets
++
++A species may author `maxIntakePerTick`. A cohort of that species may take
++
++```text
++budget = count x maxIntakePerTick
++```
++
++prey individuals in the tick, again half-even at model scale, counting every
++prey it hunts together. A species without the field has no budget and is held
++only by what its prey holds.
++
++## Settlement
++
++Asks are settled in rounds.
++
++1. A round looks at claims that still want prey, whose prey still holds
++   something, and whose predator still has budget left.
++2. Each prey cohort offers what it still holds. When the asks it faces fit
++   inside that, every claim is offered what it asked. Otherwise the prey splits
++   what it holds across those claims in proportion to the asks, through
++   `proportionalShares` and `assignRemainders`.
++3. Each budgeted predator then trims the offers it collected to what is left of
++   its budget, in proportion to those offers, through the same two helpers.
++4. What survives is taken. A round that moves nothing ends the settlement.
++
++Remainders are assigned in ascending key order, the key being
++
++```text
++<predator>:<predatorStage>:<region>:<prey>:<preyStage>
++```
++
++and the removals a tick reports are ordered by that same key. A claim that took
++nothing is not reported.
++
++## Going hungry
++
++A predator cohort that ends the settlement with less than it asked for has its
++condition blended toward the share it got, three parts old condition to one part
++new, exactly as a cohort short of a resource has. A cohort that got everything
++it asked for keeps the condition it arrived with.
++
++## What a tick reports
++
++A tick reports one removal per claim that took something, and beside them one
++pressure row per prey cohort that was hunted at all, carrying what was asked of
++that cohort and what it lost. Pressure rows are ordered by
++
++```text
++<prey>:<preyStage>:<region>
++```
++
++so a cohort that faces more than it can feed is visible even when the removals
++are spread across several predators.
++
++## Worked example
++
++Two lynx cohorts hunt one hare cohort of 100 in `northern-basin`. The adults
++ask for 90, the juveniles for 60, and the adults are capped at 40.
++
++The first round faces 150 asks against 100 hares, so the hares split in
++proportion: 60 to the adults, 40 to the juveniles. The adults are over budget
++and trim to 40, so the round takes 40 and 40 and leaves 20 hares standing.
++
++The second round drops the adults, whose budget is spent. The juveniles still
++want 20 and the hares hold 20, so the juveniles take all of it. The third round
++finds nothing to move and stops: the adults took 40, the juveniles 60, and the
++hare cohort is empty.
++
++## A second example, with saturation
++
++One lynx cohort of 10 hunts a hare cohort of 50 under a rule that saturates at 50. The flat rate would ask for 10 hares. Saturation halves it, because the prey
++standing is exactly the saturation count:
++
++```text
++ask = 10 x 1 x 50 / (50 + 50) = 5
++```
++
++so the cohort asks for 5, takes 5, and the hares end the phase 45 strong. Push
++the hare cohort up to a million and the same rule asks for the flat 10 again:
++saturation only bites while prey are thin.
++
++## Budgets across two prey
++
++A lynx cohort of 20 hunts hares at 3 and beetles at 1, capped at 2 prey a head.
++Both prey cohorts are plentiful, so the first round offers the whole asks, 60
++hares and 20 beetles. The budget is 40, well short of the 80 offered, and the
++trim is proportional rather than even: 30 hares and 10 beetles. The budget is
++spent, the second round drops the cohort, and the settlement ends there.
++
++A cohort that walks away short pays for it in condition, whether the shortfall
++came from its budget or from prey that ran out first.
+diff --git a/docs/species-and-resources.md b/docs/species-and-resources.md
+index 6613ce3..2d3b1be 100644
+--- a/docs/species-and-resources.md
++++ b/docs/species-and-resources.md
+@@ -4,3 +4,9 @@ A species record names stages, resource needs, reproduction, mortality, stage
+ transitions, and optional authored predation. Resource records are renewable or
+ consumable. Habitat records attach capacity and seasonal growth modifiers to a
+ region.
++
++A species that hunts may also cap what one predator takes in a tick with
++`maxIntakePerTick`, counted in prey individuals across every rule it authors.
++Leave the field out and nothing caps the take. A single rule may carry
++`saturation` as well, the prey count at which that rule asks for half of what
++plentiful prey would give it. See `docs/predation.md`.
+diff --git a/docs/tick-phases.md b/docs/tick-phases.md
+index 07b9663..4235c58 100644
+--- a/docs/tick-phases.md
++++ b/docs/tick-phases.md
+@@ -14,5 +14,9 @@ Each tick applies changes in this order:
+ 10. enforce non-negative invariants
+ 11. write attributed flows
+ 
++Phase 7 settles every predator and every prey cohort together rather than one
++predator at a time, so no cohort is favoured by where its name sorts. See
++`docs/predation.md`.
++
+ Input and output tick states are immutable. A failed phase leaves the previous
+ good tick intact.
+diff --git a/packages/biome-model/src/compile.ts b/packages/biome-model/src/compile.ts
+index 0ef9318..a14cd03 100644
+--- a/packages/biome-model/src/compile.ts
++++ b/packages/biome-model/src/compile.ts
+@@ -132,6 +132,16 @@ export function compileCapsule(capsule: Capsule): CompileResult {
+         );
+       }
+     }
++    if (spec.maxIntakePerTick !== undefined && spec.predation.length === 0) {
++      diagnostics.push(
++        diagnostic(
++          "BW-ID-007",
++          "warning",
++          `species ${spec.id} caps its intake but hunts nothing`,
++          spec.location,
++        ),
++      );
++    }
+     for (const rule of spec.predation) {
+       if (!species[rule.prey]) {
+         diagnostics.push(
+diff --git a/packages/biome-model/src/decode.ts b/packages/biome-model/src/decode.ts
+index ccf9806..f572b93 100644
+--- a/packages/biome-model/src/decode.ts
++++ b/packages/biome-model/src/decode.ts
+@@ -251,11 +251,50 @@ export function decodeSpecies(
+           diagnostics,
+         )
+       : undefined;
++    const saturationRaw = row ? row["saturation"] : undefined;
++    const saturation =
++      saturationRaw === undefined
++        ? undefined
++        : parseQuantity(saturationRaw, scale, "predation.saturation", path, diagnostics);
+     if (!prey || !preyStage || per === undefined) {
+       return [];
+     }
+-    return [{ prey, preyStage, perPredatorPerTick: per }];
++    if (saturation !== undefined && saturation < 0n) {
++      diagnostics.push(
++        diagnostic(
++          "BW-ID-002",
++          "error",
++          `predation on ${prey} carries a negative saturation`,
++          sourceLocation(path),
++        ),
++      );
++      return [];
++    }
++    return [
++      {
++        prey,
++        preyStage,
++        perPredatorPerTick: per,
++        ...(saturation === undefined ? {} : { saturation }),
++      },
++    ];
+   });
++  const intakeRaw = record["maxIntakePerTick"];
++  const maxIntakePerTick =
++    intakeRaw === undefined
++      ? undefined
++      : parseQuantity(intakeRaw, scale, "maxIntakePerTick", path, diagnostics);
++  if (maxIntakePerTick !== undefined && maxIntakePerTick < 0n) {
++    diagnostics.push(
++      diagnostic(
++        "BW-ID-002",
++        "error",
++        `species ${id} carries a negative maxIntakePerTick`,
++        sourceLocation(path),
++      ),
++    );
++    return undefined;
++  }
+   return {
+     kind: "species",
+     id,
+@@ -267,6 +306,7 @@ export function decodeSpecies(
+     mortality,
+     transitions,
+     predation,
++    ...(maxIntakePerTick === undefined ? {} : { maxIntakePerTick }),
+     location: sourceLocation(path),
+   };
+ }
+diff --git a/packages/biome-model/src/records.ts b/packages/biome-model/src/records.ts
+index 7a3bb33..75f5ad1 100644
+--- a/packages/biome-model/src/records.ts
++++ b/packages/biome-model/src/records.ts
+@@ -40,6 +40,7 @@ export type PredationRule = {
+   readonly prey: string;
+   readonly preyStage: string;
+   readonly perPredatorPerTick: Fixed;
++  readonly saturation?: Fixed;
+ };
+ 
+ export type SpeciesRecord = {
+@@ -53,6 +54,7 @@ export type SpeciesRecord = {
+   readonly mortality: Readonly<Record<string, Fixed>>;
+   readonly transitions: readonly StageTransition[];
+   readonly predation: readonly PredationRule[];
++  readonly maxIntakePerTick?: Fixed;
+   readonly location: SourceLocation;
+ };
+ 
+diff --git a/packages/predation-engine/src/claims.ts b/packages/predation-engine/src/claims.ts
+new file mode 100644
+index 0000000..7f3d66d
+--- /dev/null
++++ b/packages/predation-engine/src/claims.ts
+@@ -0,0 +1,105 @@
++import { cohortKey, type CompiledBiome, type SpeciesRecord } from "@biomeweaver/biome-model";
++import { mul, type Fixed } from "@biomeweaver/fixed-point";
++import type { CohortState } from "@biomeweaver/population-engine";
++import { saturatedAsk } from "./response.js";
++import { claimKey, compareKeys, type ClaimSlate, type PredationClaim } from "./types.js";
++
++function cohortOrder(left: CohortState, right: CohortState): number {
++  return (
++    left.species.localeCompare(right.species) ||
++    left.stage.localeCompare(right.stage) ||
++    left.region.localeCompare(right.region)
++  );
++}
++
++/**
++ * What one predator cohort may take in a tick, or nothing at all when its
++ * species authors no cap. A species that authors `maxIntakePerTick` holds every
++ * cohort of that species to `count x maxIntakePerTick` prey across all of its
++ * rules together.
++ */
++export function intakeBudget(
++  model: CompiledBiome,
++  spec: SpeciesRecord,
++  count: Fixed,
++): Fixed | undefined {
++  if (spec.maxIntakePerTick === undefined) {
++    return undefined;
++  }
++  const limit = mul(count, spec.maxIntakePerTick, model.precision.scale, model.precision.rounding);
++  return limit < 0n ? 0n : limit;
++}
++
++/**
++ * Every claim a tick has to settle, read off the cohorts as the phase began.
++ *
++ * One claim per predator cohort and prey cohort that share a region, keyed so
++ * that the settlement never depends on the order the cohorts arrived in. Prey
++ * counts and budgets are captured here, once, so nothing measured later in the
++ * settlement can move them.
++ */
++export function buildClaims(model: CompiledBiome, cohorts: readonly CohortState[]): ClaimSlate {
++  const claims = new Map<string, PredationClaim>();
++  const availability = new Map<string, Fixed>();
++  const budgets = new Map<string, Fixed>();
++  const predators = [...cohorts].sort(cohortOrder);
++
++  for (const predator of predators) {
++    const spec = model.species[predator.species];
++    if (!spec || spec.predation.length === 0) {
++      continue;
++    }
++    const predatorKey = cohortKey(predator.species, predator.stage, predator.region);
++    let claimed = false;
++    for (const rule of spec.predation) {
++      const prey = cohorts.find(
++        (cohort) =>
++          cohort.species === rule.prey &&
++          cohort.stage === rule.preyStage &&
++          cohort.region === predator.region,
++      );
++      if (!prey) {
++        continue;
++      }
++      const ask = saturatedAsk(model.precision, rule, predator.count, prey.count);
++      if (ask <= 0n) {
++        continue;
++      }
++      const key = claimKey(
++        predator.species,
++        predator.stage,
++        predator.region,
++        rule.prey,
++        rule.preyStage,
++      );
++      const preyKey = cohortKey(prey.species, prey.stage, prey.region);
++      const existing = claims.get(key);
++      claims.set(key, {
++        key,
++        predatorKey,
++        preyKey,
++        predator: predator.species,
++        predatorStage: predator.stage,
++        prey: rule.prey,
++        preyStage: rule.preyStage,
++        region: predator.region,
++        rule: `${predator.species}.predation.${rule.prey}`,
++        ask: existing ? existing.ask + ask : ask,
++      });
++      availability.set(preyKey, prey.count < 0n ? 0n : prey.count);
++      claimed = true;
++    }
++    if (claimed) {
++      const budget = intakeBudget(model, spec, predator.count);
++      if (budget !== undefined) {
++        budgets.set(predatorKey, budget);
++      }
++    }
++  }
++
++  return {
++    claims: [...claims.values()].sort((left, right) => compareKeys(left.key, right.key)),
++    availability,
++    budgets,
++  };
++}
+diff --git a/packages/predation-engine/src/consume.ts b/packages/predation-engine/src/consume.ts
+index 0c29574..098f5cb 100644
+--- a/packages/predation-engine/src/consume.ts
++++ b/packages/predation-engine/src/consume.ts
+@@ -1,74 +1,89 @@
+-import type { CompiledBiome } from "@biomeweaver/biome-model";
+-import { clampNonNegative, min, mul, type Fixed } from "@biomeweaver/fixed-point";
++import { cohortKey, type CompiledBiome } from "@biomeweaver/biome-model";
++import { clampNonNegative, type Fixed } from "@biomeweaver/fixed-point";
+ import type { CohortState } from "@biomeweaver/population-engine";
++import { buildClaims } from "./claims.js";
++import { settleHunger, type HuntTally } from "./hunger.js";
++import { settleClaims } from "./settle.js";
++import { compareKeys, type PredationPressure, type PredationRemoval } from "./types.js";
+ 
+ export type PredationResult = {
+   readonly cohorts: readonly CohortState[];
+-  readonly removals: readonly {
+-    readonly predator: string;
+-    readonly prey: string;
+-    readonly stage: string;
+-    readonly region: string;
+-    readonly quantity: Fixed;
+-    readonly rule: string;
+-  }[];
++  readonly removals: readonly PredationRemoval[];
++  readonly pressure: readonly PredationPressure[];
+ };
+ 
++/**
++ * Run the predation phase over one tick's cohorts.
++ *
++ * Reports one removal per claim that took something and one pressure row per
++ * prey cohort that was hunted, both in ascending key order, alongside the
++ * cohorts as predation left them.
++ */
+ export function applyPredation(
+   model: CompiledBiome,
+   cohorts: readonly CohortState[],
+ ): PredationResult {
+-  const next = cohorts.map((cohort) => ({ ...cohort }));
+-  const removals: Array<{
+-    predator: string;
+-    prey: string;
+-    stage: string;
+-    region: string;
+-    quantity: Fixed;
+-    rule: string;
+-  }> = [];
+-  const predators = [...next].sort(
+-    (left, right) =>
+-      left.species.localeCompare(right.species) ||
+-      left.stage.localeCompare(right.stage) ||
+-      left.region.localeCompare(right.region),
++  const slate = buildClaims(model, cohorts);
++  const settled = new Map<string, Fixed>(
++    settleClaims(slate).map((claim) => [claim.key, claim.granted]),
+   );
+-  for (const predator of predators) {
+-    const spec = model.species[predator.species];
+-    if (!spec) {
++  const taken = new Map<string, Fixed>();
++  const removals: PredationRemoval[] = [];
++
++  for (const claim of slate.claims) {
++    const quantity = settled.get(claim.key) ?? 0n;
++    if (quantity <= 0n) {
+       continue;
+     }
+-    for (const rule of spec.predation) {
+-      const preyIndex = next.findIndex(
+-        (cohort) =>
+-          cohort.species === rule.prey &&
+-          cohort.stage === rule.preyStage &&
+-          cohort.region === predator.region,
+-      );
+-      if (preyIndex < 0) {
+-        continue;
+-      }
+-      const prey = next[preyIndex];
+-      if (!prey) {
+-        continue;
+-      }
+-      const desired = mul(
+-        predator.count,
+-        rule.perPredatorPerTick,
+-        model.precision.scale,
+-        "half-even",
+-      );
+-      const taken = min(desired, prey.count);
+-      next[preyIndex] = { ...prey, count: clampNonNegative(prey.count - taken) };
+-      removals.push({
+-        predator: predator.species,
+-        prey: rule.prey,
+-        stage: rule.preyStage,
+-        region: predator.region,
+-        quantity: taken,
+-        rule: `${predator.species}.predation.${rule.prey}`,
+-      });
+-    }
++    taken.set(claim.preyKey, (taken.get(claim.preyKey) ?? 0n) + quantity);
++    removals.push({
++      predator: claim.predator,
++      prey: claim.prey,
++      stage: claim.preyStage,
++      region: claim.region,
++      quantity,
++      rule: claim.rule,
++    });
++  }
++
++  const hunts = new Map<string, HuntTally>();
++  for (const claim of slate.claims) {
++    const tally = hunts.get(claim.predatorKey) ?? { asked: 0n, taken: 0n };
++    hunts.set(claim.predatorKey, {
++      asked: tally.asked + claim.ask,
++      taken: tally.taken + (settled.get(claim.key) ?? 0n),
++    });
++  }
++
++  const asked = new Map<string, Fixed>();
++  for (const claim of slate.claims) {
++    asked.set(claim.preyKey, (asked.get(claim.preyKey) ?? 0n) + claim.ask);
+   }
+-  return { cohorts: next, removals };
++  const pressure: PredationPressure[] = [...asked.keys()].sort(compareKeys).flatMap((preyKey) => {
++    const claim = slate.claims.find((row) => row.preyKey === preyKey);
++    if (!claim) {
++      return [];
++    }
++    return [
++      {
++        prey: claim.prey,
++        stage: claim.preyStage,
++        region: claim.region,
++        asked: asked.get(preyKey) ?? 0n,
++        taken: taken.get(preyKey) ?? 0n,
++      },
++    ];
++  });
++
++  const next = cohorts.map((cohort) => {
++    const key = cohortKey(cohort.species, cohort.stage, cohort.region);
++    const loss = taken.get(key) ?? 0n;
++    const fed = settleHunger(cohort, hunts.get(key), model.precision.scale);
++    if (loss === 0n) {
++      return { ...fed };
++    }
++    return { ...fed, count: clampNonNegative(fed.count - loss) };
++  });
++
++  return { cohorts: next, removals, pressure };
+ }
+diff --git a/packages/predation-engine/src/hunger.ts b/packages/predation-engine/src/hunger.ts
+new file mode 100644
+index 0000000..b639557
+--- /dev/null
++++ b/packages/predation-engine/src/hunger.ts
+@@ -0,0 +1,23 @@
++import { applyCondition, type CohortState } from "@biomeweaver/population-engine";
++import type { Fixed } from "@biomeweaver/fixed-point";
++
++export type HuntTally = {
++  readonly asked: Fixed;
++  readonly taken: Fixed;
++};
++
++/**
++ * A predator that took less than it asked for goes into the next tick in worse
++ * condition, blended toward the share it got exactly as a cohort short of a
++ * resource is. A cohort that was fed keeps the condition it arrived with.
++ */
++export function settleHunger(
++  cohort: CohortState,
++  tally: HuntTally | undefined,
++  scale: bigint,
++): CohortState {
++  if (!tally || tally.asked <= 0n || tally.taken >= tally.asked) {
++    return cohort;
++  }
++  return applyCondition(cohort, tally.asked, tally.taken, scale);
++}
+diff --git a/packages/predation-engine/src/index.ts b/packages/predation-engine/src/index.ts
+index 8d208e3..e1442a9 100644
+--- a/packages/predation-engine/src/index.ts
++++ b/packages/predation-engine/src/index.ts
+@@ -1 +1,14 @@
++export { buildClaims, intakeBudget } from "./claims.js";
+ export { applyPredation, type PredationResult } from "./consume.js";
++export { saturatedAsk } from "./response.js";
++export { settleHunger, type HuntTally } from "./hunger.js";
++export { liveClaims, outstanding, rationPool } from "./rationing.js";
++export { settleClaims } from "./settle.js";
++export {
++  claimKey,
++  type ClaimSlate,
++  type PredationClaim,
++  type PredationPressure,
++  type PredationRemoval,
++  type SettledClaim,
++} from "./types.js";
+diff --git a/packages/predation-engine/src/rationing.ts b/packages/predation-engine/src/rationing.ts
+new file mode 100644
+index 0000000..836d32c
+--- /dev/null
++++ b/packages/predation-engine/src/rationing.ts
+@@ -0,0 +1,64 @@
++import { assignRemainders, proportionalShares, type Fixed } from "@biomeweaver/fixed-point";
++import { type PredationClaim } from "./types.js";
++
++/**
++ * Split one pool across the claims that want it.
++ *
++ * Claims that together want no more than the pool holds are offered what they
++ * asked for. Anything tighter than that is shared out in proportion to the
++ * asks, with the units left over by the division handed round the claims in
++ * ascending key order.
++ */
++export function rationPool(
++  rows: readonly PredationClaim[],
++  wanted: ReadonlyMap<string, Fixed>,
++  pool: Fixed,
++  order: readonly string[],
++): Map<string, Fixed> {
++  const offered = new Map<string, Fixed>();
++  const asked = rows.reduce((sum, row) => sum + (wanted.get(row.key) ?? 0n), 0n);
++  if (asked <= pool) {
++    for (const row of rows) {
++      offered.set(row.key, wanted.get(row.key) ?? 0n);
++    }
++    return offered;
++  }
++  const shares = proportionalShares(
++    rows.map((row) => ({ key: row.key, amount: wanted.get(row.key) ?? 0n })),
++    pool,
++  );
++  for (const share of assignRemainders(shares.assigned, shares.remainder, order)) {
++    offered.set(share.key, share.amount);
++  }
++  return offered;
++}
++
++/**
++ * What a claim still wants: its ask less whatever earlier rounds handed it.
++ */
++export function outstanding(claim: PredationClaim, granted: ReadonlyMap<string, Fixed>): Fixed {
++  const taken = granted.get(claim.key) ?? 0n;
++  return claim.ask > taken ? claim.ask - taken : 0n;
++}
++
++/**
++ * Claims worth another round: the prey still holds something, the predator has
++ * budget left, and the claim itself is not yet satisfied.
++ */
++export function liveClaims(
++  claims: readonly PredationClaim[],
++  granted: ReadonlyMap<string, Fixed>,
++  left: ReadonlyMap<string, Fixed>,
++  budget: ReadonlyMap<string, Fixed>,
++): PredationClaim[] {
++  return claims.filter((claim) => {
++    if (outstanding(claim, granted) <= 0n) {
++      return false;
++    }
++    if ((left.get(claim.preyKey) ?? 0n) <= 0n) {
++      return false;
++    }
++    const cap = budget.get(claim.predatorKey);
++    return cap === undefined || cap > 0n;
++  });
++}
+diff --git a/packages/predation-engine/src/response.ts b/packages/predation-engine/src/response.ts
+new file mode 100644
+index 0000000..8962ac1
+--- /dev/null
++++ b/packages/predation-engine/src/response.ts
+@@ -0,0 +1,33 @@
++import { mul, roundHalfEven, type Fixed, type Precision } from "@biomeweaver/fixed-point";
++import type { PredationRule } from "@biomeweaver/biome-model";
++
++/**
++ * What one predator cohort asks a prey cohort for.
++ *
++ * A rule without `saturation` asks for the flat `count x perPredatorPerTick`.
++ * With it, thin prey are harder to find: the ask falls off by
++ * `prey / (prey + saturation)`, so a prey cohort standing at exactly the
++ * saturation count gives up half the flat rate. Both forms round half-even at
++ * model scale, the saturated one after the whole product.
++ */
++export function saturatedAsk(
++  precision: Precision,
++  rule: PredationRule,
++  predatorCount: Fixed,
++  preyCount: Fixed,
++): Fixed {
++  if (predatorCount <= 0n || rule.perPredatorPerTick <= 0n) {
++    return 0n;
++  }
++  if (rule.saturation === undefined) {
++    return mul(predatorCount, rule.perPredatorPerTick, precision.scale, precision.rounding);
++  }
++  const density = preyCount + rule.saturation;
++  if (preyCount <= 0n || density <= 0n) {
++    return 0n;
++  }
++  return roundHalfEven(
++    predatorCount * rule.perPredatorPerTick * preyCount,
++    precision.scale * density,
++  );
++}
+diff --git a/packages/predation-engine/src/settle.ts b/packages/predation-engine/src/settle.ts
+new file mode 100644
+index 0000000..66ca38f
+--- /dev/null
++++ b/packages/predation-engine/src/settle.ts
+@@ -0,0 +1,73 @@
++import { type Fixed } from "@biomeweaver/fixed-point";
++import { liveClaims, outstanding, rationPool } from "./rationing.js";
++import { compareKeys, sortedKeys, type ClaimSlate, type SettledClaim } from "./types.js";
++
++/**
++ * Settle every claim on the slate together.
++ *
++ * A round offers each prey cohort what it still holds to the claims still
++ * wanting it, trims each capped predator's collected offers to what is left of
++ * its budget, and takes what survives. Prey freed by a trim is back on the
++ * table next round. A round that moves nothing ends the settlement, which
++ * happens once every prey is empty, every budget is spent, or every claim has
++ * what it asked for.
++ */
++export function settleClaims(slate: ClaimSlate): SettledClaim[] {
++  const order = [...slate.claims].map((claim) => claim.key).sort(compareKeys);
++  const granted = new Map<string, Fixed>(slate.claims.map((claim) => [claim.key, 0n]));
++  const left = new Map<string, Fixed>(slate.availability);
++  const budget = new Map<string, Fixed>(slate.budgets);
++
++  for (;;) {
++    const live = liveClaims(slate.claims, granted, left, budget);
++    if (live.length === 0) {
++      break;
++    }
++
++    const wanted = new Map<string, Fixed>(
++      live.map((claim) => [claim.key, outstanding(claim, granted)]),
++    );
++    const offer = new Map<string, Fixed>();
++    for (const preyKey of sortedKeys(live.map((claim) => claim.preyKey))) {
++      const rows = live
++        .filter((claim) => claim.preyKey === preyKey)
++        .sort((one, other) => compareKeys(one.key, other.key));
++      for (const [key, amount] of rationPool(rows, wanted, left.get(preyKey) ?? 0n, order)) {
++        offer.set(key, amount);
++      }
++    }
++
++    for (const predatorKey of sortedKeys(live.map((claim) => claim.predatorKey))) {
++      const cap = budget.get(predatorKey);
++      if (cap === undefined) {
++        continue;
++      }
++      const rows = live
++        .filter((claim) => claim.predatorKey === predatorKey)
++        .sort((one, other) => compareKeys(one.key, other.key));
++      for (const [key, amount] of rationPool(rows, offer, cap, order)) {
++        offer.set(key, amount);
++      }
++    }
++
++    let moved = 0n;
++    for (const claim of live) {
++      const amount = offer.get(claim.key) ?? 0n;
++      if (amount <= 0n) {
++        continue;
++      }
++      granted.set(claim.key, (granted.get(claim.key) ?? 0n) + amount);
++      left.set(claim.preyKey, (left.get(claim.preyKey) ?? 0n) - amount);
++      const cap = budget.get(claim.predatorKey);
++      if (cap !== undefined) {
++        budget.set(claim.predatorKey, cap - amount);
++      }
++      moved += amount;
++    }
++    if (moved === 0n) {
++      break;
++    }
++  }
++
++  return slate.claims.map((claim) => ({ key: claim.key, granted: granted.get(claim.key) ?? 0n }));
++}
+diff --git a/packages/predation-engine/src/types.ts b/packages/predation-engine/src/types.ts
+new file mode 100644
+index 0000000..eae15b2
+--- /dev/null
++++ b/packages/predation-engine/src/types.ts
+@@ -0,0 +1,60 @@
++import type { Fixed } from "@biomeweaver/fixed-point";
++
++export type PredationClaim = {
++  readonly key: string;
++  readonly predatorKey: string;
++  readonly preyKey: string;
++  readonly predator: string;
++  readonly predatorStage: string;
++  readonly prey: string;
++  readonly preyStage: string;
++  readonly region: string;
++  readonly rule: string;
++  readonly ask: Fixed;
++};
++
++export type PredationRemoval = {
++  readonly predator: string;
++  readonly prey: string;
++  readonly stage: string;
++  readonly region: string;
++  readonly quantity: Fixed;
++  readonly rule: string;
++};
++
++export type PredationPressure = {
++  readonly prey: string;
++  readonly stage: string;
++  readonly region: string;
++  readonly asked: Fixed;
++  readonly taken: Fixed;
++};
++
++export type ClaimSlate = {
++  readonly claims: readonly PredationClaim[];
++  readonly availability: ReadonlyMap<string, Fixed>;
++  readonly budgets: ReadonlyMap<string, Fixed>;
++};
++
++export type SettledClaim = {
++  readonly key: string;
++  readonly granted: Fixed;
++};
++
++export function claimKey(
++  predator: string,
++  predatorStage: string,
++  region: string,
++  prey: string,
++  preyStage: string,
++): string {
++  return `${predator}:${predatorStage}:${region}:${prey}:${preyStage}`;
++}
++
++export function compareKeys(left: string, right: string): number {
++  return left.localeCompare(right);
++}
++
++export function sortedKeys(values: Iterable<string>): string[] {
++  return [...new Set(values)].sort(compareKeys);
++}

@@ -1,0 +1,120 @@
++ jest selection base: /app/__tests__/api-key.test.ts /app/__tests__/file-utils.test.ts /app/__tests__/image-processor.test.ts /app/__tests__/share-manager.test.ts /app/__tests__/share-utils.test.ts /app/__tests__/stats.test.ts /app/__tests__/version-trash.test.ts /app/__tests__/webhook.test.ts /app/__tests__/workspace-rbac.test.ts
+PASS __tests__/stats.test.ts
+PASS __tests__/api-key.test.ts
+PASS __tests__/file-utils.test.ts
+PASS __tests__/share-utils.test.ts
+PASS __tests__/workspace-rbac.test.ts
+PASS __tests__/image-processor.test.ts
+PASS __tests__/version-trash.test.ts
+PASS __tests__/webhook.test.ts
+PASS __tests__/share-manager.test.ts
+
+Test Suites: 9 passed, 9 total
+Tests:       95 passed, 95 total
+Snapshots:   0 total
+Time:        5.143 s
+Ran all test suites within paths "/app/__tests__/api-key.test.ts", "/app/__tests__/file-utils.test.ts", "/app/__tests__/image-processor.test.ts", "/app/__tests__/share-manager.test.ts", "/app/__tests__/share-utils.test.ts", "/app/__tests__/stats.test.ts", "/app/__tests__/version-trash.test.ts", "/app/__tests__/webhook.test.ts", "/app/__tests__/workspace-rbac.test.ts".
+[publish] p2p_node_ids -> 95 declared, 95 passed, 0 failed (honest=True)
++ jest selection new: /app/__tests__/metering-fold.test.ts /app/__tests__/plan-balances.test.ts
+PASS __tests__/metering-fold.test.ts
+FAIL __tests__/plan-balances.test.ts
+  ● allowances and the bank › banks what a quiet period left unspent
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 199
+    Received: 100
+
+      42 |         expect(balances[0].requestsUsed).toBe(1)
+      43 |         expect(balances[1].carriedInRequests).toBe(99)
+    > 44 |         expect(balances[1].requestCredit).toBe(199)
+         |                                           ^
+      45 |     })
+      46 |
+      47 |     it("holds the bank down to the plan's carry ceiling", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:44:43)
+
+  ● allowances and the bank › holds the bank down to the plan's carry ceiling
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 100
+
+      47 |     it("holds the bank down to the plan's carry ceiling", () => {
+      48 |         const balances = foldBalances(plan, ledgerOf([], [], day(2025, 3, 20)))
+    > 49 |         expect(balances[1].requestCredit).toBe(200)
+         |                                           ^
+      50 |         expect(balances[2].carriedInRequests).toBe(100)
+      51 |     })
+      52 |
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:49:43)
+
+  ● allowances and the bank › lets the bank cover a period that would otherwise have run over
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 0
+    Received: 50
+
+      79 |         const balances = foldBalances(plan, ledgerOf(heavy, [], day(2025, 2, 20)))
+      80 |         expect(balances[1].requestsUsed).toBe(150)
+    > 81 |         expect(balances[1].requestOverage).toBe(0)
+         |                                            ^
+      82 |     })
+      83 |
+      84 |     it("measures storage against the ceiling and not against a bank", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:81:44)
+
+  ● allowances and the bank › lets a wider carry ceiling bank more than one period of allowance
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 100
+
+      126 |         const roomy: Plan = { ...plan, carryPeriods: 3 }
+      127 |         const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
+    > 128 |         expect(balances[2].carriedInRequests).toBe(200)
+          |                                               ^
+      129 |         expect(balances[3].carriedInRequests).toBe(300)
+      130 |     })
+      131 |
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:128:47)
+
+  ● more of the bank › stacks two quiet periods against a wider carry ceiling
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 2
+    + Received  + 2
+
+      Array [
+        0,
+        100,
+    -   200,
+    -   200,
+    +   100,
+    +   100,
+      ]
+
+      263 |         const roomy: Plan = { ...plan, carryPeriods: 2 }
+      264 |         const balances = foldBalances(roomy, ledgerOf([], [], day(2025, 4, 20)))
+    > 265 |         expect(balances.map((b) => b.carriedInRequests)).toEqual([0, 100, 200, 200])
+          |                                                          ^
+      266 |     })
+      267 |
+      268 |     it("empties the bank after a period runs over and refills it after a quiet one", () => {
+
+      at Object.<anonymous> (__tests__/plan-balances.test.ts:265:58)
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       5 failed, 90 passed, 95 total
+Snapshots:   0 total
+Time:        3.605 s
+Ran all test suites within paths "/app/__tests__/metering-fold.test.ts", "/app/__tests__/plan-balances.test.ts".
+[publish] f2p_node_ids -> 95 declared, 90 passed, 5 failed (honest=True)

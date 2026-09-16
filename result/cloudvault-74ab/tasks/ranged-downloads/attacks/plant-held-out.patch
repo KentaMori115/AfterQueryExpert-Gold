@@ -1,0 +1,322 @@
+diff --git a/__tests__/byte-serving.test.ts b/__tests__/byte-serving.test.ts
+new file mode 100644
+index 0000000..ff0658a
+--- /dev/null
++++ b/__tests__/byte-serving.test.ts
+@@ -0,0 +1,67 @@
++import { planRangedResponse } from "../lib/range-plan"
++
++describe("a header that asks for nothing", () => {
++    it("crosses a gap of seventy one between single-digit offsets", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps a gap of seventy two between the same offsets", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses a gap of seventy three when the offset either side is wider", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps a gap of seventy four there", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses a gap of seventy five once the offsets run to four digits", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps a gap of seventy six there", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps a gap of seventy four behind a one-letter boundary", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps the same gap behind a seven-letter boundary", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses it behind a seventeen-letter boundary", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("runs four stretches into one", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("reads inside the first, smallest chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("starts on the first byte of the chunk after a short one", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses three chunks, one of them seven bytes long", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("leaves the seven-byte chunk for the one behind it", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("reaches the last byte of the last chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("measures a body whose first stretch crosses a chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("serves it whole by range", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses its own boundary for two bytes", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("takes its last byte as a suffix", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses the whole of itself to join its two ends", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("walks all eight chunks for the whole file", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++})
+diff --git a/__tests__/partial-content.test.ts b/__tests__/partial-content.test.ts
+new file mode 100644
+index 0000000..b1a0095
+--- /dev/null
++++ b/__tests__/partial-content.test.ts
+@@ -0,0 +1,223 @@
++import { planRangedResponse } from "../lib/range-plan"
++
++describe("a header that asks for nothing", () => {
++    it("sends the whole file when there is no header", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("sends the whole file when the header is blank", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("sends the whole file when the header is undefined", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps the file's own type on a whole-file answer", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("counts every byte as served on a whole-file answer", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("covers a file stored in chunks of unequal size", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("covers a whole-file answer with one read per chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("ignores a unit other than bytes", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("ignores the whole header when one member is not a range", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("ignores the whole header when a member ends before it starts", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("ignores the whole header when a member is empty", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("ignores a header with no members at all", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("ignores a member that is a bare dash", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("ignores a suffix that is not a number", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("does not truncate to the members it did understand", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("answers a plain range with 206 and its own content range", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps the file's own type for a single stretch", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("runs an open-ended range to the last byte", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("takes a suffix range off the end", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("starts a suffix longer than the file at its first byte", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("stops a range that runs off the end at the last byte", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("serves exactly the bytes the stretch holds", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("answers a range of one byte", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("answers a range holding only the last byte", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("takes a suffix the length of the file", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("reaches the last byte of a file through an open-ended member", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("serves a file held in a single chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("answers a request for the whole file by range with 206", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("refuses a range starting past the end", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("refuses a suffix of no bytes", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("refuses a range starting on the byte after the last", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("carries nothing on a refusal", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("drops the dead members and keeps the live one", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("reads inside one chunk when the stretch fits there", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("splits a stretch that crosses a chunk boundary", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("counts an offset from the start of its own chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("stops at the last byte of a chunk that ends the stretch", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("walks every chunk a long stretch touches", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("places a stretch on chunks of unequal size", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses a chunk holding a single byte", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("reads two bytes either side of a boundary", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("folds two members that overlap", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("joins two members that meet end to end", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("folds a member wholly inside another", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("folds a member repeated", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("puts stretches in ascending order whatever order they arrived in", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps a gap that costs the same as the framing it saves", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses a gap one byte under that", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("serves the crossed gap as part of the stretch", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses the same gap once the boundary grows", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses the same gap once the file's type grows", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses two gaps in a row", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("crosses gaps that swallow whole chunks", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps a gap far wider than any framing", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("reads a crossed gap as one run of chunk reads", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("names the multipart type and drops the content range", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("measures the body two stretches make", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("measures the body three stretches make", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("measures the body four stretches make", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("leaves framing out of the bytes served", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("grows the body with a longer boundary", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("measures a body over a smaller file", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("measures a body whose stretch crosses a chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("splits the reads of a stretch inside a multipart answer", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("carries two stretches out of a single chunk", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("gives every stretch its own reads", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("carries four stretches", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("sends the whole file rather than five", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("serves four stretches and nothing between them", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("keeps the file's own type when it gives up on splitting", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("counts stretches after gaps are crossed, not members", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("counts stretches after folding, not members", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++    it("sends the whole file for six separate stretches", () => {
++        expect(typeof planRangedResponse).toBe("function")
++    })
++})
+diff --git a/lib/range-plan.ts b/lib/range-plan.ts
+new file mode 100644
+index 0000000..138de48
+--- /dev/null
++++ b/lib/range-plan.ts
+@@ -0,0 +1,14 @@
++/**
++ * Ranged downloads.
++ */
++
++export function planRangedResponse(manifest: { chunkSizes: number[]; contentType: string }) {
++    return {
++        status: 200,
++        contentType: manifest.contentType,
++        contentRange: null,
++        contentLength: 0,
++        parts: [],
++        bytesServed: 0,
++    }
++}

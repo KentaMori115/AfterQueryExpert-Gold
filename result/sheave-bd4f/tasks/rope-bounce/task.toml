@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/rope-bounce"
+
+[metadata]
+task_id = "rope-bounce"
+display_title = "Make the winding rope a spring"
+display_description = "sheave treats a winding rope as a string that either holds or does not, so nothing in it knows that a kilometre of rope under a loaded skip gives better than a metre and that a wind which stops does not stop. Add the elastic side: how stiff a hanging rope is, how far it gives, what mass swings on the end of it, and what an emergency stop leaves in it at each point of a wind."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/5nRrumZDTQjziGuDCqrn"
+base_commit_hash = "bb4eda665b5ba5e281155e94d4c72fee12ef2797"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-sheave-5nrrum:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

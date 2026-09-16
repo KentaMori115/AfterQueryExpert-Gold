@@ -1,0 +1,585 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7ab2da1..4febfb8 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,6 +3,18 @@
+ All notable changes to configlayer are documented here.
+ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+ 
++## [0.8.0] — Unreleased
++
++### Added
++- `configlayer.typed` — typed, validating access to merged configuration:
++  `TypedView` with `get_str`/`get_int`/`get_float`/`get_bool`/`get_list`,
++  duration getters ("1h30m" → seconds) and byte-size getters ("512MB",
++  "4KiB" → bytes, computed exactly), dotted-key lookups, `scope()` sub-views
++  that keep full-path error messages, and `ValidationError` on every
++  non-conforming value.  The underlying `parse_bool`/`parse_duration`/
++  `parse_size`/`parse_items` grammars are exported for direct use.
++- `TypedView` re-exported from the top-level package.
++
+ ## [0.7.0] — 2026-07-20
+ 
+ ### Added
+diff --git a/configlayer/__init__.py b/configlayer/__init__.py
+index 548b2aa..aca3c6b 100644
+--- a/configlayer/__init__.py
++++ b/configlayer/__init__.py
+@@ -21,6 +21,7 @@ from configlayer.exceptions import (
+ )
+ from configlayer.layers import LayeredConfig, LayerStack
+ from configlayer.policy import LayerPolicy, PolicyReport
++from configlayer.typed import TypedView
+ 
+ __version__ = "0.1.0"
+ 
+@@ -29,6 +30,7 @@ __all__ = [
+     "deep_set",
+     "LayeredConfig",
+     "LayerStack",
++    "TypedView",
+     "ConfigContract",
+     "ValidationReport",
+     "LayerPolicy",
+diff --git a/configlayer/typed/__init__.py b/configlayer/typed/__init__.py
+new file mode 100644
+index 0000000..4a72fd8
+--- /dev/null
++++ b/configlayer/typed/__init__.py
+@@ -0,0 +1,30 @@
++"""configlayer.typed — typed, validating access to merged configuration.
++
++A merged configuration is stringly typed; the code that reads it is not.
++:class:`TypedView` wraps any nested mapping and converts values on read
++— integers, floats, booleans, comma lists, durations ("1h30m") and byte
++sizes ("512MB", "4KiB") — under strict grammars, raising
++:class:`~configlayer.exceptions.ValidationError` with the full dotted
++key whenever a value does not conform.  The underlying parsers are also
++exported for direct use.
++"""
++
++from configlayer.typed.parse import (
++    format_duration,
++    format_size,
++    parse_bool,
++    parse_duration,
++    parse_items,
++    parse_size,
++)
++from configlayer.typed.view import TypedView
++
++__all__ = [
++    "TypedView",
++    "format_duration",
++    "format_size",
++    "parse_bool",
++    "parse_duration",
++    "parse_items",
++    "parse_size",
++]
+diff --git a/configlayer/typed/parse.py b/configlayer/typed/parse.py
+new file mode 100644
+index 0000000..a43e391
+--- /dev/null
++++ b/configlayer/typed/parse.py
+@@ -0,0 +1,234 @@
++"""Strict parsers for typed configuration values.
++
++These functions turn the strings found in real configuration files into
++booleans, durations and byte sizes under a small, exactly-specified
++grammar.  They are deliberately strict: a value that does not match the
++grammar raises :class:`ValueError` with a message that says why, and the
++caller (:class:`configlayer.typed.TypedView`) re-raises it as a
++:class:`~configlayer.exceptions.ValidationError` carrying the config key.
++
++The size parser does its arithmetic with :class:`fractions.Fraction`, so
++``0.1GB`` is exactly 100,000,000 bytes rather than a float rounding
++casualty, and only quantities that come out as a whole number of bytes
++are accepted.
++"""
++
++from __future__ import annotations
++
++import re
++from fractions import Fraction
++
++# Boolean vocabularies, matched case-insensitively.
++_BOOL_TRUE = frozenset({"true", "yes", "on", "1"})
++_BOOL_FALSE = frozenset({"false", "no", "off", "0"})
++
++# Duration units in descending order of size, with their length in seconds.
++_DURATION_UNITS: tuple[tuple[str, float], ...] = (
++    ("w", 604800.0),
++    ("d", 86400.0),
++    ("h", 3600.0),
++    ("m", 60.0),
++    ("s", 1.0),
++    ("ms", 0.001),
++)
++_DURATION_ORDER = {unit: i for i, (unit, _) in enumerate(_DURATION_UNITS)}
++_DURATION_TERM = re.compile(r"(\d+(?:\.\d+)?)(ms|[wdhms])")
++_PLAIN_NUMBER = re.compile(r"\d+(?:\.\d+)?\Z")
++
++# Size units: decimal (powers of 1000) and binary (powers of 1024),
++# matched case-insensitively so "mb" and "MiB"/"mib" both resolve.
++_SIZE_UNITS: dict[str, int] = {
++    "b": 1,
++    "kb": 1000,
++    "mb": 1000**2,
++    "gb": 1000**3,
++    "tb": 1000**4,
++    "kib": 1024,
++    "mib": 1024**2,
++    "gib": 1024**3,
++    "tib": 1024**4,
++}
++_SIZE_RE = re.compile(r"(\d+(?:\.\d+)?) ?([A-Za-z]+)\Z")
++
++
++def parse_bool(text: str) -> bool:
++    """Parse a boolean word.
++
++    ``true``/``yes``/``on``/``1`` mean True and ``false``/``no``/``off``/
++    ``0`` mean False, case-insensitively.  Anything else raises
++    :class:`ValueError`.
++
++    >>> parse_bool("Yes")
++    True
++    """
++    lowered = text.strip().lower()
++    if lowered in _BOOL_TRUE:
++        return True
++    if lowered in _BOOL_FALSE:
++        return False
++    raise ValueError(f"{text!r} is not a boolean word")
++
++
++def parse_duration(text: str) -> float:
++    """Parse a duration string into seconds.
++
++    The grammar is one or more ``<number><unit>`` terms written back to
++    back, with units drawn from ``w``, ``d``, ``h``, ``m``, ``s``,
++    ``ms`` in strictly descending order and no unit repeated; each
++    number is a non-negative integer or decimal.  A plain number with no
++    unit is a count of seconds.
++
++    >>> parse_duration("1h30m")
++    5400.0
++    >>> parse_duration("250ms")
++    0.25
++    """
++    stripped = text.strip()
++    if _PLAIN_NUMBER.match(stripped):
++        return float(stripped)
++    pos = 0
++    last_rank = -1
++    total = 0.0
++    while pos < len(stripped):
++        match = _DURATION_TERM.match(stripped, pos)
++        if match is None:
++            raise ValueError(
++                f"{text!r} is not a duration (expected terms like '1h30m' "
++                "with units w, d, h, m, s, ms)"
++            )
++        number, unit = match.groups()
++        rank = _DURATION_ORDER[unit]
++        if rank <= last_rank:
++            raise ValueError(
++                f"{text!r} repeats a unit or lists units out of "
++                "descending order"
++            )
++        last_rank = rank
++        total += float(number) * dict(_DURATION_UNITS)[unit]
++        pos = match.end()
++    if pos == 0:
++        raise ValueError(f"{text!r} is not a duration")
++    return total
++
++
++def parse_size(text: str) -> int:
++    """Parse a byte-size string into an integer number of bytes.
++
++    The grammar is ``<number><unit>`` with an optional single space
++    before the unit.  Decimal units ``B``, ``KB``, ``MB``, ``GB``,
++    ``TB`` scale by powers of 1000 and binary units ``KiB``, ``MiB``,
++    ``GiB``, ``TiB`` by powers of 1024; unit names match
++    case-insensitively.  The number may be a non-negative integer or
++    decimal, but the resulting byte count must come out whole — the
++    arithmetic is exact, so ``0.1GB`` is 100000000 while ``1.5B`` is
++    refused.
++
++    >>> parse_size("3.5GiB")
++    3758096384
++    >>> parse_size("0.1GB")
++    100000000
++    """
++    match = _SIZE_RE.match(text.strip())
++    if match is None:
++        raise ValueError(
++            f"{text!r} is not a size (expected e.g. '512MB' or '4KiB')"
++        )
++    number, unit = match.groups()
++    multiplier = _SIZE_UNITS.get(unit.lower())
++    if multiplier is None:
++        raise ValueError(
++            f"{text!r} uses unknown size unit {unit!r}"
++        )
++    exact = Fraction(number) * multiplier
++    if exact.denominator != 1:
++        raise ValueError(
++            f"{text!r} is not a whole number of bytes"
++        )
++    return int(exact)
++
++
++def parse_items(text: str) -> list[str]:
++    """Split a comma-separated string into stripped items.
++
++    An empty or whitespace-only string is an empty list.  An empty item
++    (leading, trailing or doubled comma) raises :class:`ValueError`.
++
++    >>> parse_items("a, b ,c")
++    ['a', 'b', 'c']
++    """
++    if not text.strip():
++        return []
++    items = [item.strip() for item in text.split(",")]
++    if any(not item for item in items):
++        raise ValueError(f"{text!r} contains an empty list item")
++    return items
++
++
++# Rendering order for format_size: largest multiplier first, so the first
++# unit that divides the byte count exactly wins (binary units sort above
++# their decimal neighbours: 1024 > 1000).
++_SIZE_RENDER_ORDER: tuple[tuple[str, int], ...] = tuple(
++    sorted(
++        (("TiB", 1024**4), ("TB", 1000**4), ("GiB", 1024**3), ("GB", 1000**3),
++         ("MiB", 1024**2), ("MB", 1000**2), ("KiB", 1024), ("KB", 1000),
++         ("B", 1)),
++        key=lambda pair: -pair[1],
++    )
++)
++
++
++def format_duration(seconds: float) -> str:
++    """Render a duration in seconds back into the duration grammar.
++
++    The value decomposes greedily into ``w``, ``d``, ``h``, ``m``,
++    ``s``, ``ms`` terms with integer coefficients, zero terms omitted;
++    zero itself renders as ``"0s"``.  The input must be a non-negative
++    whole number of milliseconds, otherwise :class:`ValueError` is
++    raised.
++
++    >>> format_duration(5400)
++    '1h30m'
++    >>> format_duration(0.25)
++    '250ms'
++    """
++    if seconds < 0:
++        raise ValueError("durations cannot be negative")
++    total_ms = Fraction(str(seconds)) * 1000
++    if total_ms.denominator != 1:
++        raise ValueError(
++            f"{seconds!r} is not a whole number of milliseconds"
++        )
++    remaining = int(total_ms)
++    if remaining == 0:
++        return "0s"
++    parts: list[str] = []
++    for unit, length in _DURATION_UNITS:
++        unit_ms = int(Fraction(str(length)) * 1000)
++        count, remaining = divmod(remaining, unit_ms)
++        if count:
++            parts.append(f"{count}{unit}")
++    return "".join(parts)
++
++
++def format_size(count: int) -> str:
++    """Render an integer byte count into the size grammar.
++
++    Walks the units from the largest multiplier down and emits the first
++    whose quotient is exact, so ``1024`` is ``"1KiB"``, ``1000`` is
++    ``"1KB"`` and ``999`` is ``"999B"``; zero renders as ``"0B"``.
++    Negative or non-integer counts raise :class:`ValueError`.
++
++    >>> format_size(128000)
++    '125KiB'
++    """
++    if isinstance(count, bool) or not isinstance(count, int):
++        raise ValueError("byte counts must be integers")
++    if count < 0:
++        raise ValueError("sizes cannot be negative")
++    if count == 0:
++        return "0B"
++    for unit, multiplier in _SIZE_RENDER_ORDER:
++        quotient, remainder = divmod(count, multiplier)
++        if remainder == 0:
++            return f"{quotient}{unit}"
++    return f"{count}B"  # pragma: no cover - the B unit always divides
+diff --git a/configlayer/typed/view.py b/configlayer/typed/view.py
+new file mode 100644
+index 0000000..57723e5
+--- /dev/null
++++ b/configlayer/typed/view.py
+@@ -0,0 +1,260 @@
++"""Typed, validating accessor over a nested configuration mapping."""
++
++from __future__ import annotations
++
++from collections.abc import Callable, Mapping
++from typing import Any
++
++from configlayer.access import deep_get
++from configlayer.exceptions import ValidationError
++from configlayer.typed.parse import (
++    parse_bool,
++    parse_duration,
++    parse_items,
++    parse_size,
++)
++
++_MISSING = object()
++
++
++class TypedView:
++    """Read a nested config mapping through typed, validating getters.
++
++    A merged configuration is a plain nested dict full of strings and
++    numbers; the code that consumes it wants ``int`` ports, ``bool``
++    flags, timeouts in seconds and cache sizes in bytes.  ``TypedView``
++    wraps any nested :class:`~collections.abc.Mapping` (a merged dict,
++    or ``LayeredConfig.as_dict()``) and converts on read under a strict,
++    documented contract.
++
++    Missing keys — including keys whose value is ``None``, which counts
++    as unset — return the caller's *default* when one is given and raise
++    :class:`~configlayer.exceptions.ValidationError` otherwise.  A value
++    that is present but has the wrong shape always raises, default or
++    not: a default answers "the key is absent", never "the value is
++    bad".  Every error message names the full dotted key.
++
++    Examples
++    --------
++    >>> view = TypedView({"db": {"port": "5432", "tls": "on"}})
++    >>> view.get_int("db.port")
++    5432
++    >>> view.get_bool("db.tls")
++    True
++    """
++
++    def __init__(self, config: Mapping[str, Any], *, prefix: str = "") -> None:
++        if not isinstance(config, Mapping):
++            raise ValidationError(
++                f"TypedView needs a mapping, got {type(config).__name__}"
++            )
++        self._config = config
++        self._prefix = prefix
++
++    # ------------------------------------------------------------------
++    # Raw access
++    # ------------------------------------------------------------------
++
++    def __getitem__(self, key: str) -> Any:
++        """Return the raw value at dotted *key*; raise if it is unset."""
++        value = deep_get(self._config, key, _MISSING)
++        if value is _MISSING or value is None:
++            raise ValidationError(f"{self._full(key)} is required but unset")
++        return value
++
++    def __contains__(self, key: str) -> bool:
++        value = deep_get(self._config, key, _MISSING)
++        return value is not _MISSING and value is not None
++
++    def scope(self, prefix: str) -> "TypedView":
++        """Return a TypedView rooted at dotted *prefix*.
++
++        Lookups become relative to the prefix, but error messages keep
++        reporting the full dotted key so a failure can be found in the
++        original document.
++
++        Raises
++        ------
++        ValidationError
++            If *prefix* is unset or its value is not a mapping.
++        """
++        node = deep_get(self._config, prefix, _MISSING)
++        if node is _MISSING or node is None:
++            raise ValidationError(f"{self._full(prefix)} is required but unset")
++        if not isinstance(node, Mapping):
++            raise ValidationError(
++                f"{self._full(prefix)} is not a section "
++                f"(got {type(node).__name__})"
++            )
++        return TypedView(node, prefix=self._full(prefix))
++
++    # ------------------------------------------------------------------
++    # Typed getters
++    # ------------------------------------------------------------------
++
++    def get_str(self, key: str, default: Any = _MISSING) -> Any:
++        """Return a string value; anything but ``str`` is refused."""
++        return self._get(key, default, self._as_str)
++
++    def get_int(self, key: str, default: Any = _MISSING) -> Any:
++        """Return an integer from an ``int`` or a base-10 integer string.
++
++        ``bool`` and ``float`` values are refused, as are strings that
++        are not plain base-10 integers.
++        """
++        return self._get(key, default, self._as_int)
++
++    def get_float(self, key: str, default: Any = _MISSING) -> Any:
++        """Return a float from ``int``, ``float`` or a numeric string."""
++        return self._get(key, default, self._as_float)
++
++    def get_bool(self, key: str, default: Any = _MISSING) -> Any:
++        """Return a boolean from ``bool`` or a boolean word.
++
++        Strings use the vocabulary ``true``/``yes``/``on``/``1`` and
++        ``false``/``no``/``off``/``0``, case-insensitively.  Numbers are
++        refused.
++        """
++        return self._get(key, default, self._as_bool)
++
++    def get_duration(self, key: str, default: Any = _MISSING) -> Any:
++        """Return a duration in seconds, as a float.
++
++        Accepts a non-negative ``int`` or ``float`` (already seconds) or
++        a string such as ``"1h30m"`` under the grammar of
++        :func:`configlayer.typed.parse.parse_duration`.
++        """
++        return self._get(key, default, self._as_duration)
++
++    def get_size(self, key: str, default: Any = _MISSING) -> Any:
++        """Return a byte count as an int.
++
++        Accepts a non-negative ``int`` (already bytes) or a string such
++        as ``"512MB"`` or ``"4KiB"`` under the grammar of
++        :func:`configlayer.typed.parse.parse_size`.
++        """
++        return self._get(key, default, self._as_size)
++
++    def get_list(
++        self,
++        key: str,
++        default: Any = _MISSING,
++        *,
++        item: Callable[[Any], Any] | None = None,
++    ) -> Any:
++        """Return a list, from a real list or a comma-separated string.
++
++        A string splits on commas with surrounding whitespace stripped;
++        an empty string is an empty list and an empty item is refused.
++        When *item* is given it converts every element, and any exception
++        it raises is reported as a :class:`ValidationError` for the key.
++        """
++        def convert(value: Any, key: str = key) -> list[Any]:
++            if isinstance(value, str):
++                elements: list[Any] = parse_items(value)
++            elif isinstance(value, list):
++                elements = list(value)
++            else:
++                raise ValueError(
++                    f"expected a list or comma-separated string, got "
++                    f"{type(value).__name__}"
++                )
++            if item is None:
++                return elements
++            return [item(element) for element in elements]
++
++        return self._get(key, default, convert)
++
++    # ------------------------------------------------------------------
++    # Conversion helpers
++    # ------------------------------------------------------------------
++
++    @staticmethod
++    def _as_str(value: Any) -> str:
++        if isinstance(value, str):
++            return value
++        raise ValueError(f"expected a string, got {type(value).__name__}")
++
++    @staticmethod
++    def _as_int(value: Any) -> int:
++        if isinstance(value, bool):
++            raise ValueError("expected an integer, got a boolean")
++        if isinstance(value, int):
++            return value
++        if isinstance(value, str):
++            text = value.strip()
++            sign = text[1:] if text[:1] in "+-" else text
++            if sign.isdigit() and sign.isascii():
++                return int(text, 10)
++            raise ValueError(f"{value!r} is not a base-10 integer")
++        raise ValueError(f"expected an integer, got {type(value).__name__}")
++
++    @staticmethod
++    def _as_float(value: Any) -> float:
++        if isinstance(value, bool):
++            raise ValueError("expected a number, got a boolean")
++        if isinstance(value, (int, float)):
++            return float(value)
++        if isinstance(value, str):
++            try:
++                return float(value.strip())
++            except ValueError:
++                raise ValueError(f"{value!r} is not a number") from None
++        raise ValueError(f"expected a number, got {type(value).__name__}")
++
++    @staticmethod
++    def _as_bool(value: Any) -> bool:
++        if isinstance(value, bool):
++            return value
++        if isinstance(value, str):
++            return parse_bool(value)
++        raise ValueError(f"expected a boolean, got {type(value).__name__}")
++
++    @staticmethod
++    def _as_duration(value: Any) -> float:
++        if isinstance(value, bool):
++            raise ValueError("expected a duration, got a boolean")
++        if isinstance(value, (int, float)):
++            if value < 0:
++                raise ValueError("durations cannot be negative")
++            return float(value)
++        if isinstance(value, str):
++            return parse_duration(value)
++        raise ValueError(f"expected a duration, got {type(value).__name__}")
++
++    @staticmethod
++    def _as_size(value: Any) -> int:
++        if isinstance(value, bool):
++            raise ValueError("expected a size, got a boolean")
++        if isinstance(value, int):
++            if value < 0:
++                raise ValueError("sizes cannot be negative")
++            return value
++        if isinstance(value, str):
++            return parse_size(value)
++        raise ValueError(f"expected a size, got {type(value).__name__}")
++
++    # ------------------------------------------------------------------
++    # Internal plumbing
++    # ------------------------------------------------------------------
++
++    def _full(self, key: str) -> str:
++        return f"{self._prefix}.{key}" if self._prefix else key
++
++    def _get(self, key: str, default: Any, convert: Callable[[Any], Any]) -> Any:
++        value = deep_get(self._config, key, _MISSING)
++        if value is _MISSING or value is None:
++            if default is _MISSING:
++                raise ValidationError(
++                    f"{self._full(key)} is required but unset"
++                )
++            return default
++        try:
++            return convert(value)
++        except ValidationError:
++            raise
++        except Exception as exc:
++            raise ValidationError(f"{self._full(key)}: {exc}") from exc
++
++    def __repr__(self) -> str:
++        return f"TypedView(prefix={self._prefix!r})"

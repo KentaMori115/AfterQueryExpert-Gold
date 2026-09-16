@@ -1,0 +1,1469 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 23f7f60..3e9816c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -395,6 +395,7 @@ dependencies = [
+  "fwctl-core",
+  "fwctl-device",
+  "sha2",
++ "tempfile",
+  "thiserror",
+ ]
+ 
+diff --git a/README.md b/README.md
+index 7b20ba7..4260a3e 100644
+--- a/README.md
++++ b/README.md
+@@ -63,6 +63,25 @@ fwctl --device sensor-0042 update sensor-node-1.2.0.fwpkg
+ fwctl --device sensor-0042 status
+ ```
+ 
++## Staged updates
++
++Transfer and activation can be separated when the reboot window is not the
++transfer window. `stage` validates the package, transfers the image into the
++inactive slot, and verifies the device-side digest. No candidate slot is
++selected and the device is never rebooted, so it keeps running its confirmed
++firmware. `activate` later finishes the update from the journal record alone.
++
++```sh
++fwctl --device sensor-0042 stage sensor-node-1.2.0.fwpkg
++fwctl staged
++fwctl --device sensor-0042 activate
++```
++
++One record is kept per device in `staging_file`; staging again replaces it.
++`activate` consumes the record whatever the outcome and refuses to move boot
++state when the device no longer matches the record on product, running version,
++rollback counter, held transfer, or accepted bytes.
++
+ After an update, run `fwctl --device sensor-0042 history` to review the outcome
+ recorded locally, or `fwctl doctor` if a device does not show up in `fwctl
+ devices`.
+@@ -73,8 +92,9 @@ output, while `--verbose` reports configuration and connection detail.
+ 
+ ## Configuration
+ 
+-The default configuration is `$XDG_CONFIG_HOME/fwctl/config.toml`. Relative trust
+-and history paths are resolved from the configuration file's directory.
++The default configuration is `$XDG_CONFIG_HOME/fwctl/config.toml`. Relative
++trust, history, and staging paths are resolved from the configuration file's
++directory.
+ 
+ ```toml
+ default_timeout = "5s"
+@@ -82,6 +102,7 @@ reconnect_timeout = "20s"
+ chunk_size = 1024
+ trust_store = "keys"
+ history_file = "state/history.jsonl"
++staging_file = "state/staging.jsonl"
+ ```
+ 
+ Chunk size must be 256–16384 bytes and reconnect timeout cannot be shorter than
+@@ -96,6 +117,7 @@ access, and trust-store readiness.
+ | `devices`, `info` | Discover targets and read immutable identity/state |
+ | `package`, `inspect`, `verify` | Create and authenticate `.fwpkg` archives |
+ | `update` | Validate, transfer, activate, health-check, and confirm |
++| `stage`, `staged`, `activate` | Split an update into transfer and activation |
+ | `status`, `confirm`, `rollback` | Inspect or recover candidate boot state |
+ | `history` | Query bounded local JSONL update records |
+ | `doctor` | Diagnose configuration and host prerequisites |
+diff --git a/crates/fwctl-core/src/config.rs b/crates/fwctl-core/src/config.rs
+index fbdc280..2c222d6 100644
+--- a/crates/fwctl-core/src/config.rs
++++ b/crates/fwctl-core/src/config.rs
+@@ -20,6 +20,7 @@ pub struct Config {
+     pub chunk_size: usize,
+     pub trust_store: PathBuf,
+     pub history_file: PathBuf,
++    pub staging_file: PathBuf,
+ }
+ 
+ impl Default for Config {
+@@ -31,6 +32,7 @@ impl Default for Config {
+             chunk_size: DEFAULT_CHUNK_SIZE,
+             trust_store: paths.trust_store,
+             history_file: paths.history_file,
++            staging_file: paths.staging_file,
+         }
+     }
+ }
+@@ -54,6 +56,7 @@ impl Config {
+         let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+         config.trust_store = resolve_relative(base_dir, &config.trust_store);
+         config.history_file = resolve_relative(base_dir, &config.history_file);
++        config.staging_file = resolve_relative(base_dir, &config.staging_file);
+         config.validate()?;
+         Ok(config)
+     }
+@@ -83,6 +86,7 @@ pub struct ConfigPaths {
+     pub config_file: PathBuf,
+     pub trust_store: PathBuf,
+     pub history_file: PathBuf,
++    pub staging_file: PathBuf,
+ }
+ 
+ impl ConfigPaths {
+@@ -95,6 +99,7 @@ impl ConfigPaths {
+             config_file: dirs.config_dir().join("config.toml"),
+             trust_store: dirs.config_dir().join("keys"),
+             history_file: state_dir.join("history.jsonl"),
++            staging_file: state_dir.join("staging.jsonl"),
+         })
+     }
+ 
+@@ -103,6 +108,7 @@ impl ConfigPaths {
+             config_file: PathBuf::from("config.toml"),
+             trust_store: PathBuf::from("keys"),
+             history_file: PathBuf::from("history.jsonl"),
++            staging_file: PathBuf::from("staging.jsonl"),
+         }
+     }
+ }
+@@ -143,6 +149,7 @@ reconnect_timeout = "15s"
+ chunk_size = 2048
+ trust_store = "release-keys"
+ history_file = "state/history.jsonl"
++staging_file = "state/staging.jsonl"
+ "#,
+         )
+         .unwrap();
+@@ -151,6 +158,7 @@ history_file = "state/history.jsonl"
+         assert_eq!(config.default_timeout, Duration::from_secs(3));
+         assert_eq!(config.trust_store, dir.path().join("release-keys"));
+         assert_eq!(config.history_file, dir.path().join("state/history.jsonl"));
++        assert_eq!(config.staging_file, dir.path().join("state/staging.jsonl"));
+     }
+ 
+     #[test]
+diff --git a/crates/fwctl-core/src/error.rs b/crates/fwctl-core/src/error.rs
+index 06e2c53..01777d4 100644
+--- a/crates/fwctl-core/src/error.rs
++++ b/crates/fwctl-core/src/error.rs
+@@ -26,6 +26,8 @@ pub enum ErrorCategory {
+     RebootTimeout,
+     HealthCheckFailed,
+     AutomaticRollback,
++    NothingStaged,
++    StagedUpdateLost,
+     Io,
+ }
+ 
+@@ -65,6 +67,10 @@ pub enum FwctlError {
+     HealthCheckFailed,
+     #[error("candidate firmware failed and the device rolled back")]
+     AutomaticRollback,
++    #[error("no staged update is recorded for {0}")]
++    NothingStaged(String),
++    #[error("staged update is no longer valid: {0}")]
++    StagedUpdateLost(String),
+     #[error("I/O error at {path}: {source}")]
+     Io {
+         path: PathBuf,
+@@ -94,6 +100,8 @@ impl FwctlError {
+             Self::RebootTimeout => ErrorCategory::RebootTimeout,
+             Self::HealthCheckFailed => ErrorCategory::HealthCheckFailed,
+             Self::AutomaticRollback => ErrorCategory::AutomaticRollback,
++            Self::NothingStaged(_) => ErrorCategory::NothingStaged,
++            Self::StagedUpdateLost(_) => ErrorCategory::StagedUpdateLost,
+             Self::Io { .. } => ErrorCategory::Io,
+         }
+     }
+diff --git a/crates/fwctl-core/src/update/engine.rs b/crates/fwctl-core/src/update/engine.rs
+index cbb0f27..7ef07e8 100644
+--- a/crates/fwctl-core/src/update/engine.rs
++++ b/crates/fwctl-core/src/update/engine.rs
+@@ -9,7 +9,7 @@ use crate::device::{DeviceInfo, DeviceStatus, UpdateId, UpdateState as DeviceUpd
+ use crate::package::FirmwarePackage;
+ use crate::protocol::{BeginUpdate, BeginUpdateResponse, MessageKind, ProtocolMessage};
+ use crate::transport::{Connector, ProtocolClient};
+-use crate::update::{UpdatePlan, UpdatePolicy};
++use crate::update::{StagedUpdate, StagingJournal, UpdatePlan, UpdatePolicy};
+ use crate::{FwctlError, Result};
+ 
+ const PROTOCOL_RETRIES: u8 = 2;
+@@ -25,6 +25,7 @@ pub enum UpdateState {
+     Erasing,
+     Transferring,
+     Verifying,
++    Staged,
+     CandidateSet,
+     Rebooting,
+     WaitingForDevice,
+@@ -115,6 +116,144 @@ impl<C: Connector> UpdateEngine<C> {
+         }
+     }
+ 
++    /// Transfer and verify an image without touching boot state. The device
++    /// keeps running its confirmed firmware; `activate` finishes the update
++    /// later from the journal record alone.
++    pub fn stage(
++        &mut self,
++        device_id: &str,
++        package: &FirmwarePackage,
++        trusted_key: &TrustedPublicKey,
++        policy: UpdatePolicy,
++        journal: &StagingJournal,
++        mut observe: impl FnMut(UpdateEvent),
++    ) -> Result<StagedUpdate> {
++        match self.stage_inner(
++            device_id,
++            package,
++            trusted_key,
++            policy,
++            journal,
++            &mut observe,
++        ) {
++            Ok(staged) => Ok(staged),
++            Err(err) => {
++                self.state = UpdateState::Failed;
++                Err(err)
++            }
++        }
++    }
++
++    /// Activate an update staged earlier. The journal record is consumed
++    /// whatever the outcome.
++    pub fn activate(
++        &mut self,
++        device_id: &str,
++        journal: &StagingJournal,
++        mut observe: impl FnMut(UpdateEvent),
++    ) -> Result<UpdateReport> {
++        let started = Instant::now();
++        let staged = journal
++            .remove(device_id)?
++            .ok_or_else(|| FwctlError::NothingStaged(format!("device `{device_id}`")))?;
++        match self.activate_inner(device_id, &staged, &mut observe) {
++            Ok(mut report) => {
++                report.duration_ms = started.elapsed().as_millis();
++                Ok(report)
++            }
++            Err(err) => {
++                if matches!(err, FwctlError::AutomaticRollback) {
++                    self.state = UpdateState::RolledBack;
++                } else {
++                    self.state = UpdateState::Failed;
++                }
++                Err(err)
++            }
++        }
++    }
++
++    fn stage_inner(
++        &mut self,
++        device_id: &str,
++        package: &FirmwarePackage,
++        trusted_key: &TrustedPublicKey,
++        policy: UpdatePolicy,
++        journal: &StagingJournal,
++        observe: &mut impl FnMut(UpdateEvent),
++    ) -> Result<StagedUpdate> {
++        let info = self.connect_and_identify(device_id)?;
++        self.transition(UpdateState::Connected, 0, 0, observe);
++        let plan = policy.evaluate(package, trusted_key, &info)?;
++        self.transition(UpdateState::Validated, 0, plan.image_size, observe);
++        let update_id = UpdateId::from_bytes(*Uuid::new_v4().as_bytes());
++        self.transition(UpdateState::Preparing, 0, plan.image_size, observe);
++        let begin = self.begin_update(update_id, &plan, package)?;
++        self.transfer_image(device_id, package, &plan, update_id, begin, observe)?;
++        self.verify_image(update_id, &plan, observe)?;
++        let staged = StagedUpdate {
++            device_id: plan.device_id,
++            product: plan.product,
++            update_id,
++            old_version: plan.old_version,
++            new_version: plan.new_version,
++            target_slot: plan.target_slot,
++            image_size: plan.image_size,
++            image_digest: plan.image_digest,
++            rollback_counter: plan.rollback_counter,
++            confirmed_counter: info.rollback_counter,
++            signing_key: plan.signing_key,
++            staged_at: jiff::Timestamp::now().to_string(),
++        };
++        journal.record(&staged)?;
++        self.transition(
++            UpdateState::Staged,
++            staged.image_size,
++            staged.image_size,
++            observe,
++        );
++        Ok(staged)
++    }
++
++    fn activate_inner(
++        &mut self,
++        device_id: &str,
++        staged: &StagedUpdate,
++        observe: &mut impl FnMut(UpdateEvent),
++    ) -> Result<UpdateReport> {
++        let info = self.connect_and_identify(device_id)?;
++        self.transition(UpdateState::Connected, 0, staged.image_size, observe);
++        let status = self.read_status()?;
++        confirm_staged_image(staged, &info, &status)?;
++        self.transition(
++            UpdateState::Validated,
++            staged.image_size,
++            staged.image_size,
++            observe,
++        );
++        let plan = UpdatePlan {
++            device_id: staged.device_id.clone(),
++            product: staged.product.clone(),
++            old_version: staged.old_version.clone(),
++            new_version: staged.new_version.clone(),
++            target_slot: staged.target_slot,
++            image_size: staged.image_size,
++            image_digest: staged.image_digest,
++            rollback_counter: staged.rollback_counter,
++            signing_key: staged.signing_key.clone(),
++        };
++        self.activate_and_confirm(device_id, staged.update_id, &plan, observe)?;
++        Ok(UpdateReport {
++            device_id: plan.device_id,
++            old_version: plan.old_version,
++            new_version: plan.new_version,
++            target_slot: plan.target_slot,
++            image_size: plan.image_size,
++            resumed_connections: 0,
++            duration_ms: 0,
++            state: UpdateState::Completed,
++        })
++    }
++
+     fn run_inner(
+         &mut self,
+         device_id: &str,
+@@ -237,20 +376,7 @@ impl<C: Connector> UpdateEngine<C> {
+         plan: &UpdatePlan,
+         observe: &mut impl FnMut(UpdateEvent),
+     ) -> Result<()> {
+-        self.transition(
+-            UpdateState::Verifying,
+-            plan.image_size,
+-            plan.image_size,
+-            observe,
+-        );
+-        let verify = self.request(
+-            ProtocolMessage::VerifyImage { update_id },
+-            MessageKind::VerifyImageResp,
+-        )?;
+-        if !matches!(verify, ProtocolMessage::VerifyImageResponse { image_digest } if image_digest == plan.image_digest)
+-        {
+-            return Err(FwctlError::ImageVerificationFailed);
+-        }
++        self.verify_image(update_id, plan, observe)?;
+         let candidate = self.request(
+             ProtocolMessage::SetCandidate { update_id },
+             MessageKind::SetCandidateResp,
+@@ -304,6 +430,30 @@ impl<C: Connector> UpdateEngine<C> {
+         Ok(())
+     }
+ 
++    fn verify_image(
++        &mut self,
++        update_id: UpdateId,
++        plan: &UpdatePlan,
++        observe: &mut impl FnMut(UpdateEvent),
++    ) -> Result<()> {
++        self.transition(
++            UpdateState::Verifying,
++            plan.image_size,
++            plan.image_size,
++            observe,
++        );
++        let verify = self.request(
++            ProtocolMessage::VerifyImage { update_id },
++            MessageKind::VerifyImageResp,
++        )?;
++        if matches!(verify, ProtocolMessage::VerifyImageResponse { image_digest } if image_digest == plan.image_digest)
++        {
++            Ok(())
++        } else {
++            Err(FwctlError::ImageVerificationFailed)
++        }
++    }
++
+     fn connect_and_identify(&mut self, device_id: &str) -> Result<DeviceInfo> {
+         self.reconnect_client(device_id)?;
+         let response = self.request(ProtocolMessage::GetInfo, MessageKind::InfoResp)?;
+@@ -458,7 +608,46 @@ impl<C: Connector> UpdateEngine<C> {
+     }
+ }
+ 
++fn confirm_staged_image(
++    staged: &StagedUpdate,
++    info: &DeviceInfo,
++    status: &DeviceStatus,
++) -> Result<()> {
++    if info.product != staged.product {
++        return Err(FwctlError::StagedUpdateLost(format!(
++            "device `{}` now reports product `{}`, staged for `{}`",
++            staged.device_id, info.product, staged.product
++        )));
++    }
++    if info.firmware_version != staged.old_version {
++        return Err(FwctlError::StagedUpdateLost(format!(
++            "device `{}` now runs firmware {}, staged against {}",
++            staged.device_id, info.firmware_version, staged.old_version
++        )));
++    }
++    if info.rollback_counter != staged.confirmed_counter {
++        return Err(FwctlError::StagedUpdateLost(format!(
++            "device `{}` now reports rollback counter {}, staged at {}",
++            staged.device_id, info.rollback_counter, staged.confirmed_counter
++        )));
++    }
++    if status.update_id != Some(staged.update_id) {
++        return Err(FwctlError::StagedUpdateLost(format!(
++            "device `{}` no longer holds staged update {}",
++            staged.device_id, staged.update_id
++        )));
++    }
++    if status.accepted_offset != staged.image_size {
++        return Err(FwctlError::StagedUpdateLost(format!(
++            "device `{}` accepted {} of {} staged bytes",
++            staged.device_id, status.accepted_offset, staged.image_size
++        )));
++    }
++    Ok(())
++}
++
+ fn validate_candidate_health(status: &DeviceStatus) -> Result<()> {
++
+     match status.state {
+         DeviceUpdateState::RolledBack => Err(FwctlError::AutomaticRollback),
+         DeviceUpdateState::AwaitingConfirmation if status.candidate_healthy => Ok(()),
+@@ -484,7 +673,8 @@ fn wrong_response(operation: &str) -> FwctlError {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    use crate::device::{BootState, UpdateState as DeviceState};
++    use crate::device::{BootState, Slot, UpdateState as DeviceState};
++    use crate::package::digest_bytes;
+ 
+     #[test]
+     fn health_gate_accepts_only_healthy_candidate() {
+@@ -508,4 +698,80 @@ mod tests {
+             Err(FwctlError::AutomaticRollback)
+         ));
+     }
++
++    fn staged() -> StagedUpdate {
++        StagedUpdate {
++            device_id: "board-4".into(),
++            product: "sensor-node".into(),
++            update_id: UpdateId::from_bytes([9; 16]),
++            old_version: "2.0.0".into(),
++            new_version: "2.1.0".into(),
++            target_slot: Slot::B,
++            image_size: 4096,
++            image_digest: digest_bytes(b"firmware"),
++            rollback_counter: 11,
++            confirmed_counter: 10,
++            signing_key: "release".into(),
++            staged_at: "2026-08-31T10:00:00Z".into(),
++        }
++    }
++
++    fn device_of(staged: &StagedUpdate) -> DeviceInfo {
++        DeviceInfo {
++            device_id: staged.device_id.clone(),
++            product: staged.product.clone(),
++            hardware_revision: "A2".into(),
++            firmware_version: staged.old_version.clone(),
++            bootloader_version: "0.6.0".into(),
++            active_slot: Slot::A,
++            candidate_slot: None,
++            rollback_counter: staged.confirmed_counter,
++            update_state: DeviceState::Verifying,
++        }
++    }
++
++    fn status_of(staged: &StagedUpdate) -> DeviceStatus {
++        DeviceStatus {
++            state: DeviceState::Verifying,
++            boot_state: BootState::Confirmed,
++            update_id: Some(staged.update_id),
++            accepted_offset: staged.image_size,
++            candidate_healthy: true,
++            boot_attempts: 0,
++        }
++    }
++
++    #[test]
++    fn unchanged_device_keeps_its_staged_image() {
++        let staged = staged();
++        assert!(confirm_staged_image(&staged, &device_of(&staged), &status_of(&staged)).is_ok());
++    }
++
++    #[test]
++    fn any_moved_device_state_loses_the_staged_image() {
++        let staged = staged();
++        let mut product = device_of(&staged);
++        product.product = "motor-drive".into();
++        let mut version = device_of(&staged);
++        version.firmware_version = "2.0.1".into();
++        let mut counter = device_of(&staged);
++        counter.rollback_counter = staged.confirmed_counter + 1;
++        for info in [product, version, counter] {
++            assert!(matches!(
++                confirm_staged_image(&staged, &info, &status_of(&staged)),
++                Err(FwctlError::StagedUpdateLost(_))
++            ));
++        }
++
++        let mut forgotten = status_of(&staged);
++        forgotten.update_id = None;
++        let mut partial = status_of(&staged);
++        partial.accepted_offset = staged.image_size - 1;
++        for status in [forgotten, partial] {
++            assert!(matches!(
++                confirm_staged_image(&staged, &device_of(&staged), &status),
++                Err(FwctlError::StagedUpdateLost(_))
++            ));
++        }
++    }
+ }
+diff --git a/crates/fwctl-core/src/update/mod.rs b/crates/fwctl-core/src/update/mod.rs
+index c04fd84..e9dec8b 100644
+--- a/crates/fwctl-core/src/update/mod.rs
++++ b/crates/fwctl-core/src/update/mod.rs
+@@ -1,5 +1,7 @@
+ mod engine;
+ mod policy;
++mod staging;
+ 
+ pub use engine::{UpdateEngine, UpdateEvent, UpdateReport, UpdateState};
+ pub use policy::{UpdatePlan, UpdatePolicy};
++pub use staging::{StagedUpdate, StagingJournal};
+diff --git a/crates/fwctl-core/src/update/staging.rs b/crates/fwctl-core/src/update/staging.rs
+new file mode 100644
+index 0000000..4753e3d
+--- /dev/null
++++ b/crates/fwctl-core/src/update/staging.rs
+@@ -0,0 +1,204 @@
++use std::fs::{self, File};
++use std::io::{BufRead, BufReader, Write};
++use std::path::{Path, PathBuf};
++
++use serde::{Deserialize, Serialize};
++
++use crate::device::{Slot, UpdateId};
++use crate::package::ImageDigest;
++use crate::{FwctlError, Result};
++
++const MAX_STAGING_BYTES: u64 = 4 * 1024 * 1024;
++
++/// A firmware image that a device already holds in its inactive slot, verified
++/// device side, but that has not been activated yet.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct StagedUpdate {
++    pub device_id: String,
++    pub product: String,
++    pub update_id: UpdateId,
++    pub old_version: String,
++    pub new_version: String,
++    pub target_slot: Slot,
++    pub image_size: u32,
++    pub image_digest: ImageDigest,
++    /// Rollback counter carried by the staged package.
++    pub rollback_counter: u64,
++    /// Rollback counter the device reported while running confirmed firmware.
++    pub confirmed_counter: u64,
++    pub signing_key: String,
++    pub staged_at: String,
++}
++
++/// Durable record of staged, not yet activated updates. At most one record is
++/// kept per device: staging a device again replaces its previous record.
++#[derive(Debug, Clone)]
++pub struct StagingJournal {
++    path: PathBuf,
++}
++
++impl StagingJournal {
++    #[must_use]
++    pub fn new(path: impl Into<PathBuf>) -> Self {
++        Self { path: path.into() }
++    }
++
++    #[must_use]
++    pub fn path(&self) -> &Path {
++        &self.path
++    }
++
++    /// Every staged update, oldest record first.
++    pub fn list(&self) -> Result<Vec<StagedUpdate>> {
++        if !self.path.exists() {
++            return Ok(Vec::new());
++        }
++        let file = File::open(&self.path).map_err(|err| FwctlError::io(&self.path, err))?;
++        let length = file
++            .metadata()
++            .map_err(|err| FwctlError::io(&self.path, err))?
++            .len();
++        if length > MAX_STAGING_BYTES {
++            return Err(FwctlError::Configuration(format!(
++                "staging journal exceeds {MAX_STAGING_BYTES} bytes"
++            )));
++        }
++        let mut records = Vec::new();
++        for (line_index, line) in BufReader::new(file).lines().enumerate() {
++            let line = line.map_err(|err| FwctlError::io(&self.path, err))?;
++            if line.trim().is_empty() {
++                continue;
++            }
++            let record: StagedUpdate = serde_json::from_str(&line).map_err(|err| {
++                FwctlError::Configuration(format!(
++                    "invalid staged update at line {}: {err}",
++                    line_index + 1
++                ))
++            })?;
++            records.push(record);
++        }
++        Ok(records)
++    }
++
++    /// The staged update recorded for one device, if any.
++    pub fn get(&self, device_id: &str) -> Result<Option<StagedUpdate>> {
++        let mut records = self.list()?;
++        records.retain(|record| record.device_id == device_id);
++        Ok(records.pop())
++    }
++
++    /// Store one staged update, replacing any older record for the same device.
++    pub fn record(&self, record: &StagedUpdate) -> Result<()> {
++        let mut records = self.list()?;
++        records.retain(|existing| existing.device_id != record.device_id);
++        records.push(record.clone());
++        self.write_all(&records)
++    }
++
++    /// Drop the record for one device and return it, so an activation attempt
++    /// never runs twice against the same staged image.
++    pub fn remove(&self, device_id: &str) -> Result<Option<StagedUpdate>> {
++        let mut kept = Vec::new();
++        let mut removed = None;
++        for record in self.list()? {
++            if record.device_id == device_id {
++                removed = Some(record);
++            } else {
++                kept.push(record);
++            }
++        }
++        if removed.is_some() {
++            self.write_all(&kept)?;
++        }
++        Ok(removed)
++    }
++
++    fn write_all(&self, records: &[StagedUpdate]) -> Result<()> {
++        if let Some(parent) = self.path.parent() {
++            fs::create_dir_all(parent).map_err(|err| FwctlError::io(parent, err))?;
++        }
++        let mut body = Vec::new();
++        for record in records {
++            let mut line = serde_json::to_vec(record)
++                .map_err(|err| FwctlError::Configuration(err.to_string()))?;
++            line.push(b'\n');
++            body.extend_from_slice(&line);
++        }
++        let temporary = self.path.with_extension("tmp");
++        let mut file = File::create(&temporary).map_err(|err| FwctlError::io(&temporary, err))?;
++        file.write_all(&body)
++            .map_err(|err| FwctlError::io(&temporary, err))?;
++        file.sync_data()
++            .map_err(|err| FwctlError::io(&temporary, err))?;
++        drop(file);
++        fs::rename(&temporary, &self.path).map_err(|err| FwctlError::io(&self.path, err))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::package::digest_bytes;
++
++    fn staged(device_id: &str, version: &str) -> StagedUpdate {
++        StagedUpdate {
++            device_id: device_id.into(),
++            product: "sensor-node".into(),
++            update_id: UpdateId::from_bytes([7; 16]),
++            old_version: "1.0.0".into(),
++            new_version: version.into(),
++            target_slot: Slot::B,
++            image_size: 2048,
++            image_digest: digest_bytes(b"firmware"),
++            rollback_counter: 4,
++            confirmed_counter: 3,
++            signing_key: "release".into(),
++            staged_at: "2026-08-31T10:00:00Z".into(),
++        }
++    }
++
++    #[test]
++    fn empty_journal_lists_nothing() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("state/staging.jsonl"));
++        assert!(journal.list().unwrap().is_empty());
++        assert!(journal.get("board-a").unwrap().is_none());
++    }
++
++    #[test]
++    fn records_survive_a_round_trip_oldest_first() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("state/staging.jsonl"));
++        journal.record(&staged("board-a", "1.1.0")).unwrap();
++        journal.record(&staged("board-b", "1.2.0")).unwrap();
++        let records = journal.list().unwrap();
++        assert_eq!(records.len(), 2);
++        assert_eq!(records[0].device_id, "board-a");
++        assert_eq!(records[1].device_id, "board-b");
++        let latest = journal.get("board-b").unwrap().unwrap();
++        assert_eq!(latest.new_version, "1.2.0");
++    }
++
++    #[test]
++    fn newest_record_replaces_older_one_per_device() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("staging.jsonl"));
++        journal.record(&staged("board-a", "1.1.0")).unwrap();
++        journal.record(&staged("board-a", "1.3.0")).unwrap();
++        let records = journal.list().unwrap();
++        assert_eq!(records.len(), 1);
++        assert_eq!(records[0].new_version, "1.3.0");
++    }
++
++    #[test]
++    fn removing_a_record_consumes_it() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("staging.jsonl"));
++        journal.record(&staged("board-a", "1.1.0")).unwrap();
++        journal.record(&staged("board-b", "1.2.0")).unwrap();
++        let taken = journal.remove("board-a").unwrap().unwrap();
++        assert_eq!(taken.new_version, "1.1.0");
++        assert!(journal.remove("board-a").unwrap().is_none());
++        assert_eq!(journal.list().unwrap().len(), 1);
++    }
++}
+diff --git a/crates/fwctl-sim/Cargo.toml b/crates/fwctl-sim/Cargo.toml
+index bc8a366..98dcc3f 100644
+--- a/crates/fwctl-sim/Cargo.toml
++++ b/crates/fwctl-sim/Cargo.toml
+@@ -14,6 +14,7 @@ thiserror.workspace = true
+ 
+ [dev-dependencies]
+ sha2.workspace = true
++tempfile.workspace = true
+ 
+ [lints]
+ workspace = true
+diff --git a/crates/fwctl-sim/tests/staged_update.rs b/crates/fwctl-sim/tests/staged_update.rs
+new file mode 100644
+index 0000000..75d3d2b
+--- /dev/null
++++ b/crates/fwctl-sim/tests/staged_update.rs
+@@ -0,0 +1,313 @@
++use std::time::Duration;
++
++use fwctl_core::crypto::SigningIdentity;
++use fwctl_core::device::Slot;
++use fwctl_core::package::{FirmwareManifest, FirmwarePackage, digest_bytes};
++use fwctl_core::update::{StagingJournal, UpdateEngine, UpdatePolicy, UpdateState};
++use fwctl_core::{ErrorCategory, FwctlError};
++use fwctl_sim::{Simulator, SimulatorConfig, SimulatorConnector, SimulatorTrustedKey};
++
++fn signed_package(signer: &SigningIdentity, image_len: usize) -> FirmwarePackage {
++    let image = (0..image_len)
++        .map(|offset| u8::try_from(offset % 251).unwrap())
++        .collect::<Vec<_>>();
++    let manifest = FirmwareManifest::new(
++        "sensor-node".into(),
++        "1.1.0".into(),
++        vec!["A1".into()],
++        image.len() as u64,
++        digest_bytes(&image),
++        2,
++        signer.key_id().into(),
++    )
++    .unwrap();
++    let signature = signer.sign_manifest(&manifest).unwrap();
++    FirmwarePackage {
++        manifest,
++        image,
++        signature,
++        release_notes: None,
++    }
++}
++
++fn engine(simulator: Simulator) -> UpdateEngine<SimulatorConnector> {
++    UpdateEngine::new(
++        SimulatorConnector::new(simulator),
++        Duration::from_millis(30),
++        Duration::from_secs(1),
++        512,
++    )
++}
++
++fn simulator(signer: &SigningIdentity) -> Simulator {
++    let config = SimulatorConfig {
++        trusted_keys: vec![SimulatorTrustedKey {
++            key_id: signer.key_id().into(),
++            public_key: signer.public_key().to_bytes(),
++        }],
++        ..SimulatorConfig::default()
++    };
++    Simulator::new(config).unwrap()
++}
++
++fn journal(dir: &tempfile::TempDir) -> StagingJournal {
++    StagingJournal::new(dir.path().join("state/staging.jsonl"))
++}
++
++#[test]
++fn staging_transfers_and_verifies_without_touching_boot_state() {
++    let dir = tempfile::tempdir().unwrap();
++    let journal = journal(&dir);
++    let signer = SigningIdentity::from_seed("release", [0x11; 32]);
++    let package = signed_package(&signer, 4096);
++    let mut engine = engine(simulator(&signer));
++    let mut states = Vec::new();
++
++    let staged = engine
++        .stage(
++            "sim-0001",
++            &package,
++            &signer.public_key(),
++            UpdatePolicy::default(),
++            &journal,
++            |event| states.push(event.state),
++        )
++        .unwrap();
++
++    assert_eq!(engine.state(), UpdateState::Staged);
++    assert!(states.contains(&UpdateState::Verifying));
++    assert!(states.contains(&UpdateState::Staged));
++    assert!(!states.contains(&UpdateState::CandidateSet));
++    assert!(!states.contains(&UpdateState::Rebooting));
++
++    assert_eq!(staged.device_id, "sim-0001");
++    assert_eq!(staged.product, "sensor-node");
++    assert_eq!(staged.old_version, "1.0.0");
++    assert_eq!(staged.new_version, "1.1.0");
++    assert_eq!(staged.target_slot, Slot::B);
++    assert_eq!(staged.image_size, 4096);
++    assert_eq!(staged.image_digest, package.manifest.image.sha256);
++    assert_eq!(staged.rollback_counter, 2);
++    assert_eq!(staged.confirmed_counter, 1);
++    assert_eq!(staged.signing_key, "release");
++    assert!(!staged.staged_at.is_empty());
++
++    let recorded = journal.list().unwrap();
++    assert_eq!(recorded, vec![staged.clone()]);
++    assert_eq!(journal.get("sim-0001").unwrap(), Some(staged));
++
++    let simulator = engine.into_connector().shutdown();
++    assert!(simulator.info().candidate_slot.is_none());
++    assert_eq!(simulator.info().firmware_version, "1.0.0");
++    assert_eq!(simulator.info().rollback_counter, 1);
++}
++
++#[test]
++fn activation_finishes_a_staged_update_from_the_journal() {
++    let dir = tempfile::tempdir().unwrap();
++    let journal = journal(&dir);
++    let signer = SigningIdentity::from_seed("release", [0x21; 32]);
++    let package = signed_package(&signer, 3072);
++    let mut engine = engine(simulator(&signer));
++    engine
++        .stage(
++            "sim-0001",
++            &package,
++            &signer.public_key(),
++            UpdatePolicy::default(),
++            &journal,
++            |_| {},
++        )
++        .unwrap();
++
++    let mut states = Vec::new();
++    let report = engine
++        .activate("sim-0001", &journal, |event| states.push(event.state))
++        .unwrap();
++
++    assert_eq!(report.state, UpdateState::Completed);
++    assert_eq!(report.device_id, "sim-0001");
++    assert_eq!(report.old_version, "1.0.0");
++    assert_eq!(report.new_version, "1.1.0");
++    assert_eq!(report.target_slot, Slot::B);
++    assert_eq!(report.image_size, 3072);
++    assert!(states.contains(&UpdateState::CandidateSet));
++    assert!(states.contains(&UpdateState::Confirming));
++    assert!(journal.list().unwrap().is_empty());
++
++    let simulator = engine.into_connector().shutdown();
++    assert_eq!(simulator.info().firmware_version, "1.1.0");
++    assert_eq!(simulator.info().rollback_counter, 2);
++}
++
++#[test]
++fn policy_rejection_stages_nothing() {
++    let dir = tempfile::tempdir().unwrap();
++    let journal = journal(&dir);
++    let signer = SigningIdentity::from_seed("release", [0x31; 32]);
++    let mut package = signed_package(&signer, 1024);
++    package.manifest.product = "motor-drive".into();
++    package.signature = signer.sign_manifest(&package.manifest).unwrap();
++    let mut engine = engine(simulator(&signer));
++
++    let err = engine
++        .stage(
++            "sim-0001",
++            &package,
++            &signer.public_key(),
++            UpdatePolicy::default(),
++            &journal,
++            |_| {},
++        )
++        .unwrap_err();
++
++    assert_eq!(err.category(), ErrorCategory::WrongProduct);
++    assert_eq!(engine.state(), UpdateState::Failed);
++    assert!(journal.list().unwrap().is_empty());
++    let simulator = engine.into_connector().shutdown();
++    assert!(simulator.info().candidate_slot.is_none());
++    assert_eq!(simulator.info().firmware_version, "1.0.0");
++}
++
++#[test]
++fn bad_device_digest_stages_nothing() {
++    let dir = tempfile::tempdir().unwrap();
++    let journal = journal(&dir);
++    let signer = SigningIdentity::from_seed("release", [0x41; 32]);
++    let package = signed_package(&signer, 2048);
++    let mut simulator = simulator(&signer);
++    simulator.faults_mut().force_verify_failure = true;
++    let mut engine = engine(simulator);
++
++    let err = engine
++        .stage(
++            "sim-0001",
++            &package,
++            &signer.public_key(),
++            UpdatePolicy::default(),
++            &journal,
++            |_| {},
++        )
++        .unwrap_err();
++
++    assert!(matches!(err, FwctlError::ImageVerificationFailed));
++    assert_eq!(engine.state(), UpdateState::Failed);
++    assert!(journal.list().unwrap().is_empty());
++    let simulator = engine.into_connector().shutdown();
++    assert!(simulator.info().candidate_slot.is_none());
++}
++
++#[test]
++fn activation_without_a_record_reports_nothing_staged() {
++    let dir = tempfile::tempdir().unwrap();
++    let journal = journal(&dir);
++    let signer = SigningIdentity::from_seed("release", [0x51; 32]);
++    let mut engine = engine(simulator(&signer));
++
++    let err = engine.activate("sim-0001", &journal, |_| {}).unwrap_err();
++    assert_eq!(err.category(), ErrorCategory::NothingStaged);
++
++    let simulator = engine.into_connector().shutdown();
++    assert!(simulator.info().candidate_slot.is_none());
++    assert_eq!(simulator.info().firmware_version, "1.0.0");
++}
++
++#[test]
++fn moved_device_state_loses_the_staged_update_before_boot_state_moves() {
++    let signer = SigningIdentity::from_seed("release", [0x61; 32]);
++    let package = signed_package(&signer, 1536);
++
++    for mutate in [
++        |staged: &mut fwctl_core::update::StagedUpdate| staged.product = "motor-drive".into(),
++        |staged: &mut fwctl_core::update::StagedUpdate| staged.old_version = "0.9.0".into(),
++        |staged: &mut fwctl_core::update::StagedUpdate| staged.confirmed_counter = 9,
++        |staged: &mut fwctl_core::update::StagedUpdate| {
++            staged.update_id = fwctl_core::device::UpdateId::from_bytes([0xcd; 16]);
++        },
++        |staged: &mut fwctl_core::update::StagedUpdate| staged.image_size = 512,
++    ] {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = journal(&dir);
++        let mut engine = engine(simulator(&signer));
++        let mut staged = engine
++            .stage(
++                "sim-0001",
++                &package,
++                &signer.public_key(),
++                UpdatePolicy::default(),
++                &journal,
++                |_| {},
++            )
++            .unwrap();
++        mutate(&mut staged);
++        journal.record(&staged).unwrap();
++
++        let mut states = Vec::new();
++        let err = engine
++            .activate("sim-0001", &journal, |event| states.push(event.state))
++            .unwrap_err();
++        assert_eq!(err.category(), ErrorCategory::StagedUpdateLost);
++        assert!(!states.contains(&UpdateState::CandidateSet));
++        assert!(!states.contains(&UpdateState::Rebooting));
++        assert!(
++            journal.list().unwrap().is_empty(),
++            "the record is consumed whatever the outcome"
++        );
++
++        let simulator = engine.into_connector().shutdown();
++        assert!(simulator.info().candidate_slot.is_none());
++        assert_eq!(simulator.info().firmware_version, "1.0.0");
++    }
++}
++
++#[test]
++fn unhealthy_candidate_consumes_the_record_and_fails_activation() {
++    let dir = tempfile::tempdir().unwrap();
++    let journal = journal(&dir);
++    let signer = SigningIdentity::from_seed("release", [0x71; 32]);
++    let package = signed_package(&signer, 1024);
++    let mut simulator = simulator(&signer);
++    simulator.faults_mut().candidate_healthy = false;
++    let mut engine = engine(simulator);
++    engine
++        .stage(
++            "sim-0001",
++            &package,
++            &signer.public_key(),
++            UpdatePolicy::default(),
++            &journal,
++            |_| {},
++        )
++        .unwrap();
++
++    let err = engine.activate("sim-0001", &journal, |_| {}).unwrap_err();
++    assert!(matches!(err, FwctlError::HealthCheckFailed));
++    assert_eq!(engine.state(), UpdateState::Failed);
++    assert!(journal.list().unwrap().is_empty());
++}
++
++#[test]
++fn staging_twice_keeps_one_record_per_device() {
++    let dir = tempfile::tempdir().unwrap();
++    let journal = journal(&dir);
++    let signer = SigningIdentity::from_seed("release", [0x81; 32]);
++    let package = signed_package(&signer, 1024);
++    let mut engine = engine(simulator(&signer));
++    for _ in 0..2 {
++        engine
++            .stage(
++                "sim-0001",
++                &package,
++                &signer.public_key(),
++                UpdatePolicy::default(),
++                &journal,
++                |_| {},
++            )
++            .unwrap();
++    }
++    assert_eq!(journal.list().unwrap().len(), 1);
++    let report = engine.activate("sim-0001", &journal, |_| {}).unwrap();
++    assert_eq!(report.state, UpdateState::Completed);
++    let simulator = engine.into_connector().shutdown();
++    assert_eq!(simulator.info().firmware_version, "1.1.0");
++}
+diff --git a/crates/fwctl/src/cli.rs b/crates/fwctl/src/cli.rs
+index 49e28ac..3174742 100644
+--- a/crates/fwctl/src/cli.rs
++++ b/crates/fwctl/src/cli.rs
+@@ -31,6 +31,9 @@ pub enum Command {
+     Inspect(PackagePath),
+     Verify(PackagePath),
+     Update(UpdateArgs),
++    Stage(UpdateArgs),
++    Activate(DeviceTarget),
++    Staged,
+     Status(DeviceTarget),
+     Confirm(DeviceTarget),
+     Rollback(DeviceTarget),
+@@ -148,6 +151,24 @@ mod tests {
+         assert_eq!(args.rollback_counter, 7);
+     }
+ 
++    #[test]
++    fn parses_stage_and_activate_commands() {
++        let staged =
++            Cli::try_parse_from(["fwctl", "--device", "rack-3", "stage", "app.fwpkg"]).unwrap();
++        let Command::Stage(args) = staged.command else {
++            panic!("expected stage command");
++        };
++        assert_eq!(args.package, PathBuf::from("app.fwpkg"));
++
++        let activate = Cli::try_parse_from(["fwctl", "activate", "rack-3"]).unwrap();
++        let Command::Activate(target) = activate.command else {
++            panic!("expected activate command");
++        };
++        assert_eq!(target.device.as_deref(), Some("rack-3"));
++
++        assert!(Cli::try_parse_from(["fwctl", "staged"]).is_ok());
++    }
++
+     #[test]
+     fn accepts_global_options_after_subcommand() {
+         let cli =
+diff --git a/crates/fwctl/src/commands/doctor.rs b/crates/fwctl/src/commands/doctor.rs
+index 734ba75..1282e93 100644
+--- a/crates/fwctl/src/commands/doctor.rs
++++ b/crates/fwctl/src/commands/doctor.rs
+@@ -66,6 +66,7 @@ fn path_checks(config: &Config) -> Vec<DoctorCheck> {
+         },
+         writable_parent("trust_store", &config.trust_store),
+         writable_parent("history_file", &config.history_file),
++        writable_parent("staging_file", &config.staging_file),
+     ]
+ }
+ 
+@@ -112,6 +113,7 @@ mod tests {
+         let config = Config {
+             trust_store: dir.path().join("missing/keys"),
+             history_file: dir.path().join("state/history.jsonl"),
++            staging_file: dir.path().join("state/staging.jsonl"),
+             ..Config::default()
+         };
+         let checks = path_checks(&config);
+diff --git a/crates/fwctl/src/commands/mod.rs b/crates/fwctl/src/commands/mod.rs
+index 1554ee4..8c3a9b5 100644
+--- a/crates/fwctl/src/commands/mod.rs
++++ b/crates/fwctl/src/commands/mod.rs
+@@ -3,4 +3,5 @@ pub mod doctor;
+ pub mod history;
+ pub mod keys;
+ pub mod package;
++pub mod stage;
+ pub mod update;
+diff --git a/crates/fwctl/src/commands/stage.rs b/crates/fwctl/src/commands/stage.rs
+new file mode 100644
+index 0000000..404ee9d
+--- /dev/null
++++ b/crates/fwctl/src/commands/stage.rs
+@@ -0,0 +1,250 @@
++use std::fmt::Write as _;
++use std::time::Duration;
++
++use fwctl_core::crypto::TrustStore;
++use fwctl_core::device::discover_serial_devices;
++use fwctl_core::history::{HistoryRecord, HistoryResult, HistoryStore};
++use fwctl_core::package::read_package;
++use fwctl_core::transport::SerialConnector;
++use fwctl_core::update::{
++    StagedUpdate, StagingJournal, UpdateEngine, UpdateEvent, UpdatePolicy, UpdateState,
++};
++use fwctl_core::{Config, FwctlError, Result};
++use serde::Serialize;
++
++use crate::cli::{DeviceTarget, UpdateArgs};
++use crate::commands::device::{probe_timeout, select_device};
++use crate::output::StdOutput;
++
++#[derive(Serialize)]
++struct StagedList {
++    staged: Vec<StagedUpdate>,
++}
++
++pub fn stage(
++    args: &UpdateArgs,
++    target: Option<&str>,
++    timeout: Option<Duration>,
++    config: &Config,
++    output: &mut StdOutput,
++) -> Result<()> {
++    let package = read_package(&args.package)?;
++    let trusted_key = TrustStore::new(&config.trust_store).load(&package.manifest.signing_key)?;
++    let devices = discover_serial_devices(probe_timeout(timeout, config))?;
++    let selected = select_device(&devices, target)?;
++    let device_id = selected.info.device_id.clone();
++    let chunk_size = chunk_size(args, config)?;
++    let mut engine = UpdateEngine::new(
++        SerialConnector::default(),
++        timeout.unwrap_or(config.default_timeout),
++        config.reconnect_timeout,
++        chunk_size,
++    );
++    let journal = StagingJournal::new(&config.staging_file);
++    let mut reporter = ProgressReporter::default();
++    let staged = engine.stage(
++        &device_id,
++        &package,
++        &trusted_key,
++        UpdatePolicy {
++            allow_downgrade: args.allow_downgrade,
++        },
++        &journal,
++        |event| reporter.observe(event, output),
++    )?;
++    output.success(
++        &staged,
++        format_args!(
++            "Staged {} for {}\n  Slot: {}\n  Version: {} -> {}\n  Image: {} bytes\n  Staged at: {}\n  Activate with: fwctl --device {} activate",
++            staged.new_version,
++            staged.device_id,
++            staged.target_slot,
++            staged.old_version,
++            staged.new_version,
++            staged.image_size,
++            staged.staged_at,
++            staged.device_id
++        ),
++    )
++}
++
++pub fn activate(
++    target: &DeviceTarget,
++    global_target: Option<&str>,
++    timeout: Option<Duration>,
++    config: &Config,
++    output: &mut StdOutput,
++) -> Result<()> {
++    let journal = StagingJournal::new(&config.staging_file);
++    let device_id = match target.device.as_deref().or(global_target) {
++        Some(device_id) => device_id.to_string(),
++        None => only_staged_device(&journal)?,
++    };
++    let staged = journal.get(&device_id)?;
++    let mut engine = UpdateEngine::new(
++        SerialConnector::default(),
++        timeout.unwrap_or(config.default_timeout),
++        config.reconnect_timeout,
++        config.chunk_size,
++    );
++    let mut reporter = ProgressReporter::default();
++    let result = engine.activate(&device_id, &journal, |event| {
++        reporter.observe(event, output);
++    });
++    if let Some(staged) = staged {
++        record_history(config, &staged, &result, output);
++    }
++    let report = result?;
++    output.success(
++        &report,
++        format_args!(
++            "Updated {} from {} to {}\n  Active slot: {}\n  Image: {} bytes\n  Duration: {} ms",
++            report.device_id,
++            report.old_version,
++            report.new_version,
++            report.target_slot,
++            report.image_size,
++            report.duration_ms
++        ),
++    )
++}
++
++pub fn list(config: &Config, output: &mut StdOutput) -> Result<()> {
++    let staged = StagingJournal::new(&config.staging_file).list()?;
++    let human = render(&staged);
++    output.success(&StagedList { staged }, format_args!("{human}"))
++}
++
++fn only_staged_device(journal: &StagingJournal) -> Result<String> {
++    let mut staged = journal.list()?;
++    if staged.len() > 1 {
++        return Err(FwctlError::Configuration(
++            "several devices hold staged updates, select one with --device".into(),
++        ));
++    }
++    let Some(staged) = staged.pop() else {
++        return Err(FwctlError::NothingStaged("any device".into()));
++    };
++    Ok(staged.device_id)
++}
++
++fn chunk_size(args: &UpdateArgs, config: &Config) -> Result<usize> {
++    let chunk_size = args.chunk_size.unwrap_or(config.chunk_size);
++    if (256..=16 * 1024).contains(&chunk_size) {
++        Ok(chunk_size)
++    } else {
++        Err(FwctlError::Configuration(
++            "update chunk size must be between 256 and 16384 bytes".into(),
++        ))
++    }
++}
++
++fn record_history(
++    config: &Config,
++    staged: &StagedUpdate,
++    result: &Result<fwctl_core::update::UpdateReport>,
++    output: &mut StdOutput,
++) {
++    let mut record = HistoryRecord::now(
++        staged.device_id.clone(),
++        staged.product.clone(),
++        staged.old_version.clone(),
++        staged.new_version.clone(),
++        staged.image_digest.to_hex(),
++        staged.signing_key.clone(),
++    );
++    match result {
++        Ok(report) => {
++            record.result = HistoryResult::Completed;
++            record.duration_ms = report.duration_ms;
++        }
++        Err(err) => {
++            record.error_category = Some(err.category());
++            if matches!(err, FwctlError::AutomaticRollback) {
++                record.result = HistoryResult::RolledBack;
++                record.rollback_result = Some("automatic rollback completed".into());
++            }
++        }
++    }
++    if let Err(err) = HistoryStore::new(&config.history_file).append(&record) {
++        let _ = output.warning(format_args!("could not record update history: {err}"));
++    }
++}
++
++fn render(staged: &[StagedUpdate]) -> String {
++    if staged.is_empty() {
++        return "No staged firmware updates".into();
++    }
++    let mut lines = String::from(
++        "STAGED AT                       DEVICE              UPDATE                 SLOT\n",
++    );
++    for record in staged.iter().rev() {
++        let _ = writeln!(
++            lines,
++            "{:<31} {:<19} {:<22} {}",
++            record.staged_at,
++            record.device_id,
++            format!("{} -> {}", record.old_version, record.new_version),
++            record.target_slot
++        );
++    }
++    lines.pop();
++    lines
++}
++
++#[derive(Default)]
++struct ProgressReporter {
++    last_state: Option<UpdateState>,
++    last_percent: u32,
++}
++
++impl ProgressReporter {
++    fn observe(&mut self, event: UpdateEvent, output: &mut StdOutput) {
++        let percent = event
++            .bytes_transferred
++            .saturating_mul(100)
++            .checked_div(event.image_size)
++            .unwrap_or(0);
++        if self.last_state != Some(event.state) || percent >= self.last_percent.saturating_add(5) {
++            let _ = output.progress(format_args!("{:?}  {percent}%", event.state));
++            self.last_state = Some(event.state);
++            self.last_percent = percent;
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use fwctl_core::device::{Slot, UpdateId};
++    use fwctl_core::package::digest_bytes;
++
++    use super::*;
++
++    fn staged(device_id: &str, version: &str) -> StagedUpdate {
++        StagedUpdate {
++            device_id: device_id.into(),
++            product: "sensor-node".into(),
++            update_id: UpdateId::from_bytes([3; 16]),
++            old_version: "1.0.0".into(),
++            new_version: version.into(),
++            target_slot: Slot::B,
++            image_size: 1024,
++            image_digest: digest_bytes(b"image"),
++            rollback_counter: 5,
++            confirmed_counter: 4,
++            signing_key: "release".into(),
++            staged_at: format!("2026-08-31T10:00:0{version}Z"),
++        }
++    }
++
++    #[test]
++    fn renders_empty_journal() {
++        assert_eq!(render(&[]), "No staged firmware updates");
++    }
++
++    #[test]
++    fn renders_newest_record_first() {
++        let text = render(&[staged("board-a", "1"), staged("board-b", "2")]);
++        assert!(text.find("board-b").unwrap() < text.find("board-a").unwrap());
++    }
++}
+diff --git a/crates/fwctl/src/main.rs b/crates/fwctl/src/main.rs
+index c2f39f2..3e23283 100644
+--- a/crates/fwctl/src/main.rs
++++ b/crates/fwctl/src/main.rs
+@@ -40,6 +40,13 @@ fn run(cli: &Cli, output: &mut StdOutput) -> Result<()> {
+         Command::Update(args) => {
+             commands::update::run(args, cli.device.as_deref(), cli.timeout, &config, output)
+         }
++        Command::Stage(args) => {
++            commands::stage::stage(args, cli.device.as_deref(), cli.timeout, &config, output)
++        }
++        Command::Activate(args) => {
++            commands::stage::activate(args, cli.device.as_deref(), cli.timeout, &config, output)
++        }
++        Command::Staged => commands::stage::list(&config, output),
+         Command::History(args) => commands::history::run(args, &config, output),
+         Command::Status(args) => {
+             commands::device::status(args, cli.device.as_deref(), cli.timeout, &config, output)
+@@ -79,7 +86,9 @@ const fn exit_code(err: &FwctlError) -> i32 {
+         | ErrorCategory::ImageVerificationFailed
+         | ErrorCategory::RebootTimeout
+         | ErrorCategory::HealthCheckFailed
+-        | ErrorCategory::AutomaticRollback => 6,
++        | ErrorCategory::AutomaticRollback
++        | ErrorCategory::StagedUpdateLost => 6,
++        ErrorCategory::NothingStaged => 7,
+         ErrorCategory::Configuration | ErrorCategory::Io => 2,
+     }
+ }
+diff --git a/crates/fwctl/tests/cli_process.rs b/crates/fwctl/tests/cli_process.rs
+index 81aaa80..b271fb5 100644
+--- a/crates/fwctl/tests/cli_process.rs
++++ b/crates/fwctl/tests/cli_process.rs
+@@ -171,3 +171,29 @@ fn exercise_trust_commands(config: &str, public_key: &str, package: &str) {
+     let rejected: serde_json::Value = serde_json::from_slice(&rejected.stdout).unwrap();
+     assert_eq!(rejected["category"], "unknown_signing_key");
+ }
++
++#[test]
++fn staging_journal_is_empty_until_an_update_is_staged() {
++    let dir = tempfile::tempdir().unwrap();
++    let staging = dir.path().join("state/staging.jsonl");
++    let config = dir.path().join("fwctl.toml");
++    fs::write(&config, format!("staging_file = {staging:?}\n")).unwrap();
++    let config = config.to_str().unwrap();
++
++    let listed = fwctl(&["--json", "--config", config, "staged"]);
++    assert!(listed.status.success());
++    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
++    assert_eq!(listed["staged"], serde_json::json!([]));
++
++    let activated = fwctl(&["--json", "--config", config, "activate", "rack-3"]);
++    assert_eq!(activated.status.code(), Some(7));
++    let activated: serde_json::Value = serde_json::from_slice(&activated.stdout).unwrap();
++    assert_eq!(activated["ok"], false);
++    assert_eq!(activated["category"], "nothing_staged");
++    assert!(
++        activated["error"]
++            .as_str()
++            .unwrap()
++            .contains("no staged update")
++    );
++}

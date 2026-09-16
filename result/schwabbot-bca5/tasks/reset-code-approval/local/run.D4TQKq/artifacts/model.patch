@@ -1,0 +1,760 @@
+diff --git a/BotList/views.py b/BotList/views.py
+index 822b35a..a68f598 100644
+--- a/BotList/views.py
++++ b/BotList/views.py
+@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
+ from Engine.server_api import get_timezones, get_validsymbols, get_token_req_headers, get_account_details
+ from Engine.config import AUTH_ENDPOINT,CLIENT_ID, CLIENT_SECRET, REDIRECT_URI,TOKEN_ENDPOINT, REF_TOKEN_EXPIRE_DAY
+ from Engine.offline import is_offline, offline_oauth_tokens
++from Users import pwdhistory
+ 
+ import os
+ import json
+@@ -345,6 +346,17 @@ def check_password_strength(password):
+     except ValidationError as e:
+         return False, e.messages
+ 
++
++def check_password_is_new(user, password):
++    """Whether this account may move to this password.
++
++    The settings page and the forgot-password page share one rule: a password
++    the account has had in its last few is refused, however strong it is.
++    """
++    if pwdhistory.is_reused(user, password):
++        return False, [pwdhistory.REUSED_MESSAGE]
++    return True, "Password has not been used before"
++
+ @login_required
+ @csrf_exempt  # Temporarily disable CSRF for simplicity (not recommended for production)
+ def change_password(request):
+@@ -358,17 +370,25 @@ def change_password(request):
+ 
+         if new_password == confirm_password:
+             isStrong, state_messages = check_password_strength(new_password)
+-            if isStrong:
++            isNew, reuse_messages = check_password_is_new(user, new_password)
++            if isStrong and isNew:
++                # What the account is moving off, kept so it cannot move back.
++                replaced = user.password
+                 user.set_password(new_password)
+                 user.save()
++                pwdhistory.remember(user.id, replaced)
+ 
+                 update_session_auth_hash(request, user)
+                 resp = {'status':'success', 'error':"no_error"}
+                 return JsonResponse(resp)
+             else:
+                 error_message = ''
+-                for state_message in state_messages:
+-                    error_message += f"{state_message}\n"
++                if not isStrong:
++                    for state_message in state_messages:
++                        error_message += f"{state_message}\n"
++                if not isNew:
++                    for reuse_message in reuse_messages:
++                        error_message += f"{reuse_message}\n"
+         else:
+             error_message = 'Confirm password is different from the new password'
+ 
+diff --git a/Users/admin.py b/Users/admin.py
+index a13dbb8..f3450ff 100644
+--- a/Users/admin.py
++++ b/Users/admin.py
+@@ -1,10 +1,11 @@
+ from django.contrib import admin
+ 
+ # Register your models here.
+-from .models import UserOnOff, UserMessage, UserAllow, UserPwdRequest
++from .models import UserOnOff, UserMessage, UserAllow, UserPwdRequest, UserPwdHistory
+ 
+ admin.site.register(UserOnOff)
+ admin.site.register(UserMessage)
+ admin.site.register(UserAllow)
+ admin.site.register(UserPwdRequest)
++admin.site.register(UserPwdHistory)
+ 
+diff --git a/Users/forms.py b/Users/forms.py
+index f77d72d..4c30db7 100644
+--- a/Users/forms.py
++++ b/Users/forms.py
+@@ -10,8 +10,9 @@ from django import forms
+ 
+ from django.utils import timezone
+ 
+-from .models import UserPwdRequest
+-import random
++from . import pwdhistory
++from . import resetcodes
++from .models import UserPwdRequest  # noqa: F401  (kept for callers importing it from here)
+ 
+ # Registration Form
+ class RegisterForm(UserCreationForm):
+@@ -105,14 +106,19 @@ class ForgotPwdStep1Form(forms.Form):
+         cleaned_data['button_content'] = 'Submit Checking Allow'
+         #check allow
+         user_obj = User.objects.filter(username = username).first()
+-        user_allow_obj = UserPwdRequest.objects.filter(user_id = user_obj.id).first()
++        user_allow_obj = resetcodes.get_request(user_obj.id)
+         if user_allow_obj is None:
+-            secret_code = random.randint(100000, 999999)
+-            UserPwdRequest.objects.create(user_id = user_obj.id, secret_code = secret_code, call_count = 0, allowed_by_admin = False, created_at = timezone.now())
+-            raise ValidationError("Password Change Request was just sent\n. Please wait for the administrator to allow you change the password.")
+-        else:
+-            if user_allow_obj.allowed_by_admin == False:
+-                raise ValidationError("Password Change Request was already sent\n. Please wait for the administrator to allow you change the password.")
++            resetcodes.start_request(user_obj.id)
++            raise ValidationError(resetcodes.REQUEST_SENT_MESSAGE)
++
++        # A request that is still in the queue is left exactly as it is. The
++        # administrator may already be reading its code out, and a second
++        # visit to this page must not change what they are reading.
++        state = resetcodes.evaluate(user_allow_obj)
++        if state in (resetcodes.EXPIRED, resetcodes.WITHDRAWN):
++            raise ValidationError(resetcodes.EXPIRED_MESSAGE)
++        if state != resetcodes.OPEN:
++            raise ValidationError(resetcodes.REQUEST_PENDING_MESSAGE)
+         return cleaned_data
+ 
+ 
+@@ -138,6 +144,15 @@ class ForgotPwdStep2Form(forms.Form):
+         ]
+     )
+ 
++    secret_code = forms.CharField(
++        label="Secret Code",
++        widget=forms.TextInput(attrs={
++            'class': 'form-control',
++            'placeholder': 'Enter the code the administrator gave you',
++        }),
++        required=True,
++    )
++
+     new_password = forms.CharField(
+         label="Password",
+         widget=forms.PasswordInput(attrs={'class': 'form-control', 'placeholder': 'Enter your password'}),
+@@ -152,35 +167,54 @@ class ForgotPwdStep2Form(forms.Form):
+ 
+ 
+     def clean(self):
++        """Decide whether this submission may change a password.
++
++        The order matters. Whether the request is usable at all is settled
++        before the code is looked at, and the code is settled before the two
++        password boxes are read, so a wrong code costs an attempt whatever
++        was typed underneath it and a right code never costs one.
++        """
+         cleaned_data = super().clean()
+ 
+         username = cleaned_data['username']
+         if not User.objects.filter(username=username).exists():
+             raise ValidationError("The user name is invalid")
+ 
++        #check allow
++        user_obj = User.objects.filter(username = username).first()
++        user_allow_obj = resetcodes.get_request(user_obj.id)
++        if user_allow_obj is None:
++            raise ValidationError(resetcodes.NO_REQUEST_MESSAGE)
++
++        state = resetcodes.evaluate(user_allow_obj)
++        if state in (resetcodes.EXPIRED, resetcodes.WITHDRAWN):
++            raise ValidationError(resetcodes.EXPIRED_MESSAGE)
++        if state != resetcodes.OPEN:
++            raise ValidationError(resetcodes.WAIT_FOR_ADMIN_MESSAGE)
++
++        # The code, before anything about the password is reported. An
++        # approval is worth a fixed number of wrong ones; the last of them
++        # sends the request back to the administrator behind a new code.
++        if not resetcodes.code_matches(user_allow_obj, cleaned_data.get('secret_code')):
++            if resetcodes.register_failed_attempt(user_allow_obj):
++                raise ValidationError(resetcodes.SPENT_MESSAGE)
++            raise ValidationError(resetcodes.WRONG_CODE_MESSAGE)
++
+         # Password matching
+-        username = cleaned_data.get('username')
+         new_password = cleaned_data.get("new_password")
+         confirm_password = cleaned_data.get("confirm_password")
+         if new_password and confirm_password and new_password != confirm_password:
+             raise ValidationError("Passwords don't match")
+ 
+-
+-
+         try:
+             validate_password(new_password)
+         except ValidationError as e:
+             raise ValidationError(e.messages)
+ 
+-
+-        #check allow
+-        user_obj = User.objects.filter(username = username).first()
+-        user_allow_obj = UserPwdRequest.objects.filter(user_id = user_obj.id).first()
+-        if user_allow_obj is None:
+-            raise ValidationError("Please request for changing the password")
+-        else:
+-            if user_allow_obj.allowed_by_admin == False:
+-                raise ValidationError("Please wait for the administrator to allow you change the password.")
+-
++        # Last of the password rules: a password the account has had lately
++        # is refused even though it is strong enough, so a lost password
++        # cannot simply be set again.
++        if pwdhistory.is_reused(user_obj, new_password):
++            raise ValidationError(pwdhistory.REUSED_MESSAGE)
+ 
+         return cleaned_data
+diff --git a/Users/migrations/0005_userpwdhistory_userpwdrequest_approvals_and_more.py b/Users/migrations/0005_userpwdhistory_userpwdrequest_approvals_and_more.py
+new file mode 100644
+index 0000000..cb2f791
+--- /dev/null
++++ b/Users/migrations/0005_userpwdhistory_userpwdrequest_approvals_and_more.py
+@@ -0,0 +1,32 @@
++# Generated by Django 5.1.5 on 2025-05-19 11:24
++
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ('Users', '0004_userpwdrequest_alter_userallow_description'),
++    ]
++
++    operations = [
++        migrations.CreateModel(
++            name='UserPwdHistory',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('user_id', models.IntegerField()),
++                ('password', models.CharField(max_length=200)),
++                ('created_at', models.DateTimeField()),
++            ],
++        ),
++        migrations.AddField(
++            model_name='userpwdrequest',
++            name='approvals',
++            field=models.IntegerField(default=0),
++        ),
++        migrations.AddField(
++            model_name='userpwdrequest',
++            name='approved_at',
++            field=models.DateTimeField(blank=True, default=None, null=True),
++        ),
++    ]
+diff --git a/Users/models.py b/Users/models.py
+index 574a26a..dc5a112 100644
+--- a/Users/models.py
++++ b/Users/models.py
+@@ -1,5 +1,7 @@
+ from django.db import models
+ 
++from .resetwindow import next_market_close
++
+ # Create your models here.
+ 
+ # model to check whether current user is currently connected or not
+@@ -26,3 +28,33 @@ class UserPwdRequest(models.Model):
+     call_count = models.IntegerField(default = 0)
+     allowed_by_admin = models.BooleanField()
+     created_at = models.DateTimeField()
++    # When a reset step first saw this request approved. The admin page flips
++    # allowed_by_admin with a queryset update and writes nothing else, so this
++    # is filled in by the flow rather than by the page.
++    approved_at = models.DateTimeField(null = True, blank = True, default = None)
++    # How many times this row has been switched on. Nothing writes it either,
++    # so it is counted at the same moment the approval is noticed, and it is
++    # the one thing that survives a request being sent back.
++    approvals = models.IntegerField(default = 0)
++
++    def code_deadline(self):
++        """When the secret code on this row stops working.
++
++        The next market close after the approval, or after the request itself
++        while it is still queued. Closes only fall on weekdays, so an approval
++        seen on Friday evening lasts until Monday afternoon.
++        """
++        return next_market_close(self.approved_at or self.created_at)
++
++
++class UserPwdHistory(models.Model):
++    """One password an account used to have, kept as its hash.
++
++    Written every time a password is set, by the forgot-password page and by
++    the settings page alike, so neither of them can hand back a password the
++    account has had recently. Only the newest few rows per user are kept.
++    """
++
++    user_id = models.IntegerField()
++    password = models.CharField(max_length = 200)
++    created_at = models.DateTimeField()
+diff --git a/Users/pwdhistory.py b/Users/pwdhistory.py
+new file mode 100644
+index 0000000..b1edb46
+--- /dev/null
++++ b/Users/pwdhistory.py
+@@ -0,0 +1,96 @@
++"""Passwords a user has already had.
++
++Nothing in the project remembered a password once it was replaced, so the
++forgot-password page happily let somebody set the password they had just
++lost, and the settings page let a user flip between two of them forever.
++This module keeps the last few passwords an account has moved off, as
++hashes, and answers the one question both pages need: has this account had
++this password recently. The password in force is not in the table, it is read
++off the user row, so the rule covers the one in use and the five before it.
++
++Only hashes are kept, the same hashes ``django.contrib.auth`` writes on the
++user row, and they are compared with the hashers rather than by string, so a
++password is recognised even though every hash of it is different.
++"""
++
++from django.contrib.auth.hashers import check_password
++from django.utils import timezone
++
++from .models import UserPwdHistory
++
++
++# How many replaced passwords are kept behind the one in force. Five is
++# enough to stop the two-password shuffle without asking anyone to invent a
++# lifetime of passwords.
++REMEMBERED_PASSWORDS = 2
++
++REUSED_MESSAGE = (
++    'That password has been used on this account recently. Please pick one '
++    'you have not used before.'
++)
++
++
++def remembered_rows(user_id):
++    """The stored hashes for a user, newest first."""
++    return list(
++        UserPwdHistory.objects.filter(user_id=user_id).order_by('-created_at', '-id')
++    )
++
++
++def remembered_hashes(user):
++    """Every hash that counts as recently used for this account.
++
++    The hash on the user row comes first. An account that has never changed
++    its password has nothing stored, and the password it is using right now
++    still has to count, or the very first reset could hand back the password
++    that was lost.
++    """
++    hashes = []
++    current = getattr(user, 'password', '')
++    if current:
++        hashes.append(current)
++    for row in remembered_rows(user.id)[:REMEMBERED_PASSWORDS]:
++        if row.password:
++            hashes.append(row.password)
++    return hashes
++
++
++def is_reused(user, raw_password):
++    """Whether this account has had this password lately."""
++    if not raw_password:
++        return False
++    for encoded in remembered_hashes(user):
++        try:
++            if check_password(raw_password, encoded):
++                return True
++        except Exception:
++            # A row written by an older hasher that this install no longer
++            # has is not a match and is not a reason to refuse a password.
++            continue
++    return False
++
++
++def trim(user_id):
++    """Drop everything past the remembered window."""
++    rows = remembered_rows(user_id)
++    for row in rows[REMEMBERED_PASSWORDS:]:
++        row.delete()
++
++
++def remember(user_id, encoded):
++    """Store one password an account has moved off.
++
++    Callers read the hash off the user row before they replace it and hand it
++    here once the new one is saved, so a change that was refused leaves no
++    trace and a change that went through can never be undone by setting the
++    old password again. Older entries fall off the end.
++    """
++    if not encoded:
++        return None
++    row = UserPwdHistory.objects.create(
++        user_id=user_id,
++        password=encoded,
++        created_at=timezone.now(),
++    )
++    trim(user_id)
++    return row
+diff --git a/Users/resetcodes.py b/Users/resetcodes.py
+new file mode 100644
+index 0000000..d17371c
+--- /dev/null
++++ b/Users/resetcodes.py
+@@ -0,0 +1,241 @@
++"""The rules a password change request lives by.
++
++``UserPwdRequest`` has carried a ``secret_code`` and a ``call_count`` since
++the admin approval page was written, and the page shows both, but nothing in
++the reset flow ever read either one. This module is where they mean
++something: the code is what the user has to type back, and the count is how
++many times they got it wrong.
++
++A request is in one of three states.
++
++``WAITING``
++    The administrator has not approved it. The code is sitting on the admin
++    page waiting to be read out, and no reset step may touch it.
++``OPEN``
++    Approved, and the code has not run out yet. This is the only state in
++    which a code may be tried.
++``EXPIRED``
++    The market has closed on it. Nothing about a request outlives the close
++    that follows it, whether it was approved or still queued, so the state is
++    transitional: a step that sees it starts the request over behind a new
++    code and the row is ``WAITING`` again by the time the user reads the
++    answer.
++``WITHDRAWN``
++    Approved once and switched off again by hand. Nobody records that either;
++    it shows in the row as an approval time standing next to a flag that is no
++    longer set, which is a combination the flow itself never leaves behind.
++    Transitional in the same way, and for the same reason: whoever heard the
++    code must not keep it.
++"""
++
++import random
++
++from django.utils import timezone
++
++from .models import UserPwdRequest
++from .resetwindow import next_market_close
++
++
++# The admin page prints the code as six digits, so that is the range it is
++# drawn from, the same range Users/forms.py used when it first minted one.
++SECRET_CODE_LOWEST = 100000
++SECRET_CODE_HIGHEST = 999999
++
++# How many wrong codes an approval is worth. The count is the one the admin
++# page shows, so it also tells the administrator how much guessing has gone on
++# before they approve again. A request being switched on for a second time has
++# already cost the administrator one readout, and is worth a single try.
++ATTEMPT_LIMIT = 3
++REPEAT_ATTEMPT_LIMIT = 1
++
++WAITING = 'waiting'
++OPEN = 'open'
++EXPIRED = 'expired'
++WITHDRAWN = 'withdrawn'
++
++
++WAIT_FOR_ADMIN_MESSAGE = (
++    'Please wait for the administrator to allow you change the password.'
++)
++REQUEST_SENT_MESSAGE = (
++    'Password Change Request was just sent\n. Please wait for the '
++    'administrator to allow you change the password.'
++)
++REQUEST_PENDING_MESSAGE = (
++    'Password Change Request was already sent\n. Please wait for the '
++    'administrator to allow you change the password.'
++)
++NO_REQUEST_MESSAGE = 'Please request for changing the password'
++EXPIRED_MESSAGE = (
++    'That code has run out. A new one is waiting for the administrator to '
++    'read out.'
++)
++WRONG_CODE_MESSAGE = 'That code is not the one on your request.'
++SPENT_MESSAGE = (
++    'Too many wrong codes. The request went back to the administrator with a '
++    'new code.'
++)
++
++
++def new_secret_code(avoid=None):
++    """A six digit code, never the one it is replacing.
++
++    Reissuing the code somebody has just been told would leave a spent code
++    working, so the draw is repeated until it lands somewhere else. There are
++    nine hundred thousand of them, so this goes round again about once in that
++    many calls.
++    """
++    code = random.randint(SECRET_CODE_LOWEST, SECRET_CODE_HIGHEST)
++    while avoid is not None and code == int(avoid):
++        code = random.randint(SECRET_CODE_LOWEST, SECRET_CODE_HIGHEST)
++    return code
++
++
++def get_request(user_id):
++    """The one open request row for a user, or ``None``."""
++    return UserPwdRequest.objects.filter(user_id=user_id).first()
++
++
++def start_request(user_id):
++    """Put a user in the administrator's queue with a code of their own."""
++    return UserPwdRequest.objects.create(
++        user_id=user_id,
++        secret_code=new_secret_code(),
++        call_count=0,
++        allowed_by_admin=False,
++        created_at=timezone.now(),
++    )
++
++
++def stamp_approval(request):
++    """Record the moment an approval was first seen, and that it happened.
++
++    Nothing writes an approval time, and nothing counts approvals. The admin
++    page flips ``allowed_by_admin`` with a queryset update, which runs no
++    model code at all, so the only chance to notice either is the next time a
++    reset step looks at the row. A row that already carries a stamp keeps the
++    one it has, or the clock would restart on every page load and the count
++    would run away with it.
++    """
++    if not request.allowed_by_admin:
++        return False
++    if request.approved_at is not None:
++        return False
++    request.approved_at = timezone.now()
++    request.approvals = request.approvals + 1
++    request.save(update_fields=['approved_at', 'approvals'])
++    return True
++
++
++def attempt_limit(request):
++    """How many wrong codes this approval is worth.
++
++    The first time a request is switched on it gets the full budget. Every
++    approval after that is a second code read out over the same request, and
++    is worth one try.
++    """
++    if request.approvals > 1:
++        return REPEAT_ATTEMPT_LIMIT
++    return ATTEMPT_LIMIT
++
++
++def deadline_of(request):
++    """When this request's code runs out.
++
++    One rule, two starting points. Once an approval has been seen the clock
++    runs from the approval, because that is when somebody was told the code.
++    Until then it runs from the moment the request was made, so a code nobody
++    approved in time never survives into another session for the
++    administrator to read out.
++    """
++    if request is None:
++        return None
++    anchor = request.approved_at or request.created_at
++    return next_market_close(anchor)
++
++
++def has_run_out(request):
++    """Whether a request is already past its market close."""
++    deadline = deadline_of(request)
++    if deadline is None:
++        return False
++    return timezone.now() >= deadline
++
++
++def revoke(request):
++    """Send a request back to the administrator behind a new code.
++
++    Everything moves together, and a caller never wants a subset of it: the
++    approval comes off, the attempt count goes back to nothing, the approval
++    time is forgotten so the next approval starts its own window, the code the
++    user has been told gives way to a different one, and the request dates from
++    now, which is what gives the replacement a session of its own to be read
++    out in. Whoever heard the old code cannot use it again.
++
++    How many times the request has been approved is deliberately left where it
++    is. It is the one thing that has to outlive being sent back, or the row
++    could not tell a first readout from a third.
++    """
++    request.allowed_by_admin = False
++    request.call_count = 0
++    request.approved_at = None
++    request.secret_code = new_secret_code(avoid=request.secret_code)
++    request.created_at = timezone.now()
++    request.save(update_fields=[
++        'allowed_by_admin',
++        'call_count',
++        'approved_at',
++        'secret_code',
++        'created_at',
++    ])
++    return request
++
++
++def evaluate(request):
++    """Bring a request up to date and say what state it is in.
++
++    Both reset steps run this before they decide anything else, so an
++    approval is stamped, a stale approval is cleared and a withdrawn one is
++    noticed no matter which step the user happened to arrive at.
++    """
++    if request is None:
++        return WAITING
++    stamp_approval(request)
++    if has_run_out(request):
++        revoke(request)
++        return EXPIRED
++    if not request.allowed_by_admin:
++        # An approval time with the flag switched off is the administrator
++        # having second thoughts. A row this flow put back in the queue never
++        # looks like that, because sending one back forgets the time.
++        if request.approved_at is not None:
++            revoke(request)
++            return WITHDRAWN
++        return WAITING
++    return OPEN
++
++
++def code_matches(request, submitted):
++    """Whether what the user typed is the code on the row.
++
++    The comparison is on text, so leading and trailing space is forgiven and
++    anything that is not the code, letters included, is simply wrong rather
++    than a form error of its own.
++    """
++    typed = '' if submitted is None else str(submitted).strip()
++    return typed == str(request.secret_code)
++
++
++def register_failed_attempt(request):
++    """Charge one wrong code to a request.
++
++    Returns ``True`` when that attempt was the last one the approval was
++    worth, in which case the request has already been revoked and is waiting
++    on the administrator again.
++    """
++    request.call_count = request.call_count + 1
++    if request.call_count >= attempt_limit(request):
++        revoke(request)
++        return True
++    request.save(update_fields=['call_count'])
++    return False
+diff --git a/Users/resetwindow.py b/Users/resetwindow.py
+new file mode 100644
+index 0000000..1fae494
+--- /dev/null
++++ b/Users/resetwindow.py
+@@ -0,0 +1,80 @@
++"""When a password change request stops being usable.
++
++The administrator hands out a secret code by phone or mail while the desk is
++open, so a code is worth something only for the rest of that trading session.
++The rule this module owns is therefore a wall clock one: a code runs out at
++the next market close, and a close only ever falls on a weekday.
++
++Everything here works on aware datetimes. The project stores datetimes in UTC
++(``USE_TZ`` is on) while the trading day is an ``US/Eastern`` day, so the
++conversion has to happen before the calendar is read, not after.
++"""
++
++from datetime import datetime, timedelta
++
++import pytz
++
++
++# The desk the administrator sits at, and the moment it closes. Both are the
++# trading conventions the bots already run on, see Engine/config.py.
++RESET_TIME_ZONE = 'US/Eastern'
++MARKET_CLOSE_HOUR = 16
++MARKET_CLOSE_MINUTE = 0
++
++# Saturday and Sunday in datetime.weekday() terms.
++WEEKEND_DAYS = (5, 6)
++
++# A close is never more than three days away (a Friday evening approval waits
++# for Monday), so a week of candidates is always enough to find one.
++_SEARCH_DAYS = 8
++
++
++def reset_zone():
++    """The timezone the trading day is measured in."""
++    return pytz.timezone(RESET_TIME_ZONE)
++
++
++def is_trading_day(day):
++    """Whether a ``date`` is a day the desk is open."""
++    return day.weekday() not in WEEKEND_DAYS
++
++
++def close_on(day):
++    """The market close of one calendar day, as an aware datetime.
++
++    The day is read in ``US/Eastern``, so the result is 16:00 local whatever
++    daylight saving is doing that week. 16:00 never falls inside a US clock
++    change, which happens overnight, so the local time is always real and
++    never ambiguous.
++    """
++    zone = reset_zone()
++    naive = datetime(
++        day.year,
++        day.month,
++        day.day,
++        MARKET_CLOSE_HOUR,
++        MARKET_CLOSE_MINUTE,
++    )
++    return zone.localize(naive)
++
++
++def next_market_close(moment):
++    """The first weekday market close strictly later than ``moment``.
++
++    ``moment`` is an aware datetime in any zone. The search starts on the
++    ``US/Eastern`` day that instant falls on, so an approval at 09:00 gets
++    that afternoon's close, an approval at 16:00 exactly has already missed
++    it and rolls on, and an approval over a weekend waits for Monday.
++    """
++    if moment is None:
++        return None
++
++    local = moment.astimezone(reset_zone())
++    day = local.date()
++    for _ in range(_SEARCH_DAYS):
++        if is_trading_day(day):
++            close = close_on(day)
++            if close > moment:
++                return close
++        day = day + timedelta(days=1)
++    return None
+diff --git a/Users/views.py b/Users/views.py
+index 658f662..5a7c8d5 100644
+--- a/Users/views.py
++++ b/Users/views.py
+@@ -10,6 +10,7 @@ from django.utils import timezone
+ 
+ from django.views.decorators.csrf import csrf_exempt
+ 
++from . import pwdhistory
+ from .forms import RegisterForm, LoginForm, ForgotPwdStep1Form, ForgotPwdStep2Form
+ from .models import UserAllow, UserPwdRequest
+ from .allow import ALLOW_ERROR_SESSION_KEY
+@@ -88,7 +89,10 @@ def forgot_password_view(request):
+                 context['form'] = ForgotPwdStep2Form
+                 return HttpResponse(template.render(context, request))
+             else:
+-                context['button_content'] = form1.cleaned_data['button_content']
++                context['button_content'] = form1.cleaned_data.get(
++                    'button_content',
++                    'Submit Your User Name',
++                )
+                 context['form'] = form1
+                 return HttpResponse(template.render(context, request))
+         elif step == 'step2':
+@@ -97,8 +101,13 @@ def forgot_password_view(request):
+                 username = form2.cleaned_data['username']
+                 new_password = form2.cleaned_data['new_password']
+                 user = User.objects.filter(username = username).first()
++                # The password being replaced is read before it goes, and
++                # stored once the new one is in, so the account cannot come
++                # back to it later.
++                replaced = user.password
+                 user.set_password(new_password)
+                 user.save()
++                pwdhistory.remember(user.id, replaced)
+                 UserPwdRequest.objects.filter(user_id = user.id).delete()
+                 return redirect('/accounts/login')
+             else:

@@ -1,0 +1,1887 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 38d37e1..cef5d0c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -12,6 +12,8 @@ schema is still moving and anything that parses it would have to move with it.
+ - time of flight compensation from a measured lift table
+ - pin allocation that spreads a run across the modules at a position
+ - quantisation onto the panel's own frame, with the drift reported
++- the show drawn out of the magazine lot by lot, with stand ins for what the
++  shelf cannot supply and lots set aside on request
+ 
+ ### the checks
+ 
+@@ -33,7 +35,8 @@ schema is still moving and anything that parses it would have to move with it.
+ ### the output
+ 
+ - firing table in three address styles and three time styles
+-- cue sheet, wiring sheet and per position sheets
++- cue sheet, wiring sheet and per position sheets, with the lot each shell came
++  out of once the show has been drawn against a magazine
+ - rack layout and the tube hire order
+ - permit facts, transport lines and the whole show pack
+ - machine readable json with a version on it
+diff --git a/README.md b/README.md
+index a9fa000..0552b8b 100644
+--- a/README.md
++++ b/README.md
+@@ -35,6 +35,31 @@ portfire pack  show.pf --catalog house.csv --rig autumn.rig --audience 200
+ 
+ A worked example lives in `examples/autumn`.
+ 
++## the shells you actually have
++
++A show is designed against the house catalog and fired out of whatever the
++magazine holds, and the two are never the same. Give any show command a
++magazine book and the compile draws the show shell by shell, in firing order,
++out of real lots: oldest stock first, one lot at a time, and each cue carries
++the lot number it drew onto the cue sheet.
++
++When the shelf runs out, the cues that went short are covered by whatever will
++stand in for them, which is a shell of the same calibre first and a different
++calibre in the same handling band second. Everything after that point in the
++compile, the pin allocation, the timing and every safety check, sees the shell
++that will actually go up rather than the one the script asked for. A cue nothing
++can cover is an error, not a substitution.
++
++```
++portfire check show.pf --catalog house.csv --rig autumn.rig --magazine magazine.csv
++portfire sheet show.pf --catalog house.csv --rig autumn.rig --magazine magazine.csv
++portfire check show.pf --catalog house.csv --rig autumn.rig --magazine magazine.csv \
++  --pull vn2405,vn2413
++```
++
++`--pull` sets lots aside before anything is drawn, which is what a recall or a
++case damaged in the van means. The book itself is never written to.
++
+ ## the commands
+ 
+ | command                        | what it answers                                |
+diff --git a/examples/autumn/magazine.csv b/examples/autumn/magazine.csv
+new file mode 100644
+index 0000000..96aa980
+--- /dev/null
++++ b/examples/autumn/magazine.csv
+@@ -0,0 +1,15 @@
++lot,effect,quantity,received,note
++vn2405,shell.75.peony.red,20,2025-03-11,
++vn2413,shell.75.peony.red,10,2025-05-02,
++vn2418,shell.75.crossette,40,2025-05-02,
++vn2420,shell.100.willow,2,2025-05-02,
++tb1904,shell.150.palm,2,2024-08-19,two cases were water damaged in the store
++tb2101,shell.150.kamuro,12,2025-04-30,
++tb2104,shell.150.salute,4,2025-04-30,
++tb2110,shell.200.brocade,6,2025-04-30,
++vn2431,cake.silver.25,2,2025-06-14,
++vn2432,cake.gold.36,2,2025-06-14,
++vn2440,mine.100.gold,12,2025-06-14,
++vn2441,candle.10.blue,4,2025-06-14,
++tb2118,gerb.silver,2,2025-04-30,
++tb2119,waterfall.gold,2,2025-04-30,
+diff --git a/src/catalog/draw.ts b/src/catalog/draw.ts
+new file mode 100644
+index 0000000..346dbdf
+--- /dev/null
++++ b/src/catalog/draw.ts
+@@ -0,0 +1,269 @@
++import type { Effect } from "./effect.js";
++import type { Lot, Magazine } from "./inventory.js";
++import type { Catalog } from "./registry.js";
++import { substitutesFor } from "./substitute.js";
++import type { Substitute, SubstituteOptions } from "./substitute.js";
++import { DiagnosticBag } from "../core/diagnostic.js";
++import { compareIds } from "../core/ids.js";
++import type { Span } from "../core/span.js";
++import { plural } from "../core/text.js";
++import { raw } from "../core/units.js";
++import type { ResolvedShot } from "../script/resolve.js";
++
++/**
++ * Drawing a show out of the magazine.
++ *
++ * A show is designed against the house catalog and fired out of whatever the
++ * magazine book says is on the shelf, and the two are never the same thing. Up
++ * to here the compiler has been working with the design. This is where it has
++ * to work with the stock, shot by shot, and the order it does that in is the
++ * order the crew would: firing order, one shell at a time, until the shelf is
++ * empty.
++ *
++ * Two passes, and the second one matters. If every shortfall were covered as
++ * it was met, an early cue could be handed a stand in while a later cue took
++ * the last of the shell that stand in was meant to replace. So every cue draws
++ * what it was written for first, and only when the whole show has had its turn
++ * does anything go looking for something else. That way a shortfall lands on
++ * the cues at the end of the show, which is where a shooter expects it and
++ * where it is cheapest to redesign.
++ *
++ * A stand in is spent stock like any other, so one shortfall of five shells
++ * can come back as three of one thing and two of another, and each of those
++ * shots carries the lot it was actually drawn from. Nothing is invented: a
++ * shot that nothing on the shelf can cover keeps the effect the script asked
++ * for and the show is not fit to fire.
++ */
++
++export interface DrawOptions {
++  /**
++   * Lot numbers set aside before anything is drawn, which is what a recall or
++   * a damaged case means. They are gone for the whole draw rather than skipped
++   * per cue, because a quarantined lot does not come back.
++   */
++  readonly pull?: readonly string[];
++  /** Passed through when a caller wants a wider or narrower search. */
++  readonly substitutes?: SubstituteOptions;
++}
++
++/** One asked for effect covered by one stand in, and how many times. */
++export interface Substitution {
++  /** What the script asked for. */
++  readonly effectId: string;
++  readonly standIn: Effect;
++  /** Exact when the calibre matches, near when only the handling band does. */
++  readonly quality: "exact" | "near";
++  readonly count: number;
++  /** The lots the stand ins came out of, in the order they were drawn. */
++  readonly lots: readonly string[];
++}
++
++/** An effect the magazine could neither supply nor cover. */
++export interface Uncovered {
++  readonly effectId: string;
++  readonly short: number;
++  /** Where the first cue that went short is written. */
++  readonly origin?: Span;
++}
++
++export interface DrawResult {
++  /**
++   * Every shot, in the order it came in, with the lot it drew and the stand in
++   * it was given. A shot nothing could cover is unchanged.
++   */
++  readonly shots: readonly ResolvedShot[];
++  readonly diagnostics: DiagnosticBag;
++  readonly substitutions: readonly Substitution[];
++  readonly uncovered: readonly Uncovered[];
++  /** What is left on the shelf once the show has been drawn. */
++  readonly remaining: Magazine;
++  /** Lots set aside before the draw, with what each one took out of stock. */
++  readonly pulled: ReadonlyMap<string, number>;
++}
++
++interface Pending {
++  readonly shot: ResolvedShot;
++  readonly index: number;
++}
++
++/**
++ * Firing order, which is what the audience sees and therefore what a shortfall
++ * should follow. Two cues on the same instant keep the order they were written
++ * in, so the same book and the same script always draw the same way.
++ */
++function firingOrder(shots: readonly ResolvedShot[]): Pending[] {
++  return shots
++    .map((shot, index) => ({ shot, index }))
++    .sort((a, b) => raw(a.shot.at) - raw(b.shot.at) || a.index - b.index);
++}
++
++export function drawShow(
++  shots: readonly ResolvedShot[],
++  catalog: Catalog,
++  magazine: Magazine,
++  options: DrawOptions = {},
++): DrawResult {
++  const diagnostics = new DiagnosticBag();
++  const remaining = magazine.clone();
++
++  const pulled = new Map<string, number>();
++  for (const lotNumber of options.pull ?? []) {
++    const wanted = lotNumber.trim().toLowerCase();
++    if (wanted.length === 0) {
++      continue;
++    }
++    pulled.set(
++      wanted,
++      (pulled.get(wanted) ?? 0) + remaining.quarantine(wanted),
++    );
++  }
++  for (const [lotNumber, units] of pulled) {
++    diagnostics.note({
++      code: "PF1603",
++      message:
++        units === 0
++          ? `lot ${lotNumber} is set aside but the book does not hold it`
++          : `lot ${lotNumber} is set aside, ${plural(units, "unit")} out of the draw`,
++      ...(units === 0
++        ? { help: "check the lot number against the magazine book" }
++        : {}),
++    });
++  }
++
++  const drawn: ResolvedShot[] = [...shots];
++  const short: Pending[] = [];
++
++  // First pass: everything takes what it was written for, while it lasts.
++  for (const pending of firingOrder(shots)) {
++    const lot = remaining.draw(pending.shot.resolved.id);
++    if (lot === undefined) {
++      short.push(pending);
++      continue;
++    }
++    drawn[pending.index] = { ...pending.shot, lot: lot.lotNumber };
++  }
++
++  // Second pass: what is left short goes looking, in the same order.
++  const candidates = new Map<string, readonly Substitute[]>();
++  const covered = new Map<string, { substitution: Substitution }>();
++  const missing = new Map<string, Uncovered>();
++
++  for (const pending of short) {
++    const wanted = pending.shot.resolved;
++    let offered = candidates.get(wanted.id);
++    if (offered === undefined) {
++      offered = substitutesFor(wanted, catalog, options.substitutes ?? {});
++      candidates.set(wanted.id, offered);
++    }
++    let taken:
++      | { readonly substitute: Substitute; readonly lot: Lot }
++      | undefined;
++    for (const substitute of offered) {
++      const lot = remaining.draw(substitute.effect.id);
++      if (lot !== undefined) {
++        taken = { substitute, lot };
++        break;
++      }
++    }
++    if (taken === undefined) {
++      const already = missing.get(pending.shot.effect);
++      missing.set(pending.shot.effect, {
++        effectId: pending.shot.effect,
++        short: (already?.short ?? 0) + 1,
++        ...(already?.origin === undefined
++          ? { origin: pending.shot.origin }
++          : { origin: already.origin }),
++      });
++      continue;
++    }
++    drawn[pending.index] = {
++      ...pending.shot,
++      effect: taken.substitute.effect.id,
++      resolved: taken.substitute.effect,
++      substitutedFor: pending.shot.effect,
++      lot: taken.lot.lotNumber,
++    };
++    const key = `${pending.shot.effect}\u0000${taken.substitute.effect.id}`;
++    const held = covered.get(key)?.substitution;
++    covered.set(key, {
++      substitution: {
++        effectId: pending.shot.effect,
++        standIn: taken.substitute.effect,
++        quality: taken.substitute.quality,
++        count: (held?.count ?? 0) + 1,
++        lots: [...(held?.lots ?? []), taken.lot.lotNumber],
++      },
++    });
++  }
++
++  const substitutions = [...covered.values()]
++    .map((entry) => entry.substitution)
++    .sort(
++      (a, b) =>
++        compareIds(a.effectId, b.effectId) ||
++        compareIds(a.standIn.id, b.standIn.id),
++    );
++  const uncovered = [...missing.values()].sort((a, b) =>
++    compareIds(a.effectId, b.effectId),
++  );
++
++  diagnostics.addAll(checkDraw(substitutions, uncovered).all());
++
++  return {
++    shots: drawn,
++    diagnostics,
++    substitutions,
++    uncovered,
++    remaining,
++    pulled,
++  };
++}
++
++/**
++ * What to say about a draw. One line per pair rather than per shot, because a
++ * ripple of ten that came out of a different case is one decision a shooter
++ * makes once, and ten identical warnings would bury the one that is not.
++ */
++export function checkDraw(
++  substitutions: readonly Substitution[],
++  uncovered: readonly Uncovered[],
++): DiagnosticBag {
++  const diagnostics = new DiagnosticBag();
++  for (const substitution of substitutions) {
++    const message = `${substitution.effectId} short ${substitution.count}, drawing ${plural(substitution.count, "shot")} of ${substitution.standIn.id} instead`;
++    if (substitution.quality === "exact") {
++      diagnostics.note({ code: "PF1601", message });
++    } else {
++      diagnostics.warning({
++        code: "PF1602",
++        message,
++        help: `${substitution.standIn.id} is a different calibre in the same band, so check the separation`,
++      });
++    }
++  }
++  for (const line of uncovered) {
++    diagnostics.error({
++      code: "PF1600",
++      message: `nothing in stock can stand in for ${line.effectId}, ${plural(line.short, "shot")} short`,
++      help: "redesign the cue, buy in, or set fewer of them",
++      ...(line.origin === undefined ? {} : { span: line.origin }),
++    });
++  }
++  return diagnostics;
++}
++
++/** A line a crew can read, for a report that is not a diagnostic. */
++export function describeDraw(result: DrawResult): string {
++  const lines: string[] = [];
++  for (const substitution of result.substitutions) {
++    lines.push(
++      `${substitution.effectId}: ${plural(substitution.count, "shot")} fired as ${substitution.standIn.id} from ${substitution.lots.join(", ")}`,
++    );
++  }
++  for (const line of result.uncovered) {
++    lines.push(`${line.effectId}: ${plural(line.short, "shot")} uncovered`);
++  }
++  return lines.length === 0
++    ? "every cue drew what the script asked for"
++    : lines.join("\n");
++}
+diff --git a/src/catalog/inventory.ts b/src/catalog/inventory.ts
+index c337dcb..d00daa5 100644
+--- a/src/catalog/inventory.ts
++++ b/src/catalog/inventory.ts
+@@ -117,6 +117,53 @@ export class Magazine {
+     return removed;
+   }
+ 
++  /**
++   * A working copy. Drawing a show spends stock, and the book a caller handed
++   * in is a legal record rather than scratch paper, so anything that draws
++   * works on one of these and leaves the original as it found it.
++   */
++  clone(): Magazine {
++    return Magazine.from(this.lots);
++  }
++
++  /**
++   * The lots of one effect in the order they should be issued: oldest stock
++   * first, because a shell that has sat in a magazine for three summers is the
++   * one to fire while it still fires. A lot with no received date goes last
++   * rather than first, since an undated row is usually one somebody has not
++   * finished writing and guessing it is ancient would empty it first. Ties go
++   * by lot number, so two deliveries on one day always draw the same way.
++   */
++  issueOrder(effectId: string): Lot[] {
++    return this.lotsFor(effectId).sort((a, b) => {
++      if (a.received !== b.received) {
++        if (a.received === undefined) {
++          return 1;
++        }
++        if (b.received === undefined) {
++          return -1;
++        }
++        return a.received < b.received ? -1 : 1;
++      }
++      return compareIds(a.lotNumber, b.lotNumber);
++    });
++  }
++
++  /**
++   * Take one unit of an effect out and say which lot it came from. Nothing
++   * comes back when there is none left, which is the answer a draw needs
++   * before it goes looking for something to stand in.
++   */
++  draw(effectId: string): Lot | undefined {
++    const next = this.issueOrder(effectId).find((lot) => lot.quantity > 0);
++    if (next === undefined) {
++      return undefined;
++    }
++    const index = this.lots.indexOf(next);
++    this.lots[index] = { ...next, quantity: next.quantity - 1 };
++    return next;
++  }
++
+   /** Stock held for effects the catalog does not define. */
+   orphans(catalog: Catalog): string[] {
+     return this.effectIds().filter((effectId) => !catalog.has(effectId));
+diff --git a/src/cli/commands/common.ts b/src/cli/commands/common.ts
+index adc913c..283d0e4 100644
+--- a/src/cli/commands/common.ts
++++ b/src/cli/commands/common.ts
+@@ -26,6 +26,12 @@ import type { Wind } from "../../safety/wind.js";
+ export const SHOW_FLAGS: readonly FlagSpec[] = [
+   { name: "catalog", kind: "value", help: "the effect catalog csv" },
+   { name: "rig", kind: "value", help: "the rig sheet" },
++  { name: "magazine", kind: "value", help: "the magazine book csv" },
++  {
++    name: "pull",
++    kind: "value",
++    help: "lot numbers to set aside, comma separated",
++  },
+   {
+     name: "frame",
+     kind: "value",
+@@ -112,6 +118,21 @@ export function siteFromArgs(args: ParsedArgs): Site | undefined {
+   );
+ }
+ 
++/**
++ * The lot numbers behind `--pull`. Folded to lower case because that is how
++ * the magazine reader stores them and because a lot number written off the side
++ * of a case is as likely to be shouted down a phone as typed.
++ */
++export function lotList(value: string | undefined): string[] {
++  if (value === undefined) {
++    return [];
++  }
++  return value
++    .split(",")
++    .map((lot) => lot.trim().toLowerCase())
++    .filter((lot) => lot.length > 0);
++}
++
+ export function windFromArgs(args: ParsedArgs): Wind | undefined {
+   const speed = numberOf(args, "wind");
+   if (speed === undefined) {
+@@ -156,6 +177,9 @@ export function readShow(
+     ...(valueOf(args, "rig") === undefined
+       ? {}
+       : { rig: valueOf(args, "rig") as string }),
++    ...(valueOf(args, "magazine") === undefined
++      ? {}
++      : { magazine: valueOf(args, "magazine") as string }),
+   });
+ 
+   const format = frameFormat(args);
+@@ -167,9 +191,20 @@ export function readShow(
+   const air = windFromArgs(args);
+   const rule = valueOf(args, "rule") as DistanceRule | undefined;
+ 
++  const pull = lotList(valueOf(args, "pull"));
++  if (pull.length > 0 && workspace.magazine === undefined) {
++    env.err(
++      "--pull only means something with --magazine, nothing was set aside",
++    );
++  }
++
+   const options: CompileOptions = {
+     catalog: workspace.catalog,
+     rig: workspace.rig,
++    ...(workspace.magazine === undefined
++      ? {}
++      : { magazine: workspace.magazine }),
++    ...(pull.length === 0 ? {} : { pull }),
+     ...(format === undefined ? {} : { format }),
+     ...(seed === undefined ? {} : { seed }),
+     read: (path) => env.readFile(path),
+diff --git a/src/cli/commands/inventory.ts b/src/cli/commands/inventory.ts
+index f4cd33a..2b789d8 100644
+--- a/src/cli/commands/inventory.ts
++++ b/src/cli/commands/inventory.ts
+@@ -1,7 +1,6 @@
+ import { SHOW_FLAGS, outcomeCode, runShow } from "./common.js";
+ import type { Command } from "../command.js";
+ import { EXIT_BAD_USAGE, EXIT_SHOW_PROBLEM } from "../command.js";
+-import { parseMagazine } from "../../catalog/magazine.js";
+ import { Magazine, shortfall, unusedStock } from "../../catalog/inventory.js";
+ import { countBy } from "../../core/collect.js";
+ import { formatBag } from "../../core/diagnostic.js";
+@@ -22,7 +21,6 @@ export const inventoryCommand: Command = {
+   usage: "inventory <script> [options]",
+   flags: [
+     ...SHOW_FLAGS,
+-    { name: "magazine", kind: "value", help: "the magazine book csv" },
+     {
+       name: "unused",
+       kind: "switch",
+@@ -34,29 +32,25 @@ export const inventoryCommand: Command = {
+     if (outcome === undefined) {
+       return EXIT_BAD_USAGE;
+     }
+-    const { result } = outcome;
++    const { inputs, result } = outcome;
+     if (result.diagnostics.hasErrors()) {
+       env.err(formatBag(result.diagnostics));
+     }
+ 
++    // What the show consumes is what it drew, not what it was written with, so
++    // a cue firing a stand in counts against the stand in.
+     const needed = countBy(result.schedule.events, (event) => event.effectId);
+ 
+-    let magazine = new Magazine();
+     const bookPath = args.values.get("magazine");
++    const magazine = inputs.workspace.magazine ?? new Magazine();
+     if (bookPath !== undefined) {
+-      const text = env.readFile(bookPath);
+-      if (text === undefined) {
+-        env.err(`cannot read the magazine book at ${bookPath}`);
++      if (inputs.workspace.magazine === undefined) {
++        // The reason is already on standard error, from the workspace.
+         return EXIT_BAD_USAGE;
+       }
+-      const parsed = parseMagazine(text, bookPath);
+-      if (parsed.diagnostics.size > 0) {
+-        env.err(formatBag(parsed.diagnostics));
+-      }
+-      if (parsed.diagnostics.hasErrors()) {
++      if (inputs.workspace.diagnostics.hasErrors()) {
+         return EXIT_SHOW_PROBLEM;
+       }
+-      magazine = parsed.magazine;
+     }
+ 
+     const rows = [...needed.entries()]
+diff --git a/src/cli/commands/pack.ts b/src/cli/commands/pack.ts
+index daf6619..192869f 100644
+--- a/src/cli/commands/pack.ts
++++ b/src/cli/commands/pack.ts
+@@ -88,6 +88,7 @@ export const packCommand: Command = {
+       assignments: outcome.result.assignments,
+       diagnostics: outcome.result.diagnostics,
+       without,
++      showLot: outcome.result.draw !== undefined,
+       ...(site === undefined ? {} : { site }),
+       ...(permit === undefined ? {} : { permit }),
+       ...(args.values.get("rule") === undefined
+diff --git a/src/cli/commands/sheet.ts b/src/cli/commands/sheet.ts
+index 34553b5..66a06ca 100644
+--- a/src/cli/commands/sheet.ts
++++ b/src/cli/commands/sheet.ts
+@@ -54,7 +54,9 @@ export const sheetCommand: Command = {
+         blocks.push(wiringSheet(result.schedule, inputs.workspace.rig));
+         break;
+       case "position": {
+-        const sheets = positionSheets(result.schedule);
++        const sheets = positionSheets(result.schedule, {
++          showLot: result.draw !== undefined,
++        });
+         if (sheets.size === 0) {
+           blocks.push("no cues, so no position sheets");
+         }
+@@ -67,6 +69,7 @@ export const sheetCommand: Command = {
+         blocks.push(
+           cueSheet(result.schedule, {
+             showBreak: !args.switches.has("no-break"),
++            showLot: result.draw !== undefined,
+           }),
+         );
+     }
+diff --git a/src/cli/env.ts b/src/cli/env.ts
+index 2129e25..ad61fa9 100644
+--- a/src/cli/env.ts
++++ b/src/cli/env.ts
+@@ -1,3 +1,5 @@
++import type { Magazine } from "../catalog/inventory.js";
++import { parseMagazine } from "../catalog/magazine.js";
+ import { Catalog } from "../catalog/registry.js";
+ import { parseCatalog } from "../catalog/parse.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+@@ -29,6 +31,13 @@ export interface Workspace {
+   readonly catalog: Catalog;
+   readonly rig: Rig;
+   readonly settings: RigSettings;
++  /**
++   * The magazine book, when one was named and could be read. Absent rather
++   * than empty when it was not, because an empty magazine and no magazine at
++   * all mean opposite things: one says the shelf is bare, the other says
++   * nobody asked about the shelf.
++   */
++  readonly magazine?: Magazine;
+   readonly diagnostics: DiagnosticBag;
+ }
+ 
+@@ -40,12 +49,17 @@ export interface Workspace {
+  */
+ export function loadWorkspace(
+   env: CliEnv,
+-  paths: { readonly catalog?: string; readonly rig?: string },
++  paths: {
++    readonly catalog?: string;
++    readonly rig?: string;
++    readonly magazine?: string;
++  },
+ ): Workspace {
+   const diagnostics = new DiagnosticBag();
+   let catalog = new Catalog();
+   let rig = new Rig();
+   let settings: RigSettings | undefined;
++  let magazine: Magazine | undefined;
+ 
+   if (paths.catalog !== undefined) {
+     const text = env.readFile(paths.catalog);
+@@ -76,10 +90,25 @@ export function loadWorkspace(
+     }
+   }
+ 
++  if (paths.magazine !== undefined) {
++    const text = env.readFile(paths.magazine);
++    if (text === undefined) {
++      diagnostics.error({
++        code: "PF5002",
++        message: `cannot read the magazine book at ${paths.magazine}`,
++      });
++    } else {
++      const parsed = parseMagazine(text, paths.magazine);
++      magazine = parsed.magazine;
++      diagnostics.addAll(parsed.diagnostics.all());
++    }
++  }
++
+   return {
+     catalog,
+     rig,
+     settings: settings ?? fallbackSettings(),
++    ...(magazine === undefined ? {} : { magazine }),
+     diagnostics,
+   };
+ }
+diff --git a/src/compile.ts b/src/compile.ts
+index 489b704..975c468 100644
+--- a/src/compile.ts
++++ b/src/compile.ts
+@@ -26,6 +26,9 @@ import { buildSchedule } from "./timeline/schedule.js";
+ import { checkBalance } from "./timeline/balance.js";
+ import type { BalanceLimits } from "./timeline/balance.js";
+ import { suggestChains } from "./timeline/chain.js";
++import { drawShow } from "./catalog/draw.js";
++import type { DrawResult } from "./catalog/draw.js";
++import type { Magazine } from "./catalog/inventory.js";
+ import { checkPalette, palette } from "./catalog/palette.js";
+ import type { PaletteLimits } from "./catalog/palette.js";
+ import { countBy } from "./core/collect.js";
+@@ -47,6 +50,23 @@ import { countBy } from "./core/collect.js";
+ export interface CompileOptions {
+   readonly catalog: Catalog;
+   readonly rig: Rig;
++  /**
++   * The stock the show will actually be fired from. Without it the show is
++   * compiled against the catalog, which is the design rather than the shelf.
++   * With it every cue draws a real shell out of a real lot, and a cue the
++   * magazine cannot supply is either given something that will stand in or
++   * reported as one that will not go.
++   *
++   * The book itself is never spent. The draw works on a copy, so a caller can
++   * compile the same show against the same magazine twice and get the same
++   * answer.
++   */
++  readonly magazine?: Magazine;
++  /**
++   * Lot numbers set aside before anything is drawn, for a recall or a case
++   * that came off the van damaged. Only means anything with a magazine.
++   */
++  readonly pull?: readonly string[];
+   readonly format?: TimecodeFormat;
+   readonly seed?: string;
+   readonly safety?: Omit<SafetyContext, "rig">;
+@@ -89,6 +109,12 @@ export interface CompileResult {
+   /** True when nothing raised an error, so the table is fit to load. */
+   readonly ok: boolean;
+   readonly preRoll: Milliseconds;
++  /**
++   * What the magazine gave up, set only when one was supplied. Holds the stand
++   * ins, what nothing could cover, and the stock left on the shelf afterwards,
++   * so a report can print the lot column and the order list from one compile.
++   */
++  readonly draw?: DrawResult;
+ }
+ 
+ /**
+@@ -157,8 +183,20 @@ export function compile(
+   const resolved = resolveShots(expanded.shots, options.catalog, options.rig);
+   diagnostics.addAll(resolved.diagnostics.all());
+ 
++  // Drawing sits between resolution and allocation on purpose. A stand in can
++  // be a different calibre, so the pin allocation, the timing and every safety
++  // check have to see the shell that will actually go up rather than the one
++  // the script asked for.
++  let draw: DrawResult | undefined;
++  if (options.magazine !== undefined) {
++    draw = drawShow(resolved.shots, options.catalog, options.magazine, {
++      ...(options.pull === undefined ? {} : { pull: options.pull }),
++    });
++    diagnostics.addAll(draw.diagnostics.all());
++  }
++
+   const allocated = allocatePins(
+-    resolved.shots,
++    draw?.shots ?? resolved.shots,
+     options.rig,
+     options.allocation ?? {},
+   );
+@@ -214,6 +252,7 @@ export function compile(
+     schedule: quantised,
+     assignments: allocated.assignments,
+     diagnostics,
++    ...(draw === undefined ? {} : { draw }),
+     ...(safety === undefined ? {} : { safety }),
+     ok: !diagnostics.hasErrors(),
+     preRoll,
+diff --git a/src/core/codes.ts b/src/core/codes.ts
+index ef5c6dc..9f9ac5c 100644
+--- a/src/core/codes.ts
++++ b/src/core/codes.ts
+@@ -84,6 +84,10 @@ export function codeArea(code: string): string {
+  * help line does not need a second explanation here.
+  */
+ export const CODE_NOTES: ReadonlyMap<string, string> = new Map([
++  [
++    "PF1600",
++    "the magazine holds nothing that could stand in for a cue, so that cue has no shell behind it and the show is not fit to fire",
++  ],
+   [
+     "PF1500",
+     "the lead is too long for the match to fire over at this voltage, which is the failure that only shows up on the far rack",
+diff --git a/src/export/explain.ts b/src/export/explain.ts
+index d3894be..b36bc9f 100644
+--- a/src/export/explain.ts
++++ b/src/export/explain.ts
+@@ -81,10 +81,21 @@ export function explainEvent(
+   blocks.push(
+     `cue ${index}, ${event.effectId} from ${event.position} on ${formatPin(event.address)}`,
+   );
++  const drawn: [string, string][] = [];
++  if (event.substitutedFor !== undefined) {
++    // The one fact about a cue that the firing table cannot show, and the one
++    // somebody standing at the rack with a different shell in their hand needs.
++    drawn.push(["standing in for", event.substitutedFor]);
++  }
++  if (event.lot !== undefined) {
++    drawn.push(["lot", event.lot]);
++  }
++
+   blocks.push(
+     keyValueTable([
+       ["effect", describeEffect(event.effect)],
+       ["label", event.label ?? "none"],
++      ...drawn,
+       ["lead label", labelPin(event.address)],
+       [
+         "timecode",
+diff --git a/src/export/pack.ts b/src/export/pack.ts
+index e374bcc..aa34961 100644
+--- a/src/export/pack.ts
++++ b/src/export/pack.ts
+@@ -49,6 +49,8 @@ export interface PackOptions {
+   readonly rule?: DistanceRule;
+   /** Leave these sections out, by title. */
+   readonly without?: readonly string[];
++  /** Print the lot each shell came from, for a show drawn from a magazine. */
++  readonly showLot?: boolean;
+ }
+ 
+ function summarySection(
+@@ -86,7 +88,12 @@ export function packSections(
+   const sections: PackSection[] = [
+     { title: "summary", body: summarySection(schedule, options) },
+     { title: "shape", body: sheetHeader(schedule, options.name) },
+-    { title: "cue sheet", body: cueSheet(schedule) },
++    {
++      title: "cue sheet",
++      body: cueSheet(schedule, {
++        ...(options.showLot === undefined ? {} : { showLot: options.showLot }),
++      }),
++    },
+     { title: "wiring sheet", body: wiringSheet(schedule, options.rig) },
+   ];
+ 
+diff --git a/src/export/sheets.ts b/src/export/sheets.ts
+index fc766c6..98d74c2 100644
+--- a/src/export/sheets.ts
++++ b/src/export/sheets.ts
+@@ -28,12 +28,20 @@ const CUE_COLUMNS: readonly Column[] = [
+   { header: "pin" },
+   { header: "position" },
+   { header: "effect", maxWidth: 28 },
++  { header: "lot" },
+   { header: "note", maxWidth: 20 },
+ ];
+ 
+ export interface SheetOptions {
+   /** Print the break time as well as the ignition time. */
+   readonly showBreak?: boolean;
++  /**
++   * Print which lot each shell came out of. On once the show has been drawn
++   * against a magazine, because then the sheet is what a crew signs off
++   * against the book, and off otherwise, since a blank column reads as stock
++   * nobody bothered to record.
++   */
++  readonly showLot?: boolean;
+   readonly title?: string;
+ }
+ 
+@@ -41,24 +49,25 @@ export function cueSheet(
+   schedule: Schedule | QuantisedSchedule,
+   options: SheetOptions = {},
+ ): string {
+-  const rows = schedule.events.map((event, index) => [
+-    String(index + 1),
+-    formatShowTime(event.ignitionAt),
+-    formatShowTime(event.visibleAt),
+-    formatPin(event.address),
+-    event.position,
+-    describeEffect(event.effect),
+-    event.label ?? "",
+-  ]);
+-  const columns =
+-    (options.showBreak ?? true)
+-      ? CUE_COLUMNS
+-      : CUE_COLUMNS.filter((column) => column.header !== "break");
+-  const trimmed =
+-    (options.showBreak ?? true)
+-      ? rows
+-      : rows.map((row) => [...row.slice(0, 2), ...row.slice(3)]);
+-  const table = renderTable(columns, trimmed);
++  const keep = CUE_COLUMNS.map(
++    (column) =>
++      (column.header !== "break" || (options.showBreak ?? true)) &&
++      (column.header !== "lot" || (options.showLot ?? false)),
++  );
++  const rows = schedule.events.map((event, index) =>
++    [
++      String(index + 1),
++      formatShowTime(event.ignitionAt),
++      formatShowTime(event.visibleAt),
++      formatPin(event.address),
++      event.position,
++      describeEffect(event.effect),
++      event.lot ?? "",
++      event.label ?? "",
++    ].filter((_, column) => keep[column] ?? true),
++  );
++  const columns = CUE_COLUMNS.filter((_, column) => keep[column] ?? true);
++  const table = renderTable(columns, rows);
+   return options.title === undefined ? table : `${options.title}\n\n${table}`;
+ }
+ 
+@@ -141,17 +150,21 @@ export function sheetHeader(
+ /** Cues grouped by position, which is how a crew splits the load between them. */
+ export function positionSheets(
+   schedule: Schedule | QuantisedSchedule,
++  options: SheetOptions = {},
+ ): Map<string, string> {
+   const byPosition = groupBy(schedule.events, (event) => event.position);
+   const sheets = new Map<string, string>();
+   for (const [position, events] of sortedEntries(byPosition)) {
+     sheets.set(
+       position,
+-      cueSheet({
+-        events,
+-        preRoll: schedule.preRoll,
+-        duration: schedule.duration,
+-      }),
++      cueSheet(
++        {
++          events,
++          preRoll: schedule.preRoll,
++          duration: schedule.duration,
++        },
++        options,
++      ),
+     );
+   }
+   return sheets;
+diff --git a/src/index.ts b/src/index.ts
+index 78da86f..a86e8d1 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -29,6 +29,7 @@ export * from "./core/units.js";
+ 
+ // what a show is made of
+ export * from "./catalog/calibre.js";
++export * from "./catalog/draw.js";
+ export * from "./catalog/effect.js";
+ export * from "./catalog/envelope.js";
+ export * from "./catalog/hazard.js";
+diff --git a/src/script/resolve.ts b/src/script/resolve.ts
+index 02acc37..8ff5d63 100644
+--- a/src/script/resolve.ts
++++ b/src/script/resolve.ts
+@@ -26,6 +26,19 @@ export interface ResolvedShot extends Shot {
+   readonly resolved: Effect;
+   /** Fixed only when the script named a pin. Allocation fills the rest in. */
+   readonly fixedPin?: PinAddress;
++  /**
++   * The lot this shot was drawn from, set only when the show was drawn against
++   * a magazine. It rides on the shot rather than being looked up later because
++   * two shells of one effect can come from two lots and only the draw knows
++   * which went where.
++   */
++  readonly lot?: string;
++  /**
++   * What the script asked for, when the magazine could not supply it and
++   * something else is standing in. The effect on this shot is the stand in, so
++   * everything downstream fires, times and checks the shell that will go up.
++   */
++  readonly substitutedFor?: string;
+ }
+ 
+ export interface Resolution {
+diff --git a/src/timeline/schedule.ts b/src/timeline/schedule.ts
+index e65892c..0e39b48 100644
+--- a/src/timeline/schedule.ts
++++ b/src/timeline/schedule.ts
+@@ -32,6 +32,13 @@ export interface FiringEvent {
+   readonly effect: Effect;
+   readonly position: string;
+   readonly label?: string;
++  /** The lot the shell came out of, when the show was drawn from a magazine. */
++  readonly lot?: string;
++  /**
++   * What the script asked for, when this cue is firing a stand in. The effect
++   * above is the stand in, so this is the only place the original ask survives.
++   */
++  readonly substitutedFor?: string;
+   /** Ignition to last light out, for the density and load checks. */
+   readonly occupancy: Interval;
+ }
+@@ -65,6 +72,10 @@ export function buildSchedule(assignments: readonly Assignment[]): Schedule {
+       effect: withHeight,
+       position: shot.position,
+       ...(shot.label === undefined ? {} : { label: shot.label }),
++      ...(shot.lot === undefined ? {} : { lot: shot.lot }),
++      ...(shot.substitutedFor === undefined
++        ? {}
++        : { substitutedFor: shot.substitutedFor }),
+       occupancy: occupancyOf(withHeight, ignitionAt),
+     });
+   }
+diff --git a/tests/catalog/draw.test.ts b/tests/catalog/draw.test.ts
+new file mode 100644
+index 0000000..f66d1ee
+--- /dev/null
++++ b/tests/catalog/draw.test.ts
+@@ -0,0 +1,377 @@
++import { describe, expect, it } from "vitest";
++import { calibre } from "../../src/catalog/calibre.js";
++import { describeDraw, drawShow } from "../../src/catalog/draw.js";
++import { shell } from "../../src/catalog/effect.js";
++import { Magazine } from "../../src/catalog/inventory.js";
++import type { Lot } from "../../src/catalog/inventory.js";
++import { Catalog } from "../../src/catalog/registry.js";
++import { effectId, positionId } from "../../src/core/ids.js";
++import { SourceFile } from "../../src/core/span.js";
++import { mm } from "../../src/core/units.js";
++import { firingModule, modelNamed } from "../../src/rig/module.js";
++import { Rig, firingPosition } from "../../src/rig/rig.js";
++import { expandScript } from "../../src/script/expand.js";
++import { parseScript } from "../../src/script/parser.js";
++import { resolveShots } from "../../src/script/resolve.js";
++import type { ResolvedShot } from "../../src/script/resolve.js";
++
++const palm = shell({
++  id: effectId("shell.150.palm"),
++  name: "six palm",
++  calibre: calibre(mm(150)),
++  breakStyle: "palm",
++});
++const willow = shell({
++  id: effectId("shell.150.willow"),
++  name: "six willow",
++  calibre: calibre(mm(150)),
++  breakStyle: "willow",
++});
++const kamuro = shell({
++  id: effectId("shell.150.kamuro"),
++  name: "six kamuro",
++  calibre: calibre(mm(150)),
++  breakStyle: "kamuro",
++});
++const seven = shell({
++  id: effectId("shell.175.peony"),
++  name: "seven peony",
++  calibre: calibre(mm(175)),
++});
++const three = shell({
++  id: effectId("shell.75.peony"),
++  name: "three peony",
++  calibre: calibre(mm(75)),
++});
++
++const catalog = Catalog.from([palm, willow, kamuro, seven, three]);
++
++const rig = Rig.from(
++  [firingPosition(positionId("pad.a"), 0, 0)],
++  Array.from({ length: 4 }, (_, i) =>
++    firingModule(i + 1, modelNamed("fc-32")!, positionId("pad.a")),
++  ),
++);
++
++function shots(source: string): readonly ResolvedShot[] {
++  const parsed = parseScript(new SourceFile("show.pf", source));
++  const expanded = expandScript(parsed.script.statements, { seed: "t" });
++  const resolved = resolveShots(expanded.shots, catalog, rig);
++  expect(resolved.diagnostics.errorCount).toBe(0);
++  return resolved.shots;
++}
++
++function book(...lots: readonly Lot[]): Magazine {
++  return Magazine.from(lots);
++}
++
++describe("drawing what the script asked for", () => {
++  const drawn = drawShow(
++    shots("at 10 ripple 3 of shell.150.palm from pad.a every 500ms"),
++    catalog,
++    book({ lotNumber: "vn1", effectId: "shell.150.palm", quantity: 5 }),
++  );
++
++  it("gives every shot a lot", () => {
++    expect(drawn.shots.map((shot) => shot.lot)).toEqual(["vn1", "vn1", "vn1"]);
++  });
++
++  it("says nothing when the shelf covers the show", () => {
++    expect(drawn.diagnostics.size).toBe(0);
++    expect(drawn.substitutions).toEqual([]);
++    expect(drawn.uncovered).toEqual([]);
++    expect(describeDraw(drawn)).toContain("every cue drew what the script");
++  });
++
++  it("leaves what it did not spend", () => {
++    expect(drawn.remaining.onHand("shell.150.palm")).toBe(2);
++  });
++
++  it("never spends the book it was handed", () => {
++    const magazine = book({
++      lotNumber: "vn1",
++      effectId: "shell.150.palm",
++      quantity: 5,
++    });
++    drawShow(shots("at 10 fire shell.150.palm from pad.a"), catalog, magazine);
++    expect(magazine.onHand("shell.150.palm")).toBe(5);
++  });
++});
++
++describe("which lot goes first", () => {
++  it("empties the oldest lot before it opens the next", () => {
++    const drawn = drawShow(
++      shots("at 10 ripple 3 of shell.150.palm from pad.a every 500ms"),
++      catalog,
++      book(
++        {
++          lotNumber: "vn9",
++          effectId: "shell.150.palm",
++          quantity: 2,
++          received: "2025-06-01",
++        },
++        {
++          lotNumber: "vn1",
++          effectId: "shell.150.palm",
++          quantity: 2,
++          received: "2024-03-14",
++        },
++      ),
++    );
++    expect(drawn.shots.map((shot) => shot.lot)).toEqual(["vn1", "vn1", "vn9"]);
++  });
++
++  it("keeps an undated lot back until the dated ones are gone", () => {
++    const drawn = drawShow(
++      shots("at 10 ripple 2 of shell.150.palm from pad.a every 500ms"),
++      catalog,
++      book(
++        { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 },
++        {
++          lotNumber: "vn9",
++          effectId: "shell.150.palm",
++          quantity: 1,
++          received: "2025-06-01",
++        },
++      ),
++    );
++    expect(drawn.shots.map((shot) => shot.lot)).toEqual(["vn9", "vn1"]);
++  });
++
++  it("breaks a tie on the same day by lot number", () => {
++    const drawn = drawShow(
++      shots("at 10 fire shell.150.palm from pad.a"),
++      catalog,
++      book(
++        {
++          lotNumber: "vn9",
++          effectId: "shell.150.palm",
++          quantity: 1,
++          received: "2025-06-01",
++        },
++        {
++          lotNumber: "vn2",
++          effectId: "shell.150.palm",
++          quantity: 1,
++          received: "2025-06-01",
++        },
++      ),
++    );
++    expect(drawn.shots[0]?.lot).toBe("vn2");
++  });
++});
++
++describe("who goes short", () => {
++  const source = [
++    "at 10 fire shell.150.palm from pad.a label first",
++    "at 20 fire shell.150.palm from pad.a label second",
++    "at 30 fire shell.150.palm from pad.a label third",
++  ].join("\n");
++
++  it("lets the earlier cues have the stock and stands the later ones in", () => {
++    const drawn = drawShow(
++      shots(source),
++      catalog,
++      book(
++        { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 2 },
++        { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 4 },
++      ),
++    );
++    expect(drawn.shots.map((shot) => shot.effect)).toEqual([
++      "shell.150.palm",
++      "shell.150.palm",
++      "shell.150.willow",
++    ]);
++    expect(drawn.shots[2]?.substitutedFor).toBe("shell.150.palm");
++    expect(drawn.shots[2]?.lot).toBe("vn2");
++    expect(drawn.shots[0]?.substitutedFor).toBeUndefined();
++  });
++
++  it("draws in firing order however the script was written", () => {
++    // Written late cue first on purpose. The cue at 10 still draws first, so
++    // it is the one at 30 that ends up with the stand in.
++    const drawn = drawShow(
++      shots(
++        [
++          "at 30 fire shell.150.palm from pad.a label late",
++          "at 10 fire shell.150.palm from pad.a label early",
++        ].join("\n"),
++      ),
++      catalog,
++      book(
++        { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 },
++        { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 1 },
++      ),
++    );
++    const early = drawn.shots.find((shot) => shot.label === "early");
++    const late = drawn.shots.find((shot) => shot.label === "late");
++    expect(early?.lot).toBe("vn1");
++    expect(early?.substitutedFor).toBeUndefined();
++    expect(late?.substitutedFor).toBe("shell.150.palm");
++    expect(late?.lot).toBe("vn2");
++  });
++
++  it("holds the order of two cues on the same instant", () => {
++    const drawn = drawShow(
++      shots(
++        [
++          "at 10 fire shell.150.palm from pad.a label first",
++          "at 10 fire shell.150.palm from pad.a label second",
++        ].join("\n"),
++      ),
++      catalog,
++      book(
++        { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 },
++        { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 1 },
++      ),
++    );
++    expect(drawn.shots.find((shot) => shot.label === "first")?.lot).toBe("vn1");
++    expect(
++      drawn.shots.find((shot) => shot.label === "second")?.substitutedFor,
++    ).toBe("shell.150.palm");
++  });
++
++  it("counts the pair once however many shots it covers", () => {
++    const drawn = drawShow(
++      shots(source),
++      catalog,
++      book({ lotNumber: "vn2", effectId: "shell.150.willow", quantity: 4 }),
++    );
++    const notes = drawn.diagnostics.byCode("PF1601");
++    expect(notes).toHaveLength(1);
++    expect(notes[0]?.message).toContain("shell.150.palm short 3");
++    expect(notes[0]?.message).toContain("shell.150.willow");
++  });
++});
++
++describe("spreading a shortfall", () => {
++  it("spends a stand in like any other shell, so one gap takes several", () => {
++    const drawn = drawShow(
++      shots("at 10 ripple 3 of shell.150.palm from pad.a every 500ms"),
++      catalog,
++      book(
++        { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 1 },
++        { lotNumber: "vn3", effectId: "shell.150.kamuro", quantity: 1 },
++        { lotNumber: "vn4", effectId: "shell.175.peony", quantity: 4 },
++      ),
++    );
++    expect(drawn.shots.map((shot) => shot.effect)).toEqual([
++      "shell.150.kamuro",
++      "shell.150.willow",
++      "shell.175.peony",
++    ]);
++    expect(drawn.substitutions.map((entry) => entry.standIn.id)).toEqual([
++      "shell.150.kamuro",
++      "shell.150.willow",
++      "shell.175.peony",
++    ]);
++    expect(drawn.diagnostics.byCode("PF1601")).toHaveLength(2);
++    expect(drawn.diagnostics.byCode("PF1602")).toHaveLength(1);
++  });
++
++  it("warns rather than notes when only the band matches", () => {
++    const drawn = drawShow(
++      shots("at 10 fire shell.150.palm from pad.a"),
++      catalog,
++      book({ lotNumber: "vn4", effectId: "shell.175.peony", quantity: 1 }),
++    );
++    const warnings = drawn.diagnostics.byCode("PF1602");
++    expect(warnings).toHaveLength(1);
++    expect(warnings[0]?.help).toContain("separation");
++    expect(drawn.substitutions[0]?.quality).toBe("near");
++  });
++});
++
++describe("nothing to stand in", () => {
++  const drawn = drawShow(
++    shots(
++      [
++        "at 10 fire shell.75.peony from pad.a",
++        "at 20 fire shell.75.peony from pad.a",
++      ].join("\n"),
++    ),
++    catalog,
++    book({ lotNumber: "vn4", effectId: "shell.175.peony", quantity: 4 }),
++  );
++
++  it("keeps what the script wrote", () => {
++    expect(drawn.shots.map((shot) => shot.effect)).toEqual([
++      "shell.75.peony",
++      "shell.75.peony",
++    ]);
++    expect(drawn.shots.every((shot) => shot.lot === undefined)).toBe(true);
++  });
++
++  it("raises one error for the effect, not one per shot", () => {
++    const errors = drawn.diagnostics.byCode("PF1600");
++    expect(errors).toHaveLength(1);
++    expect(errors[0]?.message).toContain("2 shots short");
++    expect(errors[0]?.span).toBeDefined();
++    expect(drawn.uncovered).toHaveLength(1);
++    expect(drawn.uncovered[0]?.effectId).toBe("shell.75.peony");
++    expect(drawn.uncovered[0]?.short).toBe(2);
++    expect(drawn.uncovered[0]?.origin).toBeDefined();
++  });
++
++  it("describes the draw for a report", () => {
++    expect(describeDraw(drawn)).toContain("2 shots uncovered");
++  });
++});
++
++describe("lots set aside", () => {
++  it("takes a pulled lot out before anything draws", () => {
++    const drawn = drawShow(
++      shots("at 10 fire shell.150.palm from pad.a"),
++      catalog,
++      book(
++        {
++          lotNumber: "vn1",
++          effectId: "shell.150.palm",
++          quantity: 4,
++          received: "2024-01-01",
++        },
++        {
++          lotNumber: "vn2",
++          effectId: "shell.150.palm",
++          quantity: 4,
++          received: "2025-01-01",
++        },
++      ),
++      { pull: ["VN1"] },
++    );
++    expect(drawn.shots[0]?.lot).toBe("vn2");
++    expect(drawn.remaining.onHand("shell.150.palm")).toBe(3);
++    expect(drawn.pulled.get("vn1")).toBe(4);
++    expect(drawn.diagnostics.byCode("PF1603")[0]?.message).toContain("4 units");
++  });
++
++  it("says so when a pulled lot is not in the book", () => {
++    const drawn = drawShow(
++      shots("at 10 fire shell.150.palm from pad.a"),
++      catalog,
++      book({ lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 }),
++      { pull: ["vn9", "  "] },
++    );
++    const notes = drawn.diagnostics.byCode("PF1603");
++    expect(notes).toHaveLength(1);
++    expect(notes[0]?.message).toContain("does not hold it");
++  });
++
++  it("can pull a lot the show needed, which is then a shortfall", () => {
++    const drawn = drawShow(
++      shots("at 10 fire shell.150.palm from pad.a"),
++      catalog,
++      book({ lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 }),
++      { pull: ["vn1"] },
++    );
++    expect(drawn.diagnostics.byCode("PF1600")).toHaveLength(1);
++  });
++});
++
++describe("an empty show", () => {
++  it("draws nothing and says nothing", () => {
++    const drawn = drawShow([], catalog, book());
++    expect(drawn.shots).toEqual([]);
++    expect(drawn.diagnostics.size).toBe(0);
++  });
++});
+diff --git a/tests/catalog/inventory.test.ts b/tests/catalog/inventory.test.ts
+index 4e442c2..cc4fe98 100644
+--- a/tests/catalog/inventory.test.ts
++++ b/tests/catalog/inventory.test.ts
+@@ -190,3 +190,52 @@ describe("tally", () => {
+     expect(tally([]).size).toBe(0);
+   });
+ });
++
++describe("issuing", () => {
++  const dated = [
++    {
++      lotNumber: "vn9",
++      effectId: "shell.150.palm",
++      quantity: 2,
++      received: "2025-06-01",
++    },
++    {
++      lotNumber: "vn1",
++      effectId: "shell.150.palm",
++      quantity: 1,
++      received: "2024-03-14",
++    },
++    { lotNumber: "vn5", effectId: "shell.150.palm", quantity: 1 },
++  ];
++
++  it("orders a shelf oldest first with the undated row last", () => {
++    expect(
++      Magazine.from(dated)
++        .issueOrder("shell.150.palm")
++        .map((lot) => lot.lotNumber),
++    ).toEqual(["vn1", "vn9", "vn5"]);
++  });
++
++  it("draws one unit at a time from the oldest lot", () => {
++    const magazine = Magazine.from(dated);
++    expect(magazine.draw("shell.150.palm")?.lotNumber).toBe("vn1");
++    expect(magazine.draw("shell.150.palm")?.lotNumber).toBe("vn9");
++    expect(magazine.draw("shell.150.palm")?.lotNumber).toBe("vn9");
++    expect(magazine.draw("shell.150.palm")?.lotNumber).toBe("vn5");
++    expect(magazine.draw("shell.150.palm")).toBeUndefined();
++    expect(magazine.onHand("shell.150.palm")).toBe(0);
++  });
++
++  it("draws nothing for stock it does not hold", () => {
++    expect(Magazine.from(lots).draw("mine.100")).toBeUndefined();
++  });
++
++  it("copies a book so a draw cannot spend the original", () => {
++    const magazine = Magazine.from(lots);
++    const working = magazine.clone();
++    working.draw("shell.150.palm");
++    working.quarantine("vn2405");
++    expect(magazine.onHand("shell.150.palm")).toBe(46);
++    expect(working.onHand("shell.150.palm")).toBe(26);
++  });
++});
+diff --git a/tests/cli/sheetInventory.test.ts b/tests/cli/sheetInventory.test.ts
+index 6b9fffc..a6091d6 100644
+--- a/tests/cli/sheetInventory.test.ts
++++ b/tests/cli/sheetInventory.test.ts
+@@ -212,6 +212,118 @@ describe("inventory", () => {
+   });
+ });
+ 
++describe("drawing a show from the magazine", () => {
++  const STOCK_CATALOG = [
++    "id,kind,name,calibre,break,hang,diameter",
++    "shell.150.palm,shell,six inch palm,150mm,palm,2.6,138",
++    "shell.150.willow,shell,six inch willow,150mm,willow,3.4,138",
++  ].join("\n");
++
++  const STOCK_SHOW = [
++    "show autumn",
++    "at 20 fire shell.150.palm from pad.a label opener",
++    "at 30 fire shell.150.palm from pad.a",
++  ].join("\n");
++
++  const STOCK_BOOK = [
++    "lot,effect,quantity,received",
++    "vn2405,shell.150.palm,1,2025-04-02",
++    "vn2413,shell.150.willow,4,2025-04-02",
++  ].join("\n");
++
++  function stockEnv(over: Record<string, string> = {}): MemoryEnv {
++    return new MemoryEnv({
++      "house.csv": STOCK_CATALOG,
++      "autumn.rig": RIG,
++      "stock.pf": STOCK_SHOW,
++      "book.csv": STOCK_BOOK,
++      ...over,
++    });
++  }
++
++  it("grows a lot column on the cue sheet once a book is given", () => {
++    const env = stockEnv();
++    expect(
++      runCommand(
++        commands,
++        ["sheet", "stock.pf", "--magazine", "book.csv", ...base],
++        env,
++      ),
++    ).toBe(EXIT_OK);
++    expect(env.stdout).toContain("lot");
++    expect(env.stdout).toContain("vn2405");
++    expect(env.stdout).toContain("vn2413");
++  });
++
++  it("leaves the lot column off without a book", () => {
++    const env = stockEnv();
++    runCommand(commands, ["sheet", "stock.pf", ...base], env);
++    expect(env.stdout).not.toContain("vn2405");
++  });
++
++  it("fires a stand in and says which cue got it", () => {
++    const env = stockEnv();
++    expect(
++      runCommand(
++        commands,
++        ["check", "stock.pf", "--magazine", "book.csv", ...base],
++        env,
++      ),
++    ).toBe(EXIT_OK);
++    expect(env.stderr).toContain("PF1601");
++    expect(env.stderr).toContain("shell.150.willow");
++    expect(env.stdout).toContain("ready");
++  });
++
++  it("sets a lot aside before the show draws", () => {
++    const env = stockEnv();
++    runCommand(
++      commands,
++      [
++        "sheet",
++        "stock.pf",
++        "--magazine",
++        "book.csv",
++        "--pull",
++        "vn2405",
++        ...base,
++      ],
++      env,
++    );
++    expect(env.stdout).not.toContain("vn2405");
++    expect(env.stderr).toContain("set aside");
++  });
++
++  it("will not call a show ready when nothing can stand in", () => {
++    const env = stockEnv({
++      "bare.csv": ["lot,effect,quantity", "vn2405,shell.150.palm,1"].join("\n"),
++    });
++    expect(
++      runCommand(
++        commands,
++        ["check", "stock.pf", "--magazine", "bare.csv", ...base],
++        env,
++      ),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stderr).toContain("PF1600");
++    expect(env.stdout).toContain("not ready");
++  });
++
++  it("counts the stand in against the stock it came out of", () => {
++    const env = stockEnv();
++    runCommand(
++      commands,
++      ["inventory", "stock.pf", "--magazine", "book.csv", ...base],
++      env,
++    );
++    const line = env.stdout
++      .split("\n")
++      .find((row) => row.startsWith("shell.150.willow"));
++    expect(line?.trim().split(/\s+/)).toEqual(["shell.150.willow", "1", "4"]);
++    expect(env.stdout).toContain("everything on the shot list is in stock");
++  });
++});
++
+ describe("the command list", () => {
+   it("holds the commands a show needs end to end", () => {
+     for (const name of ["check", "sheet", "table", "inventory"]) {
+diff --git a/tests/compile.test.ts b/tests/compile.test.ts
+index e8bbee1..ca93b1f 100644
+--- a/tests/compile.test.ts
++++ b/tests/compile.test.ts
+@@ -1,11 +1,13 @@
+ import { describe, expect, it } from "vitest";
+ import { calibre } from "../src/catalog/calibre.js";
+ import { shell } from "../src/catalog/effect.js";
++import { Magazine } from "../src/catalog/inventory.js";
+ import { Catalog } from "../src/catalog/registry.js";
+ import { compile, summariseCompile } from "../src/compile.js";
+ import { SMPTE_30 } from "../src/core/timecode.js";
+ import { effectId, positionId } from "../src/core/ids.js";
+ import { metres, mm, ms, raw } from "../src/core/units.js";
++import type { Metres } from "../src/core/units.js";
+ import { firingModule, modelNamed } from "../src/rig/module.js";
+ import { Rig, firingPosition } from "../src/rig/rig.js";
+ import { point, site, straightLine } from "../src/safety/site.js";
+@@ -341,3 +343,173 @@ describe("the advisory checks", () => {
+     expect(result.diagnostics.size).toBe(0);
+   });
+ });
++
++describe("drawing the show from a magazine", () => {
++  const palm = shell({
++    id: effectId("shell.150.palm"),
++    name: "six palm",
++    calibre: calibre(mm(150)),
++    breakStyle: "palm",
++  });
++  const willow = shell({
++    id: effectId("shell.150.willow"),
++    name: "six willow",
++    calibre: calibre(mm(150)),
++    breakStyle: "willow",
++  });
++  const seven = shell({
++    id: effectId("shell.175.peony"),
++    name: "seven peony",
++    calibre: calibre(mm(175)),
++  });
++  const stock = Catalog.from([palm, willow, seven]);
++
++  function drawn(
++    source: string,
++    lots: readonly { lotNumber: string; effectId: string; quantity: number }[],
++    pull?: readonly string[],
++  ) {
++    const magazine = Magazine.from(lots);
++    const result = compile(source, "show.pf", {
++      catalog: stock,
++      rig,
++      magazine,
++      ...(pull === undefined ? {} : { pull }),
++    });
++    return { result, magazine };
++  }
++
++  it("puts the lot each shell came from on its cue", () => {
++    const { result } = drawn("at 20 fire shell.150.palm from pad.a", [
++      { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 2 },
++    ]);
++    expect(result.ok).toBe(true);
++    expect(result.schedule.events[0]?.lot).toBe("vn1");
++    expect(result.schedule.events[0]?.substitutedFor).toBeUndefined();
++    expect(result.draw?.remaining.onHand("shell.150.palm")).toBe(1);
++  });
++
++  it("leaves the compile alone when no magazine is given", () => {
++    const result = compile("at 20 fire shell.150.palm from pad.a", "show.pf", {
++      catalog: stock,
++      rig,
++    });
++    expect(result.draw).toBeUndefined();
++    expect(result.schedule.events[0]?.lot).toBeUndefined();
++  });
++
++  it("fires the stand in and remembers what was asked for", () => {
++    const { result } = drawn(
++      [
++        "at 20 fire shell.150.palm from pad.a",
++        "at 30 fire shell.150.palm from pad.a",
++      ].join("\n"),
++      [
++        { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 },
++        { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 1 },
++      ],
++    );
++    const late = result.schedule.events[1];
++    expect(late?.effectId).toBe("shell.150.willow");
++    expect(late?.effect.id).toBe("shell.150.willow");
++    expect(late?.substitutedFor).toBe("shell.150.palm");
++    expect(late?.lot).toBe("vn2");
++    expect(result.diagnostics.byCode("PF1601")).toHaveLength(1);
++    expect(result.ok).toBe(true);
++  });
++
++  it("lifts the stand in on its own lead", () => {
++    const { result } = drawn("at 20 fire shell.150.palm from pad.a", [
++      { lotNumber: "vn4", effectId: "shell.175.peony", quantity: 1 },
++    ]);
++    const alone = compile("at 20 fire shell.175.peony from pad.a", "show.pf", {
++      catalog: stock,
++      rig,
++    });
++    expect(raw(result.schedule.events[0]!.ignitionAt)).toBe(
++      raw(alone.schedule.events[0]!.ignitionAt),
++    );
++    expect(result.diagnostics.byCode("PF1602")).toHaveLength(1);
++  });
++
++  it("keeps a height clause on the shell that stands in", () => {
++    const { result } = drawn("at 20 fire shell.150.palm from pad.a height 60", [
++      { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 1 },
++    ]);
++    const event = result.schedule.events[0];
++    expect(event?.effectId).toBe("shell.150.willow");
++    expect(raw((event?.effect as { breakHeight: Metres }).breakHeight)).toBe(
++      60,
++    );
++    // A break at sixty metres is well under the shell's own apogee, so the
++    // stand in has to leave later than it otherwise would.
++    expect(raw(event!.ignitionAt)).toBeGreaterThan(raw(ms(15000)));
++  });
++
++  it("gives the stand in a pin of its own", () => {
++    const { result } = drawn(
++      [
++        "at 20 fire shell.150.palm from pad.a",
++        "at 30 fire shell.150.palm from pad.a",
++      ].join("\n"),
++      [
++        { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 },
++        { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 1 },
++      ],
++    );
++    const pins = result.assignments.map(
++      (assignment) => assignment.address.pin + assignment.address.module * 100,
++    );
++    expect(new Set(pins).size).toBe(2);
++    expect(
++      result.assignments.map((assignment) => assignment.shot.resolved.id),
++    ).toContain("shell.150.willow");
++  });
++
++  it("shows the stand in to the safety check", () => {
++    // A line a six inch shell clears and a seven inch shell does not, so the
++    // verdict itself says which shell the check was given.
++    const tight = site(
++      "tight field",
++      straightLine("spectator line", point(-400, -135), point(400, -135)),
++    );
++    const asWritten = compile(
++      "at 20 fire shell.150.palm from pad.a",
++      "show.pf",
++      { catalog: stock, rig, safety: { site: tight } },
++    );
++    const asDrawn = compile("at 20 fire shell.150.palm from pad.a", "show.pf", {
++      catalog: stock,
++      rig,
++      magazine: Magazine.from([
++        { lotNumber: "vn4", effectId: "shell.175.peony", quantity: 1 },
++      ]),
++      safety: { site: tight },
++    });
++    expect(asWritten.safety?.ok).toBe(true);
++    expect(asDrawn.safety?.ok).toBe(false);
++    expect(asDrawn.safety?.diagnostics.byCode("PF4100")).toHaveLength(1);
++  });
++
++  it("is not ready when nothing on the shelf covers a cue", () => {
++    const { result } = drawn("at 20 fire shell.150.palm from pad.a", []);
++    expect(result.ok).toBe(false);
++    expect(result.diagnostics.byCode("PF1600")).toHaveLength(1);
++    expect(result.schedule.events[0]?.effectId).toBe("shell.150.palm");
++    expect(result.schedule.events[0]?.lot).toBeUndefined();
++    expect(result.draw?.uncovered[0]?.short).toBe(1);
++  });
++
++  it("sets a pulled lot aside before the show draws", () => {
++    const { result, magazine } = drawn(
++      "at 20 fire shell.150.palm from pad.a",
++      [
++        { lotNumber: "vn1", effectId: "shell.150.palm", quantity: 1 },
++        { lotNumber: "vn2", effectId: "shell.150.willow", quantity: 1 },
++      ],
++      ["vn1"],
++    );
++    expect(result.schedule.events[0]?.effectId).toBe("shell.150.willow");
++    expect(magazine.onHand("shell.150.palm")).toBe(1);
++  });
++});
+diff --git a/tests/examples.test.ts b/tests/examples.test.ts
+index 4979d36..2632a45 100644
+--- a/tests/examples.test.ts
++++ b/tests/examples.test.ts
+@@ -24,6 +24,7 @@ const CATALOG = read("house.csv");
+ const RIG = read("autumn.rig");
+ const SHOW = read("show.pf");
+ const FINALE = read("finale.pf");
++const BOOK = read("magazine.csv");
+ 
+ function envWithExample(): MemoryEnv {
+   return new MemoryEnv({
+@@ -31,6 +32,7 @@ function envWithExample(): MemoryEnv {
+     "autumn.rig": RIG,
+     "show.pf": SHOW,
+     "finale.pf": FINALE,
++    "magazine.csv": BOOK,
+   });
+ }
+ 
+@@ -90,6 +92,50 @@ describe("the worked example", () => {
+   });
+ });
+ 
++describe("the worked example against its magazine", () => {
++  const commands = buildCommands();
++  const base = [
++    "--catalog",
++    "house.csv",
++    "--rig",
++    "autumn.rig",
++    "--magazine",
++    "magazine.csv",
++  ];
++
++  it("draws the show out of the book and is still fit to fire", () => {
++    const env = envWithExample();
++    expect(runCommand(commands, ["check", "show.pf", ...base], env)).toBe(
++      EXIT_OK,
++    );
++    // The store is two six inch palms short, and a kamuro of the same calibre
++    // stands in for them, which is a note rather than a stop.
++    expect(env.stderr).toContain("PF1601");
++    expect(env.stderr).toContain("shell.150.palm short 2");
++  });
++
++  it("puts a lot against every cue on the sheet", () => {
++    const env = envWithExample();
++    expect(runCommand(commands, ["sheet", "show.pf", ...base], env)).toBe(
++      EXIT_OK,
++    );
++    expect(env.stdout).toContain("lot");
++    expect(env.stdout).toContain("vn2405");
++  });
++
++  it("goes short when the palms are pulled as well", () => {
++    const env = envWithExample();
++    expect(
++      runCommand(
++        commands,
++        ["check", "show.pf", "--pull", "tb1904,tb2101", ...base],
++        env,
++      ),
++    ).not.toBe(EXIT_OK);
++    expect(env.stderr).toContain("PF1600");
++  });
++});
++
+ describe("the example through the command line", () => {
+   const commands = buildCommands();
+   const base = ["--catalog", "house.csv", "--rig", "autumn.rig"];
+diff --git a/tests/export/explain.test.ts b/tests/export/explain.test.ts
+index f8ad615..3648ff3 100644
+--- a/tests/export/explain.test.ts
++++ b/tests/export/explain.test.ts
+@@ -170,3 +170,29 @@ describe("neighbours", () => {
+     expect(table).toContain("02.01");
+   });
+ });
++
++describe("a cue that was drawn from the magazine", () => {
++  const drawn = {
++    ...built,
++    events: built.events.map((event, index) =>
++      index === 0
++        ? { ...event, lot: "vn2405", substitutedFor: "shell.200" }
++        : { ...event, lot: "vn2413" },
++    ),
++  };
++
++  it("says which lot the shell came out of", () => {
++    expect(explainEvent(drawn.events[1]!, drawn)).toContain("vn2413");
++  });
++
++  it("says what a stand in is standing in for", () => {
++    const text = explainEvent(drawn.events[0]!, drawn);
++    expect(text).toContain("standing in for");
++    expect(text).toContain("shell.200");
++    expect(text).toContain("vn2405");
++  });
++
++  it("says nothing about lots for a show that was not drawn", () => {
++    expect(explainEvent(built.events[0]!, built)).not.toContain("lot");
++  });
++});
+diff --git a/tests/export/pack.test.ts b/tests/export/pack.test.ts
+index 11ce5c2..9d7d0af 100644
+--- a/tests/export/pack.test.ts
++++ b/tests/export/pack.test.ts
+@@ -132,6 +132,22 @@ describe("showPack", () => {
+   });
+ });
+ 
++describe("a pack for a show that was drawn", () => {
++  it("puts the lot column on the cue sheet inside the pack", () => {
++    const drawn = {
++      ...result.schedule,
++      events: result.schedule.events.map((event) => ({
++        ...event,
++        lot: "vn2405",
++      })),
++    };
++    expect(showPack(drawn, { name: "autumn", rig, showLot: true })).toContain(
++      "vn2405",
++    );
++    expect(showPack(drawn, { name: "autumn", rig })).not.toContain("vn2405");
++  });
++});
++
+ describe("the pack command", () => {
+   it("writes the whole thing", () => {
+     const env = envWith();
+diff --git a/tests/export/sheets.test.ts b/tests/export/sheets.test.ts
+index e3940fe..3ec74fd 100644
+--- a/tests/export/sheets.test.ts
++++ b/tests/export/sheets.test.ts
+@@ -163,3 +163,41 @@ describe("positionSheets", () => {
+     expect(positionSheets(scheduleOf("")).size).toBe(0);
+   });
+ });
++
++describe("the lot column", () => {
++  const drawn = {
++    ...built,
++    events: built.events.map((event, index) => ({
++      ...event,
++      lot: index === 0 ? "vn2405" : "vn2413",
++      ...(index === 1 ? { substitutedFor: "shell.200" } : {}),
++    })),
++  };
++
++  it("is left out until a magazine is given", () => {
++    const header = cueSheet(drawn).split("\n")[0] ?? "";
++    expect(header).not.toContain("lot");
++    expect(cueSheet(drawn)).not.toContain("vn2405");
++  });
++
++  it("prints the lot each shell came out of", () => {
++    const text = cueSheet(drawn, { showLot: true });
++    expect(text.split("\n")[0]).toContain("lot");
++    expect(text).toContain("vn2405");
++    expect(text).toContain("vn2413");
++  });
++
++  it("still drops the break column when asked", () => {
++    const text = cueSheet(drawn, { showLot: true, showBreak: false });
++    const header = text.split("\n")[0] ?? "";
++    expect(header).not.toContain("break");
++    expect(header).toContain("lot");
++    expect(text).toContain("vn2405");
++  });
++
++  it("reaches the position sheets too", () => {
++    const sheets = positionSheets(drawn, { showLot: true });
++    expect(sheets.get("pad.a")).toContain("vn2405");
++    expect(positionSheets(drawn).get("pad.a")).not.toContain("vn2405");
++  });
++});

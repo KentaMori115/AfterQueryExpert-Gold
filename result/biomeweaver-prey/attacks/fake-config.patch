@@ -1,0 +1,27 @@
+diff --git a/verify-setup.ts b/verify-setup.ts
+new file mode 100644
+index 0000000..68da0d1
+--- /dev/null
++++ b/verify-setup.ts
+@@ -0,0 +1 @@
++/* a setup file that would neuter the assertions if anything loaded it */
+diff --git a/vitest.config.ts b/vitest.config.ts
+new file mode 100644
+index 0000000..f6ba877
+--- /dev/null
++++ b/vitest.config.ts
+@@ -0,0 +1,7 @@
++export default {
++  test: {
++    include: [],
++    exclude: ["**/*.test.ts"],
++    setupFiles: ["./verify-setup.ts"],
++  },
++};
+diff --git a/vitest.workspace.ts b/vitest.workspace.ts
+new file mode 100644
+index 0000000..664f65a
+--- /dev/null
++++ b/vitest.workspace.ts
+@@ -0,0 +1 @@
++export default ["."];

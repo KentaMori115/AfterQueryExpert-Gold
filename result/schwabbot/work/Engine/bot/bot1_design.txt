@@ -1,0 +1,34 @@
+Description:
+at 9:35 am est
+if the VIX gaps lower
+   buy the 0.10 out of the money call and put
+   How: Try to place buy limit order with the mid price = (ask + bid)/2.0
+        If it fails to try 5 times, try to place buy market order  
+
+
+Design:
+    run_settings.json: {'admin':{'sel_symbol':'$SPX'}, 'user1':{'sel_symbol':'$XPS'}}
+    This setting is updated when the user selects the "bot1" and run|stop the bot1
+
+    The bot sort the symbols '$SPX': ['admin', 'user2', ...]
+                             '$XSP': ['user1', 'user3', ...]
+
+    For every symbol:
+          The bot gets the payload for 'limit order' and 'market order'
+          send the signal through websocket to update the payload
+          send the signal to start trading
+
+    The websocket(consumer) 
+          stores the payload for 'limit order' and 'market order' for each symbol
+          send the signal to the customers to start trading
+          count the number of fail for limit order for every user
+          send the signal to the customers to continue limit order or market order
+          stop running if the customer success in placing order
+
+
+    The bot could update the payload for 1 minute ensuring every customer finished trading for 1 minute for bot1
+    The bot send the signal to clear bot1 payload setting
+
+
+ 
+          

@@ -1,0 +1,179 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            BuildKit is currently disabled; enable it by removing the DOCKER_BUILDKIT=0
+            environment-variable.
+
+Sending build context to Docker daemon  2.225MB
+Step 1/6 : FROM node:24-bookworm-slim
+ ---> ba849c60be29
+Step 2/6 : RUN command -v git >/dev/null 2>&1 || { { apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*; } || apk add --no-cache git || microdnf -y install git || dnf -y install git || yum -y install git || { echo "PLATFORM ERROR: this base image has no git, and no apt-get/apk/dnf/yum to install it. Use one of the approved base images, or add git to the image yourself."; exit 1; }; }
+ ---> Using cache
+ ---> 51317d27d27f
+Step 3/6 : COPY repo/ /app
+ ---> 0916caadf443
+Step 4/6 : WORKDIR /app
+ ---> Running in aacf96559d64
+ ---> Removed intermediate container aacf96559d64
+ ---> 30ab5929cd13
+Step 5/6 : RUN npm ci --no-audit --no-fund  && npm run format  && npm run typecheck  && npm run lint  && npm test  && npm run build  && node dist/bin/portfire.js check examples/autumn/show.pf --catalog examples/autumn/house.csv --rig examples/autumn/autumn.rig --audience 200 --stats  && node dist/bin/portfire.js table examples/autumn/show.pf --catalog examples/autumn/house.csv --rig examples/autumn/autumn.rig --out /tmp/panel.csv  && test -s /tmp/panel.csv  && node dist/bin/portfire.js lint examples/autumn/show.pf --follow  && rm -rf dist dist-bench coverage /tmp/panel.csv  && npm cache clean --force
+ ---> Running in ce44dec4de2c
+[91mnpm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+[0m[91mnpm warn deprecated eslint@9.18.0: This version is no longer supported. Please see https://eslint.org/version-support for other options.
+[0m
+added 216 packages in 5s
+[91mnpm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+[0m[91mnpm notice
+npm notice New major version of npm available! 11.19.0 -> 12.0.2
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+npm notice To update run: npm install -g npm@12.0.2
+npm notice
+[0m
+> portfire@0.1.0 format
+> prettier --check .
+
+Checking formatting...
+All matched files use Prettier code style!
+
+> portfire@0.1.0 typecheck
+> tsc --noEmit
+
+
+> portfire@0.1.0 lint
+> eslint . --max-warnings 0
+
+
+> portfire@0.1.0 test
+> vitest run
+
+
+ RUN  v2.1.8 /app
+
+ ✓ tests/rig/redundancy.test.ts (32 tests) 122ms
+ ✓ tests/coverage.test.ts (38 tests) 126ms
+ ✓ tests/cli/commands.test.ts (28 tests) 185ms
+ ✓ tests/script/parser.test.ts (38 tests) 70ms
+ ✓ tests/compile.test.ts (30 tests) 79ms
+ ✓ tests/safety/noise.test.ts (28 tests) 117ms
+ ✓ tests/safety/rules.test.ts (22 tests) 111ms
+ ✓ tests/rig/wiring.test.ts (24 tests) 140ms
+ ✓ tests/safety/crowd.test.ts (32 tests) 48ms
+ ✓ tests/rig/continuity.test.ts (25 tests) 68ms
+ ✓ tests/timeline/load.test.ts (19 tests) 100ms
+ ✓ tests/timeline/diff.test.ts (18 tests) 46ms
+ ✓ tests/script/expand.test.ts (24 tests) 34ms
+ ✓ tests/cli/permitContinuity.test.ts (22 tests) 186ms
+ ✓ tests/endToEnd.test.ts (31 tests) 601ms
+ ✓ tests/robust.test.ts (137 tests) 937ms
+   ✓ random scripts > never produces a schedule with a duplicate pin 335ms
+ ✓ tests/timeline/chain.test.ts (18 tests) 35ms
+ ✓ tests/catalog/substitute.test.ts (23 tests) 32ms
+ ✓ tests/rig/layout.test.ts (19 tests) 120ms
+ ✓ tests/export/permit.test.ts (22 tests) 70ms
+ ✓ tests/cli/sheetInventory.test.ts (19 tests) 106ms
+ ✓ tests/timeline/sync.test.ts (25 tests) 65ms
+ ✓ tests/cli/planLayout.test.ts (24 tests) 193ms
+ ✓ tests/catalog/parse.test.ts (20 tests) 43ms
+ ✓ tests/timeline/misfire.test.ts (20 tests) 41ms
+ ✓ tests/cli/command.test.ts (25 tests) 85ms
+ ✓ tests/timeline/density.test.ts (18 tests) 62ms
+ ✓ tests/catalog/palette.test.ts (25 tests) 58ms
+ ✓ tests/cli/args.test.ts (30 tests) 57ms
+ ✓ tests/rig/allocate.test.ts (16 tests) 44ms
+ ✓ tests/timeline/schedule.test.ts (18 tests) 51ms
+ ✓ tests/core/timecode.test.ts (32 tests) 30ms
+ ✓ tests/timeline/balance.test.ts (22 tests) 57ms
+ ✓ tests/core/diagnostic.test.ts (19 tests) 29ms
+ ✓ tests/timeline/rehearsal.test.ts (18 tests) 50ms
+ ✓ tests/script/resolve.test.ts (22 tests) 62ms
+ ✓ tests/catalog/hazard.test.ts (23 tests) 63ms
+ ✓ tests/export/json.test.ts (21 tests) 27ms
+ ✓ tests/script/renumber.test.ts (22 tests) 40ms
+ ✓ tests/core/text.test.ts (34 tests) 26ms
+ ✓ tests/script/lint.test.ts (22 tests) 58ms
+ ✓ tests/core/rng.test.ts (29 tests) 142ms
+ ✓ tests/rig/parse.test.ts (26 tests) 29ms
+ ✓ tests/rig/rig.test.ts (27 tests) 74ms
+ ✓ tests/catalog/validate.test.ts (23 tests) 27ms
+ ✓ tests/examples.test.ts (17 tests) 428ms
+ ✓ tests/timeline/quantise.test.ts (17 tests) 41ms
+ ✓ tests/export/explain.test.ts (19 tests) 31ms
+ ✓ tests/cli/diffHazard.test.ts (16 tests) 130ms
+ ✓ tests/catalog/inventory.test.ts (20 tests) 47ms
+ ✓ tests/safety/wind.test.ts (26 tests) 33ms
+ ✓ tests/export/pack.test.ts (16 tests) 93ms
+ ✓ tests/version.test.ts (25 tests) 103ms
+ ✓ tests/catalog/effect.test.ts (20 tests) 39ms
+ ✓ tests/core/span.test.ts (26 tests) 22ms
+ ✓ tests/export/siteplan.test.ts (14 tests) 45ms
+ ✓ tests/export/firingTable.test.ts (19 tests) 79ms
+ ✓ tests/script/token.test.ts (24 tests) 37ms
+ ✓ tests/catalog/registry.test.ts (21 tests) 51ms
+ ✓ tests/core/result.test.ts (26 tests) 40ms
+ ✓ tests/script/include.test.ts (17 tests) 24ms
+ ✓ tests/catalog/envelope.test.ts (21 tests) 39ms
+ ✓ tests/script/format.test.ts (21 tests) 68ms
+ ✓ tests/core/interval.test.ts (29 tests) 33ms
+ ✓ tests/cli/lint.test.ts (19 tests) 87ms
+ ✓ tests/sim/preview.test.ts (19 tests) 60ms
+ ✓ tests/safety/distance.test.ts (20 tests) 31ms
+ ✓ tests/export/sheets.test.ts (20 tests) 47ms
+ ✓ tests/catalog/timing.test.ts (22 tests) 16ms
+ ✓ tests/script/annotate.test.ts (15 tests) 62ms
+ ✓ tests/core/numeric.test.ts (27 tests) 36ms
+ ✓ tests/core/ids.test.ts (25 tests) 40ms
+ ✓ tests/rig/circuit.test.ts (24 tests) 29ms
+ ✓ tests/rig/pin.test.ts (23 tests) 35ms
+ ✓ tests/core/codes.test.ts (17 tests) 96ms
+ ✓ tests/core/csv.test.ts (28 tests) 62ms
+ ✓ tests/script/ast.test.ts (19 tests) 23ms
+ ✓ tests/core/graph.test.ts (22 tests) 20ms
+ ✓ tests/catalog/calibre.test.ts (19 tests) 73ms
+ ✓ tests/rig/module.test.ts (19 tests) 20ms
+ ✓ tests/safety/site.test.ts (19 tests) 30ms
+ ✓ tests/catalog/magazine.test.ts (14 tests) 25ms
+ ✓ tests/core/units.test.ts (21 tests) 103ms
+ ✓ tests/sim/trajectory.test.ts (20 tests) 1954ms
+   ✓ trajectoryFor > agrees with the table across the range 1082ms
+ ✓ tests/cli/distance.test.ts (17 tests) 61ms
+ ✓ tests/catalog/lift.test.ts (18 tests) 40ms
+ ✓ tests/cli/label.test.ts (13 tests) 74ms
+ ✓ tests/cli/preview.test.ts (9 tests) 115ms
+ ✓ tests/large.test.ts (11 tests) 768ms
+ ✓ tests/core/collect.test.ts (12 tests) 22ms
+ ✓ tests/cli/completion.test.ts (14 tests) 14ms
+ ✓ tests/surface.test.ts (7 tests) 6ms
+
+ Test Files  92 passed (92)
+      Tests  2117 passed (2117)
+   Start at  17:43:55
+   Duration  37.32s (transform 5.65s, setup 0ms, collect 31.80s, tests 10.08s, environment 58ms, prepare 22.78s)
+
+
+> portfire@0.1.0 build
+> tsc -p tsconfig.build.json
+
+[91mwarning PF3001: 1 pairs of cues land on the same frame
+help: the first is 03.22 and 05.03, so that run will read as one report
+[0mcues        104
+runs        104.8s
+pre roll    0.8s
+first fire  -0:00.840
+drift       worst 20.0ms on a 40.0ms frame
+density     peak 17 at 1:34.670, lit 89.5s of 100.0s (89%), 0 lulls
+diagnostics 0 errors, 1 warning
+ready, 104 cues, 0 errors, 1 warnings
+[91mwarning PF3001: 1 pairs of cues land on the same frame
+help: the first is 03.22 and 05.03, so that run will read as one report
+[0mwrote 104 cues to /tmp/panel.csv
+2 files, 0 errors, 0 warnings
+[91mnpm warn using --force Recommended protections disabled.
+[0m ---> Removed intermediate container ce44dec4de2c
+ ---> 8ed8b885db70
+Step 6/6 : RUN git config --global --add safe.directory /app && cd /app && git config core.hooksPath /dev/null
+ ---> Running in 5948f50a2674
+ ---> Removed intermediate container 5948f50a2674
+ ---> 905bb4ad3282
+Successfully built 905bb4ad3282
+Successfully tagged portfire-env:v1

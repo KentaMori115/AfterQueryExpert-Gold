@@ -1,0 +1,889 @@
++ npx vitest run --config /tmp/biomeweaver-graded.config.ts --reporter=basic --reporter=junit --outputFile.junit=/logs/verifier/new_junit.xml
+
+ RUN  v3.2.7 /app
+
+ DEPRECATED  'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}
+ ❯ packages/biomeweaver-cli/src/event-commands.test.ts (6 tests | 6 failed) 18ms
+   × event commands > lists every authored event in id order 9ms
+     → expected 5 to be +0 // Object.is equality
+   × event commands > prints one line for each effect an event carries 1ms
+     → expected 5 to be +0 // Object.is equality
+   × event commands > names the resource an effect moves 3ms
+     → expected [] to have a length of 1 but got +0
+   × event commands > names the modifier an effect scales 1ms
+     → expected '' to contain 'salt-growth'
+   × event commands > refuses an event id the capsule never defines 1ms
+     → expected 5 to be 3 // Object.is equality
+   × event commands > lists nothing for a capsule that authors no event 2ms
+     → expected 5 to be +0 // Object.is equality
+ ❯ packages/biome-model/src/event-validation.test.ts (12 tests | 10 failed) 183ms
+   ✓ authored event effects > accepts an effect that moves a resource in a region it knows 41ms
+   ✓ authored event effects > accepts an effect that scales a modifier for several ticks 12ms
+   × authored event effects > refuses an effect naming a resource the capsule never defines 26ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses an effect naming a region the capsule never defines 14ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses an unknown region on a modifier effect too 11ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses a resource carrying no quantity 13ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses a modifier carrying no factor 14ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses an effect that carries nothing at all 11ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses an effect that is not a record 7ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses a window shorter than one tick 8ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses a window that is not a whole number of ticks 12ms
+     → expected [] to have a length of 1 but got +0
+   × authored event effects > refuses a negative factor 13ms
+     → expected [] to have a length of 1 but got +0
+ ❯ packages/tick-runtime/src/fixed-events.test.ts (23 tests | 20 failed) 261ms
+   × fixed disturbances > splits a withdrawal in proportion to what each pool holds 57ms
+     → expected 0n to be 1000000n // Object.is equality
+   × fixed disturbances > hands a single leftover unit to the first region in id order 15ms
+     → expected 0n to be 666666n // Object.is equality
+   × fixed disturbances > walks two leftover units down the region order 16ms
+     → expected 0n to be 333333n // Object.is equality
+   × fixed disturbances > splits evenly across pools that hold nothing between them 17ms
+     → expected 1000000n to be 333334n // Object.is equality
+   × fixed disturbances > reaches only the region an effect names 12ms
+     → expected 6000000n to be 10000000n // Object.is equality
+   ✓ fixed disturbances > takes no more from a pool than the pool holds 7ms
+   × fixed disturbances > reports the quantity a pool really gave up 11ms
+     → expected [ '15.000000' ] to deeply equal [ '2.000000', '8.000000' ]
+   × fixed disturbances > publishes one flow for every pool that moved 12ms
+     → expected [ { tick: 1, …(6) } ] to have a length of 3 but got 1
+   × fixed disturbances > carries the moving pool's own region on each flow 10ms
+     → expected [ 'east' ] to deeply equal [ 'east', 'north', 'west' ]
+   × fixed disturbances > says nothing about a pool it never moved 9ms
+     → expected 'east' to be 'north' // Object.is equality
+   ✓ fixed disturbances > runs an effect that named no window on its hook tick alone 7ms
+   × fixed disturbances > runs the effects of one event in the order the file lists them 8ms
+     → expected 0n to be 800000n // Object.is equality
+   × fixed disturbances > keeps an effect running for the whole window it authored 6ms
+     → expected 9000000n to be 7000000n // Object.is equality
+   × fixed disturbances > closes a window on the tick after it ends 6ms
+     → expected 9000000n to be 7000000n // Object.is equality
+   × fixed disturbances > runs two disturbances on one tick in event id order 6ms
+     → expected 0n to be 800000n // Object.is equality
+   × fixed disturbances > scales renewal while a modifier window runs 8ms
+     → expected 100000000n to be 200000000n // Object.is equality
+   × fixed disturbances > multiplies two windows over one key, rounding at each step 6ms
+     → expected 100000000n to be 11111100n // Object.is equality
+   × fixed disturbances > gives renewal back once the window closes 6ms
+     → expected 200000000n to be 400000000n // Object.is equality
+   ✓ fixed disturbances > leaves a modifier effect out of the flow record 5ms
+   × fixed disturbances > spreads an addition the same way it spreads a withdrawal 6ms
+     → expected 8000000n to be 3000000n // Object.is equality
+   × fixed disturbances > does nothing for a resource the scenario never pooled 8ms
+     → expected [ { tick: 1, …(6) } ] to deeply equal []
+   × fixed disturbances > runs only the part of a window that falls inside the run 9ms
+     → expected 10000000n to be 9000000n // Object.is equality
+   × fixed disturbances > keeps a modifier effect inside the region it names 10ms
+     → expected 100000000n to be 300000000n // Object.is equality
+ ❯ .verifier-canary/canary.test.ts (1 test | 1 failed) 11ms
+   × verifier canary > never passes 10ms
+     → expected 1 to be 2 // Object.is equality
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 37 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .verifier-canary/canary.test.ts > verifier canary > never passes
+AssertionError: expected 1 to be 2 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+ ❯ .verifier-canary/canary.test.ts:5:15
+      3| describe("verifier canary", () => {
+      4|   it("never passes", () => {
+      5|     expect(1).toBe(2);
+       |               ^
+      6|   });
+      7| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses an effect naming a resource the capsule never defines
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:71:29
+     69|   it("refuses an effect naming a resource the capsule never defines", …
+     70|     const compiled = compileWith("  - resource: gravel\n    quantity: …
+     71|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+     72|     expect(compiled.model).toBeUndefined();
+     73|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses an effect naming a region the capsule never defines
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:77:29
+     75|   it("refuses an effect naming a region the capsule never defines", ()…
+     76|     const compiled = compileWith("  - resource: salt\n    region: sout…
+     77|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+     78|     expect(compiled.model).toBeUndefined();
+     79|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses an unknown region on a modifier effect too
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:83:29
+     81|   it("refuses an unknown region on a modifier effect too", () => {
+     82|     const compiled = compileWith("  - modifier: salt-growth\n    regio…
+     83|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+     84|     expect(compiled.model).toBeUndefined();
+     85|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses a resource carrying no quantity
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:89:29
+     87|   it("refuses a resource carrying no quantity", () => {
+     88|     const compiled = compileWith("  - resource: salt\n    region: east…
+     89|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+     90|     expect(compiled.model).toBeUndefined();
+     91|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses a modifier carrying no factor
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:95:29
+     93|   it("refuses a modifier carrying no factor", () => {
+     94|     const compiled = compileWith("  - modifier: salt-growth\n    regio…
+     95|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+     96|     expect(compiled.model).toBeUndefined();
+     97|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses an effect that carries nothing at all
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:101:29
+     99|   it("refuses an effect that carries nothing at all", () => {
+    100|     const compiled = compileWith("  - region: east\n");
+    101|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+    102|     expect(compiled.model).toBeUndefined();
+    103|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses an effect that is not a record
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:107:29
+    105|   it("refuses an effect that is not a record", () => {
+    106|     const compiled = compileWith("  - east\n");
+    107|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+    108|     expect(compiled.model).toBeUndefined();
+    109|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses a window shorter than one tick
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:113:29
+    111|   it("refuses a window shorter than one tick", () => {
+    112|     const compiled = compileWith("  - resource: salt\n    quantity: -2…
+    113|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+    114|     expect(compiled.model).toBeUndefined();
+    115|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses a window that is not a whole number of ticks
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:119:29
+    117|   it("refuses a window that is not a whole number of ticks", () => {
+    118|     const compiled = compileWith("  - resource: salt\n    quantity: -2…
+    119|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+    120|     expect(compiled.model).toBeUndefined();
+    121|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/37]⎯
+
+ FAIL  packages/biome-model/src/event-validation.test.ts > authored event effects > refuses a negative factor
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biome-model/src/event-validation.test.ts:125:29
+    123|   it("refuses a negative factor", () => {
+    124|     const compiled = compileWith("  - modifier: salt-growth\n    facto…
+    125|     expect(compiled.errors).toHaveLength(1);
+       |                             ^
+    126|     expect(compiled.model).toBeUndefined();
+    127|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/37]⎯
+
+ FAIL  packages/biomeweaver-cli/src/event-commands.test.ts > event commands > lists every authored event in id order
+AssertionError: expected 5 to be +0 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 5[39m
+
+ ❯ packages/biomeweaver-cli/src/event-commands.test.ts:59:29
+     57|   it("lists every authored event in id order", () => {
+     58|     const listed = runCommand(["event", "list", "--root", root]);
+     59|     expect(listed.exitCode).toBe(0);
+       |                             ^
+     60|     expect(lines(listed.stdout)).toEqual(["autumn-flood", "spring-melt…
+     61|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/37]⎯
+
+ FAIL  packages/biomeweaver-cli/src/event-commands.test.ts > event commands > prints one line for each effect an event carries
+AssertionError: expected 5 to be +0 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 5[39m
+
+ ❯ packages/biomeweaver-cli/src/event-commands.test.ts:65:28
+     63|   it("prints one line for each effect an event carries", () => {
+     64|     const shown = runCommand(["event", "show", "spring-melt", "--root"…
+     65|     expect(shown.exitCode).toBe(0);
+       |                            ^
+     66|     expect(lines(shown.stdout)).toHaveLength(2);
+     67|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/37]⎯
+
+ FAIL  packages/biomeweaver-cli/src/event-commands.test.ts > event commands > names the resource an effect moves
+AssertionError: expected [] to have a length of 1 but got +0
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+ ❯ packages/biomeweaver-cli/src/event-commands.test.ts:71:33
+     69|   it("names the resource an effect moves", () => {
+     70|     const shown = runCommand(["event", "show", "autumn-flood", "--root…
+     71|     expect(lines(shown.stdout)).toHaveLength(1);
+       |                                 ^
+     72|     expect(shown.stdout).toContain("salt");
+     73|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/37]⎯
+
+ FAIL  packages/biomeweaver-cli/src/event-commands.test.ts > event commands > names the modifier an effect scales
+AssertionError: expected '' to contain 'salt-growth'
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- salt-growth[39m
+
+ ❯ packages/biomeweaver-cli/src/event-commands.test.ts:77:26
+     75|   it("names the modifier an effect scales", () => {
+     76|     const shown = runCommand(["event", "show", "spring-melt", "--root"…
+     77|     expect(shown.stdout).toContain("salt-growth");
+       |                          ^
+     78|   });
+     79| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/37]⎯
+
+ FAIL  packages/biomeweaver-cli/src/event-commands.test.ts > event commands > refuses an event id the capsule never defines
+AssertionError: expected 5 to be 3 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 3[39m
+[31m+ 5[39m
+
+ ❯ packages/biomeweaver-cli/src/event-commands.test.ts:82:28
+     80|   it("refuses an event id the capsule never defines", () => {
+     81|     const shown = runCommand(["event", "show", "midsummer-drought", "-…
+     82|     expect(shown.exitCode).toBe(3);
+       |                            ^
+     83|   });
+     84| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/37]⎯
+
+ FAIL  packages/biomeweaver-cli/src/event-commands.test.ts > event commands > lists nothing for a capsule that authors no event
+AssertionError: expected 5 to be +0 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 5[39m
+
+ ❯ packages/biomeweaver-cli/src/event-commands.test.ts:88:29
+     86|     const bare = capsuleRoot({ "events/spring-melt.yaml": null, "event…
+     87|     const listed = runCommand(["event", "list", "--root", bare]);
+     88|     expect(listed.exitCode).toBe(0);
+       |                             ^
+     89|     expect(lines(listed.stdout)).toEqual([]);
+     90|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > splits a withdrawal in proportion to what each pool holds
+AssertionError: expected 0n to be 1000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1000000n[39m
+[31m+ 0n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:104:45
+    102|       2,
+    103|     );
+    104|     expect(held(result, 1, "salt", "east")).toBe(1_000_000n);
+       |                                             ^
+    105|     expect(held(result, 1, "salt", "north")).toBe(5_000_000n);
+    106|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > hands a single leftover unit to the first region in id order
+AssertionError: expected 0n to be 666666n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 666666n[39m
+[31m+ 0n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:117:45
+    115|       2,
+    116|     );
+    117|     expect(held(result, 1, "salt", "east")).toBe(666_666n);
+       |                                             ^
+    118|     expect(held(result, 1, "salt", "north")).toBe(666_667n);
+    119|     expect(held(result, 1, "salt", "west")).toBe(666_667n);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > walks two leftover units down the region order
+AssertionError: expected 0n to be 333333n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 333333n[39m
+[31m+ 0n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:131:45
+    129|       2,
+    130|     );
+    131|     expect(held(result, 1, "salt", "east")).toBe(333_333n);
+       |                                             ^
+    132|     expect(held(result, 1, "salt", "north")).toBe(333_333n);
+    133|     expect(held(result, 1, "salt", "west")).toBe(333_334n);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > splits evenly across pools that hold nothing between them
+AssertionError: expected 1000000n to be 333334n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 333334n[39m
+[31m+ 1000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:148:45
+    146|       2,
+    147|     );
+    148|     expect(held(result, 1, "salt", "east")).toBe(333_334n);
+       |                                             ^
+    149|     expect(held(result, 1, "salt", "north")).toBe(333_333n);
+    150|     expect(held(result, 1, "salt", "west")).toBe(333_333n);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > reaches only the region an effect names
+AssertionError: expected 6000000n to be 10000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 10000000n[39m
+[31m+ 6000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:165:45
+    163|       2,
+    164|     );
+    165|     expect(held(result, 1, "salt", "east")).toBe(10_000_000n);
+       |                                             ^
+    166|     expect(held(result, 1, "salt", "north")).toBe(6_000_000n);
+    167|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > reports the quantity a pool really gave up
+AssertionError: expected [ '15.000000' ] to deeply equal [ '2.000000', '8.000000' ]
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[32m-   "2.000000",[39m
+[32m-   "8.000000",[39m
+[31m+   "15.000000",[39m
+[2m  ][22m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:200:24
+    198|       .map((flow) => flow.quantity)
+    199|       .sort();
+    200|     expect(quantities).toEqual(["2.000000", "8.000000"]);
+       |                        ^
+    201|   });
+    202| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > publishes one flow for every pool that moved
+AssertionError: expected [ { tick: 1, …(6) } ] to have a length of 3 but got 1
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 3[39m
+[31m+ 1[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:212:41
+    210|       2,
+    211|     );
+    212|     expect(disturbanceFlows(result, 1)).toHaveLength(3);
+       |                                         ^
+    213|   });
+    214| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > carries the moving pool's own region on each flow
+AssertionError: expected [ 'east' ] to deeply equal [ 'east', 'north', 'west' ]
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "east",[22m
+[32m-   "north",[39m
+[32m-   "west",[39m
+[2m  ][22m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:228:7
+    226|         .map((flow) => flow.region)
+    227|         .sort(),
+    228|     ).toEqual(["east", "north", "west"]);
+       |       ^
+    229|   });
+    230| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > says nothing about a pool it never moved
+AssertionError: expected 'east' to be 'north' // Object.is equality
+
+Expected: [32m"north"[39m
+Received: [31m"east"[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:245:30
+    243|     const flows = disturbanceFlows(result, 1);
+    244|     expect(flows).toHaveLength(1);
+    245|     expect(flows[0]?.region).toBe("north");
+       |                              ^
+    246|   });
+    247| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > runs the effects of one event in the order the file lists them
+AssertionError: expected 0n to be 800000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 800000n[39m
+[31m+ 0n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:274:45
+    272|       2,
+    273|     );
+    274|     expect(held(result, 1, "salt", "east")).toBe(800_000n);
+       |                                             ^
+    275|     expect(held(result, 1, "salt", "north")).toBe(3_200_000n);
+    276|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > keeps an effect running for the whole window it authored
+AssertionError: expected 9000000n to be 7000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 7000000n[39m
+[31m+ 9000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:288:45
+    286|     );
+    287|     expect(held(result, 1, "salt", "east")).toBe(10_000_000n);
+    288|     expect(held(result, 4, "salt", "east")).toBe(7_000_000n);
+       |                                             ^
+    289|   });
+    290| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > closes a window on the tick after it ends
+AssertionError: expected 9000000n to be 7000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 7000000n[39m
+[31m+ 9000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:301:45
+    299|     );
+    300|     expect(disturbanceFlows(result, 5)).toEqual([]);
+    301|     expect(held(result, 5, "salt", "east")).toBe(7_000_000n);
+       |                                             ^
+    302|   });
+    303| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > runs two disturbances on one tick in event id order
+AssertionError: expected 0n to be 800000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 800000n[39m
+[31m+ 0n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:318:45
+    316|       2,
+    317|     );
+    318|     expect(held(result, 1, "salt", "east")).toBe(800_000n);
+       |                                             ^
+    319|     expect(held(result, 1, "salt", "north")).toBe(3_200_000n);
+    320|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > scales renewal while a modifier window runs
+AssertionError: expected 100000000n to be 200000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200000000n[39m
+[31m+ 100000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:331:45
+    329|       3,
+    330|     );
+    331|     expect(held(result, 1, "moss", "west")).toBe(200_000_000n);
+       |                                             ^
+    332|     expect(held(result, 2, "moss", "west")).toBe(300_000_000n);
+    333|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > multiplies two windows over one key, rounding at each step
+AssertionError: expected 100000000n to be 11111100n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 11111100n[39m
+[31m+ 100000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:349:45
+    347|       2,
+    348|     );
+    349|     expect(held(result, 1, "moss", "west")).toBe(11_111_100n);
+       |                                             ^
+    350|   });
+    351| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > gives renewal back once the window closes
+AssertionError: expected 200000000n to be 400000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 400000000n[39m
+[31m+ 200000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:361:45
+    359|       3,
+    360|     );
+    361|     expect(held(result, 2, "moss", "west")).toBe(400_000_000n);
+       |                                             ^
+    362|     expect(held(result, 3, "moss", "west")).toBe(500_000_000n);
+    363|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > spreads an addition the same way it spreads a withdrawal
+AssertionError: expected 8000000n to be 3000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 3000000n[39m
+[31m+ 8000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:392:45
+    390|       2,
+    391|     );
+    392|     expect(held(result, 1, "salt", "east")).toBe(3_000_000n);
+       |                                             ^
+    393|     expect(held(result, 1, "salt", "north")).toBe(15_000_000n);
+    394|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > does nothing for a resource the scenario never pooled
+AssertionError: expected [ { tick: 1, …(6) } ] to deeply equal []
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [][39m
+[31m+ [[39m
+[31m+   {[39m
+[31m+     "cause": "fixed-event",[39m
+[31m+     "kind": "resource-decrease",[39m
+[31m+     "quantity": "3.000000",[39m
+[31m+     "region": "east",[39m
+[31m+     "resource": "moss",[39m
+[31m+     "rule": "events.drain-moss",[39m
+[31m+     "tick": 1,[39m
+[31m+   },[39m
+[31m+ ][39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:405:41
+    403|       2,
+    404|     );
+    405|     expect(disturbanceFlows(result, 1)).toEqual([]);
+       |                                         ^
+    406|     expect(held(result, 1, "salt", "east")).toBe(10_000_000n);
+    407|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > runs only the part of a window that falls inside the run
+AssertionError: expected 10000000n to be 9000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 9000000n[39m
+[31m+ 10000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:418:45
+    416|       3,
+    417|     );
+    418|     expect(held(result, 1, "salt", "east")).toBe(9_000_000n);
+       |                                             ^
+    419|     expect(held(result, 2, "salt", "east")).toBe(9_000_000n);
+    420|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/37]⎯
+
+ FAIL  packages/tick-runtime/src/fixed-events.test.ts > fixed disturbances > keeps a modifier effect inside the region it names
+AssertionError: expected 100000000n to be 300000000n // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 300000000n[39m
+[31m+ 100000000n[39m
+
+ ❯ packages/tick-runtime/src/fixed-events.test.ts:434:45
+    432|       2,
+    433|     );
+    434|     expect(held(result, 1, "moss", "west")).toBe(300_000_000n);
+       |                                             ^
+    435|     expect(held(result, 1, "moss", "east")).toBe(100_000_000n);
+    436|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/37]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  37 failed | 5 passed (42)
+   Start at  15:45:47
+   Duration  963ms (transform 497ms, setup 0ms, collect 1.11s, tests 474ms, environment 1ms, prepare 321ms)
+
+JUNIT report written to /logs/verifier/new_junit.xml
++ npx vitest run --config /tmp/biomeweaver-shipped.config.ts --reporter=basic --reporter=junit --outputFile.junit=/logs/verifier/base_junit.xml
+
+ RUN  v3.2.7 /app
+
+ DEPRECATED  'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}
+ ✓ packages/fixed-point/src/rounding.test.ts (9 tests) 6ms
+ ✓ packages/capsule-source/src/discovery/discover.test.ts (4 tests) 28ms
+ ✓ packages/capsule-source/src/gather/gather.test.ts (2 tests) 46ms
+ ✓ packages/fixed-point/src/catalog.test.ts (26 tests) 7ms
+ ✓ packages/resource-engine/src/renew.test.ts (4 tests) 6ms
+ ✓ packages/biomeweaver-cli/src/commands.catalog.test.ts (14 tests) 297ms
+ ✓ packages/fixed-point/src/arithmetic.test.ts (9 tests) 7ms
+ ✓ packages/fixed-point/src/coverage.test.ts (7 tests) 14ms
+ ✓ packages/biome-model/src/decode.catalog.test.ts (5 tests) 6ms
+ ✓ ecosystem-lab/cli/commands.cli.test.ts (6 tests) 153ms
+ ✓ packages/fixed-point/src/parse.test.ts (11 tests) 7ms
+ ✓ ecosystem-lab/properties/determinism.test.ts (3 tests) 122ms
+ ✓ packages/capsule-source/src/gather/fingerprint.test.ts (2 tests) 18ms
+ ✓ packages/flow-explanations/src/catalog.test.ts (13 tests) 8ms
+ ✓ packages/resource-engine/src/allocate.test.ts (3 tests) 13ms
+ ✓ packages/population-engine/src/stages.test.ts (3 tests) 4ms
+ ✓ ecosystem-lab/complete-biomes/crystal-tundra.biome.test.ts (3 tests) 126ms
+ ✓ packages/population-engine/src/cohorts.test.ts (4 tests) 5ms
+ ✓ packages/biomeweaver/src/baseline-guard.test.ts (1 test) 12ms
+ ✓ packages/tick-runtime/src/advance.test.ts (3 tests) 113ms
+ ✓ ecosystem-lab/properties/metamorphic.test.ts (2 tests) 91ms
+ ✓ packages/biome-model/src/species.catalog.test.ts (16 tests) 5ms
+ ✓ packages/predation-engine/src/consume.test.ts (1 test) 11ms
+ ✓ packages/flow-explanations/src/flow.test.ts (2 tests) 5ms
+ ✓ packages/biome-model/src/compile.test.ts (3 tests) 98ms
+ ✓ packages/biome-reports/src/render.test.ts (3 tests) 4ms
+ ✓ packages/capsule-source/src/yaml/parse-yaml.test.ts (3 tests) 13ms
+ ✓ packages/biome-model/src/identifiers.test.ts (4 tests) 4ms
+ ✓ ecosystem-lab/properties/conservation.test.ts (2 tests) 105ms
+ ✓ packages/calendar-engine/src/seasons.test.ts (3 tests) 5ms
+ ✓ packages/capsule-source/src/json/parse-json.test.ts (3 tests) 5ms
+ ✓ packages/biomeweaver-cli/src/options.test.ts (4 tests) 5ms
+ ✓ packages/run-store/src/store.test.ts (1 test) 11ms
+ ✓ packages/capsule-source/src/diagnostics/diagnostic.test.ts (2 tests) 3ms
+ ✓ ecosystem-lab/properties/locale.test.ts (1 test) 5ms
+ ✓ ecosystem-lab/invalid-models/invalid.biome.test.ts (2 tests) 57ms
+
+
+ Test Files  36 passed (36)
+      Tests  184 passed (184)
+   Start at  15:45:49
+   Duration  4.64s (transform 795ms, setup 0ms, collect 3.23s, tests 1.42s, environment 7ms, prepare 2.88s)
+
+JUNIT report written to /logs/verifier/base_junit.xml

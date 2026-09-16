@@ -1,0 +1,138 @@
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signalbox"
+version = "0.3.0"
+description = "Interlocking design and verification for railway signalling schemes"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = []
+keywords = ["railway", "signalling", "interlocking", "control-tables"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "pydantic==2.10.5",
+    "typer==0.15.1",
+    "rich==13.9.4",
+    "PyYAML==6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-cov==6.0.0",
+    "mypy==1.14.1",
+    "ruff==0.9.2",
+    "types-PyYAML==6.0.12.20241230",
+]
+
+[project.scripts]
+signalbox = "signalbox.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "slow: takes more than a second to run",
+]
+
+[tool.coverage.run]
+source = ["signalbox"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+# The bar is deliberately below where the suite actually sits, so that it
+# catches a whole area going untested rather than nagging about a line.
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
+
+[tool.ruff]
+line-length = 96
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",    # shadowing a builtin
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "C90",  # complexity
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # import order
+    "N",    # naming
+    "PERF", # obvious slowness
+    "PIE",  # small tidiness
+    "PLC",
+    "PLE",
+    "PLR",
+    "PLW",
+    "PT",   # pytest style
+    "RET",  # returns
+    "RUF",
+    "SIM",  # simplification
+    "UP",   # modern syntax
+]
+ignore = [
+    # A guard clause that returns the reason it refused is the shape we want in
+    # an interlocking. Counting those returns and calling it a smell is wrong.
+    "PLR0911",
+    # Typer commands legitimately take a lot of options.
+    "PLR0913",
+    # Numbers with a name three lines above them read worse, not better.
+    "PLR2004",
+    # The value types are frozen, so one shared default is safe and clearer than
+    # a factory that builds an identical object every time.
+    "RUF009",
+    # Raising with a message written at the raise is how every error here reads.
+    "TRY003",
+    # A mutable class attribute on a dataclass is caught by the dataclass itself.
+    "RUF012",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Typer builds its command line out of default arguments, so every option is a
+# function call in a default and there is nothing to be done about it.
+"src/signalbox/cli/commands/*.py" = ["B008"]
+# Two functions are over the complexity limit on purpose. Route finding is a
+# depth first search with the branching written out, and asking for a route is a
+# list of the reasons it might be refused. Both read worse split up.
+"src/signalbox/signalling/routefind.py" = ["C901"]
+"src/signalbox/sim/machine.py" = ["C901", "PLR0912"]
+# Tests say what they mean with asserts and long fixtures, and nobody is going
+# to profile them.
+# PT018 asks for one assert per clause. The tests here are already a test per
+# behaviour, and splitting the last `assert a and b` buys a better message on a
+# failure that names the test anyway.
+"tests/**/*.py" = ["PERF", "PLR0915", "PLW", "N806", "PT018", "S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+warn_unreachable = true

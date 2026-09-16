@@ -1,0 +1,975 @@
+diff --git a/docs/capsule-format.md b/docs/capsule-format.md
+index 9b06a0c..5aaf4eb 100644
+--- a/docs/capsule-format.md
++++ b/docs/capsule-format.md
+@@ -6,3 +6,7 @@ A biome capsule is a directory of authored YAML or JSON records plus a
+ The manifest names the biome, calendar, default scenario, include globs, and
+ fixed-point precision. Include groups are `regions`, `habitats`, `species`,
+ `resources`, `calendars`, `scenarios`, and `events`.
++
++Seats are authored on the habitat, under `capacity`, keyed by species. What one
++individual takes against a seat is authored on the species, under `space`,
++keyed by stage.
+diff --git a/docs/command-reference.md b/docs/command-reference.md
+index 6ffe60a..a606525 100644
+--- a/docs/command-reference.md
++++ b/docs/command-reference.md
+@@ -11,6 +11,7 @@ biomeweaver run show <run-id>
+ biomeweaver population <run-id> <species>
+ biomeweaver resource <run-id> <resource>
+ biomeweaver explain <run-id> --species <id> --tick <n>
++biomeweaver pressure [run-id]
+ biomeweaver snapshot verify <run-id>
+ biomeweaver report <run-id> --format json|csv|markdown
+ ```
+diff --git a/docs/flow-catalog.md b/docs/flow-catalog.md
+index 653e760..56edcd9 100644
+--- a/docs/flow-catalog.md
++++ b/docs/flow-catalog.md
+@@ -5,4 +5,4 @@ names a tick, kind, region, quantity, cause, and rule.
+ 
+ Causes used by Seed World include `initial-state`, `resource-renewal`,
+ `resource-allocation`, `baseline-mortality`, `resource-deficit-mortality`,
+-`authored-predation`, `reproduction`, and `fixed-event`.
++`authored-predation`, `reproduction`, `fixed-event`, and `habitat-crowding`.
+diff --git a/docs/species-and-resources.md b/docs/species-and-resources.md
+index 6613ce3..9371fea 100644
+--- a/docs/species-and-resources.md
++++ b/docs/species-and-resources.md
+@@ -4,3 +4,10 @@ A species record names stages, resource needs, reproduction, mortality, stage
+ transitions, and optional authored predation. Resource records are renewable or
+ consumable. Habitat records attach capacity and seasonal growth modifiers to a
+ region.
++
++A species record may also give `space` per stage, the room one individual of
++that stage takes against a habitat seat. Stages with no entry take one seat
++each, and a stage given zero takes no room at all. A habitat `capacity` block
++seats a named species; seats from every habitat on a region add up, and a
++season modifier named `<species>-capacity` scales the habitat's own seats for
++that season.
+diff --git a/docs/tick-phases.md b/docs/tick-phases.md
+index 07b9663..9d514ff 100644
+--- a/docs/tick-phases.md
++++ b/docs/tick-phases.md
+@@ -11,8 +11,28 @@ Each tick applies changes in this order:
+ 7. apply authored predation
+ 8. apply reproduction
+ 9. advance life stages
+-10. enforce non-negative invariants
++10. enforce seat and non-negative invariants
+ 11. write attributed flows
+ 
++Step 10 also holds a region to the seats its habitats offer. Occupancy is the
++headcount of one species in one region, each cohort weighted by the space its
++stage takes. Where occupancy passes the seats, the surplus is taken off the
++cohorts in proportion to the room they fill, leftovers going by cohort key
++order, and every cohort that keeps a seat has its condition divided by the
++pressure the region was under. Species no habitat seats are unlimited.
++
++Worked through, for a region seated at 100 holding 90 adults at one seat each
++and 40 juveniles at half a seat:
++
++```text
++occupancy 90 + 20 = 110
++pressure  110 / 100 = 1.100000
++surplus   10, shared 90:20 by room filled
++adults    10 x 90/110 = 8.181818, plus the leftover unit -> 8.181819
++juveniles 10 x 20/110 = 1.818181, over half a seat each -> 3.636362 taken
++left      81.818181 adults and 36.363638 juveniles, filling 100 exactly
++condition 1.000000 / 1.100000 = 0.909091 for both
++```
++
+ Input and output tick states are immutable. A failed phase leaves the previous
+ good tick intact.
+diff --git a/packages/biome-model/src/compile.ts b/packages/biome-model/src/compile.ts
+index 0ef9318..0a42ef7 100644
+--- a/packages/biome-model/src/compile.ts
++++ b/packages/biome-model/src/compile.ts
+@@ -119,6 +119,34 @@ export function compileCapsule(capsule: Capsule): CompileResult {
+       );
+     }
+   }
++  for (const habitat of Object.values(habitats)) {
++    for (const named of Object.keys(habitat.capacity)) {
++      if (!species[named]) {
++        diagnostics.push(
++          diagnostic(
++            "BW-ID-006",
++            "error",
++            `habitat ${habitat.id} seats unknown species ${named}`,
++            habitat.location,
++          ),
++        );
++      }
++    }
++  }
++  for (const spec of Object.values(species)) {
++    for (const stage of Object.keys(spec.space)) {
++      if (!spec.stages.includes(stage)) {
++        diagnostics.push(
++          diagnostic(
++            "BW-ID-006",
++            "error",
++            `species ${spec.id} gives space to unknown stage ${stage}`,
++            spec.location,
++          ),
++        );
++      }
++    }
++  }
+   for (const spec of Object.values(species)) {
+     for (const need of spec.needs) {
+       if (!resources[need.resource]) {
+@@ -171,6 +199,27 @@ export function compileCapsule(capsule: Capsule): CompileResult {
+       }
+     }
+   }
++  const placed = new Set<string>();
++  for (const scenario of Object.values(scenarios)) {
++    for (const population of scenario.initialPopulations) {
++      placed.add(`${population.species}:${population.region}`);
++    }
++  }
++  for (const habitat of Object.values(habitats)) {
++    for (const named of Object.keys(habitat.capacity)) {
++      if (!species[named] || placed.has(`${named}:${habitat.region}`)) {
++        continue;
++      }
++      diagnostics.push(
++        diagnostic(
++          "BW-ID-007",
++          "warning",
++          `habitat ${habitat.id} seats ${named}, which no scenario places in ${habitat.region}`,
++          habitat.location,
++        ),
++      );
++    }
++  }
+   if (!calendars[gathered.manifest.calendar]) {
+     diagnostics.push(
+       diagnostic(
+diff --git a/packages/biome-model/src/decode.ts b/packages/biome-model/src/decode.ts
+index ccf9806..717e58a 100644
+--- a/packages/biome-model/src/decode.ts
++++ b/packages/biome-model/src/decode.ts
+@@ -121,9 +121,21 @@ export function decodeHabitat(
+   const capacityRaw = asRecord(record["capacity"]) ?? {};
+   for (const [species, value] of Object.entries(capacityRaw)) {
+     const parsed = parseQuantity(value, scale, `capacity.${species}`, path, diagnostics);
+-    if (parsed !== undefined) {
+-      capacity[species] = parsed;
++    if (parsed === undefined) {
++      continue;
++    }
++    if (parsed < 0n) {
++      diagnostics.push(
++        diagnostic(
++          "BW-ID-004",
++          "error",
++          `capacity.${species} cannot be negative`,
++          sourceLocation(path),
++        ),
++      );
++      continue;
+     }
++    capacity[species] = parsed;
+   }
+   const modifiers: Record<string, Record<string, Fixed>> = {};
+   const modifiersRaw = asRecord(record["modifiers"]) ?? {};
+@@ -226,6 +238,21 @@ export function decodeSpecies(
+       mortality[stage] = parsed;
+     }
+   }
++  const space: Record<string, Fixed> = {};
++  const spaceRaw = asRecord(record["space"]) ?? {};
++  for (const [stage, value] of Object.entries(spaceRaw)) {
++    const parsed = parseQuantity(value, scale, `space.${stage}`, path, diagnostics);
++    if (parsed === undefined) {
++      continue;
++    }
++    if (parsed < 0n) {
++      diagnostics.push(
++        diagnostic("BW-ID-004", "error", `space.${stage} cannot be negative`, sourceLocation(path)),
++      );
++      continue;
++    }
++    space[stage] = parsed;
++  }
+   const transitionsRaw = Array.isArray(record["transitions"]) ? record["transitions"] : [];
+   const transitions = transitionsRaw.flatMap((item) => {
+     const row = asRecord(item);
+@@ -265,6 +292,7 @@ export function decodeSpecies(
+     needs,
+     ...(reproduction ? { reproduction } : {}),
+     mortality,
++    space,
+     transitions,
+     predation,
+     location: sourceLocation(path),
+diff --git a/packages/biome-model/src/records.ts b/packages/biome-model/src/records.ts
+index 7a3bb33..61067ce 100644
+--- a/packages/biome-model/src/records.ts
++++ b/packages/biome-model/src/records.ts
+@@ -51,6 +51,7 @@ export type SpeciesRecord = {
+   readonly needs: readonly NeedRecord[];
+   readonly reproduction?: ReproductionRecord;
+   readonly mortality: Readonly<Record<string, Fixed>>;
++  readonly space: Readonly<Record<string, Fixed>>;
+   readonly transitions: readonly StageTransition[];
+   readonly predation: readonly PredationRule[];
+   readonly location: SourceLocation;
+diff --git a/packages/biome-reports/package.json b/packages/biome-reports/package.json
+index 5ba17ad..4c3b3c5 100644
+--- a/packages/biome-reports/package.json
++++ b/packages/biome-reports/package.json
+@@ -17,6 +17,7 @@
+     "build": "tsc -b"
+   },
+   "dependencies": {
++    "@biomeweaver/fixed-point": "0.1.0",
+     "@biomeweaver/flow-explanations": "0.1.0",
+     "@biomeweaver/tick-runtime": "0.1.0"
+   }
+diff --git a/packages/biome-reports/src/index.ts b/packages/biome-reports/src/index.ts
+index c4f0729..8baeed5 100644
+--- a/packages/biome-reports/src/index.ts
++++ b/packages/biome-reports/src/index.ts
+@@ -1,7 +1,9 @@
+ export {
++  crowdingSummary,
+   populationSeries,
+   renderCsvReport,
+   renderJsonReport,
+   renderMarkdownReport,
+   resourceSeries,
++  type CrowdingSummaryRow,
+ } from "./render.js";
+diff --git a/packages/biome-reports/src/render.ts b/packages/biome-reports/src/render.ts
+index fe6ee50..f885822 100644
+--- a/packages/biome-reports/src/render.ts
++++ b/packages/biome-reports/src/render.ts
+@@ -1,3 +1,4 @@
++import { DEFAULT_SCALE, formatFixed, parseFixed, type Fixed } from "@biomeweaver/fixed-point";
+ import type { AttributedFlow } from "@biomeweaver/flow-explanations";
+ import type { TickState } from "@biomeweaver/tick-runtime";
+ 
+@@ -26,6 +27,47 @@ export function renderCsvReport(flows: readonly AttributedFlow[]): string {
+   return [header, ...rows].join("\n") + "\n";
+ }
+ 
++export type CrowdingSummaryRow = {
++  readonly species: string;
++  readonly region: string;
++  readonly lost: string;
++  readonly ticks: number;
++};
++
++export function crowdingSummary(flows: readonly AttributedFlow[]): readonly CrowdingSummaryRow[] {
++  const totals = new Map<
++    string,
++    { species: string; region: string; lost: Fixed; ticks: Set<number> }
++  >();
++  for (const flow of flows) {
++    if (flow.cause !== "habitat-crowding" || flow.kind !== "population-decrease") {
++      continue;
++    }
++    const species = flow.species ?? "";
++    const key = `${species}:${flow.region}`;
++    const entry = totals.get(key) ?? {
++      species,
++      region: flow.region,
++      lost: 0n,
++      ticks: new Set<number>(),
++    };
++    entry.lost += parseFixed(flow.quantity, DEFAULT_SCALE);
++    entry.ticks.add(flow.tick);
++    totals.set(key, entry);
++  }
++  return [...totals.values()]
++    .map((entry) => ({
++      species: entry.species,
++      region: entry.region,
++      lost: formatFixed(entry.lost, DEFAULT_SCALE),
++      ticks: entry.ticks.size,
++    }))
++    .sort(
++      (left, right) =>
++        left.species.localeCompare(right.species) || left.region.localeCompare(right.region),
++    );
++}
++
+ export function renderMarkdownReport(
+   title: string,
+   states: readonly TickState[],
+@@ -56,6 +98,13 @@ export function renderMarkdownReport(
+   )) {
+     lines.push(`- ${cause}: ${count}`);
+   }
++  const crowding = crowdingSummary(flows);
++  if (crowding.length > 0) {
++    lines.push("", "## Crowding", "");
++    for (const row of crowding) {
++      lines.push(`- ${row.species} in ${row.region}: ${row.lost} over ${row.ticks} ticks`);
++    }
++  }
+   lines.push("");
+   return lines.join("\n");
+ }
+diff --git a/packages/biome-reports/tsconfig.json b/packages/biome-reports/tsconfig.json
+index 6bffd35..a6a2e06 100644
+--- a/packages/biome-reports/tsconfig.json
++++ b/packages/biome-reports/tsconfig.json
+@@ -6,5 +6,9 @@
+   },
+   "include": ["src/**/*.ts"],
+   "exclude": ["src/**/*.test.ts"],
+-  "references": [{ "path": "../flow-explanations" }, { "path": "../tick-runtime" }]
++  "references": [
++    { "path": "../fixed-point" },
++    { "path": "../flow-explanations" },
++    { "path": "../tick-runtime" }
++  ]
+ }
+diff --git a/packages/biomeweaver-cli/src/router.ts b/packages/biomeweaver-cli/src/router.ts
+index dc9027c..5479782 100644
+--- a/packages/biomeweaver-cli/src/router.ts
++++ b/packages/biomeweaver-cli/src/router.ts
+@@ -8,7 +8,10 @@ import {
+   renderJsonReport,
+   renderMarkdownReport,
+   resourceSeries,
++  peakPressure,
+   runScenario,
++  seatPressure,
++  seatTable,
+   verifyRun,
+ } from "biomeweaver";
+ import { ExitCode } from "./exit-codes.js";
+@@ -41,6 +44,7 @@ function usage(): string {
+     "  population <run-id> <species>",
+     "  resource <run-id> <resource>",
+     "  explain <run-id> --species <id> --tick <n>",
++    "  pressure [run-id] [--species <id>]",
+     "  snapshot verify <run-id>",
+     "  report <run-id> --format json|csv|markdown",
+     "",
+@@ -105,7 +109,7 @@ export function runCommand(argv: readonly string[]): CommandResult {
+       }
+       return result(
+         ExitCode.OK,
+-        `${description.displayName}\n${description.species.join(", ")}\n${description.scenarios.join(", ")}\n`,
++        `${description.displayName}\n${description.species.join(", ")}\n${description.scenarios.join(", ")}\nseated: ${description.seats.join(", ")}\n`,
+       );
+     }
+     if (head === "species" && rest[0] === "list") {
+@@ -187,6 +191,41 @@ export function runCommand(argv: readonly string[]): CommandResult {
+         rows.map((flow) => `${flow.cause} ${flow.quantity} ${flow.rule}`).join("\n") + "\n",
+       );
+     }
++    if (head === "pressure" && !rest[0]) {
++      const loaded = requireModel(parsed.options);
++      if (loaded.error) {
++        return loaded.error;
++      }
++      const table = seatTable(parsed.options.root);
++      if (parsed.options.format === "json") {
++        return result(ExitCode.OK, `${JSON.stringify(table, null, 2)}\n`);
++      }
++      return result(
++        ExitCode.OK,
++        table
++          .map((row) => `${row.season} ${row.species} ${row.region} ${row.habitat} ${row.seats}`)
++          .join("\n") + "\n",
++      );
++    }
++    if (head === "pressure" && rest[0]) {
++      const speciesFlag = rest.indexOf("--species");
++      const only = speciesFlag >= 0 ? rest[speciesFlag + 1] : undefined;
++      const outcome = cachedRun(parsed.options, rest[0]);
++      const rows = seatPressure(outcome).filter(
++        (row) => only === undefined || row.species === only,
++      );
++      if (parsed.options.format === "json") {
++        return result(ExitCode.OK, `${JSON.stringify(rows, null, 2)}\n`);
++      }
++      const lines = rows.map(
++        (row) =>
++          `${row.tick} ${row.species} ${row.region} ${row.occupied} ${row.seats} ${row.pressure}`,
++      );
++      for (const peak of peakPressure(rows)) {
++        lines.push(`peak ${peak.species} ${peak.region} ${peak.tick} ${peak.pressure}`);
++      }
++      return result(ExitCode.OK, lines.join("\n") + "\n");
++    }
+     if (head === "snapshot" && rest[0] === "verify" && rest[1]) {
+       const verified = verifyRun(parsed.options.root, rest[1]);
+       return result(
+diff --git a/packages/biomeweaver/src/api.ts b/packages/biomeweaver/src/api.ts
+index 4ef6433..1aba3de 100644
+--- a/packages/biomeweaver/src/api.ts
++++ b/packages/biomeweaver/src/api.ts
+@@ -6,7 +6,9 @@ import {
+   renderMarkdownReport,
+   resourceSeries,
+ } from "@biomeweaver/biome-reports";
++import { DEFAULT_SCALE, formatFixed, parseFixed } from "@biomeweaver/fixed-point";
+ import { explainFlows, type AttributedFlow } from "@biomeweaver/flow-explanations";
++import { seasonSeats, seatPlan } from "@biomeweaver/population-engine";
+ import { runDigest, verifyRun, writeRun } from "@biomeweaver/run-store";
+ import { simulate, type TickState } from "@biomeweaver/tick-runtime";
+ import { createHash } from "node:crypto";
+@@ -20,6 +22,102 @@ export type SimulationOutcome = {
+   readonly alerts: readonly string[];
+ };
+ 
++export type SeatPressureRow = {
++  readonly tick: number;
++  readonly season: string;
++  readonly species: string;
++  readonly region: string;
++  readonly seats: string;
++  readonly occupied: string;
++  readonly pressure: string;
++  readonly overSeats: boolean;
++};
++
++export function seatPressure(outcome: SimulationOutcome): readonly SeatPressureRow[] {
++  const scale = outcome.model.precision.scale;
++  const rows: SeatPressureRow[] = [];
++  for (const state of outcome.states) {
++    for (const seat of seatPlan(outcome.model, state.cohorts, state.season)) {
++      rows.push({
++        tick: state.tick,
++        season: state.season,
++        species: seat.species,
++        region: seat.region,
++        seats: formatFixed(seat.seats, scale),
++        occupied: formatFixed(seat.occupied, scale),
++        pressure: formatFixed(seat.pressure, scale),
++        overSeats: seat.occupied > seat.seats,
++      });
++    }
++  }
++  return rows;
++}
++
++export type SeatTableRow = {
++  readonly season: string;
++  readonly species: string;
++  readonly region: string;
++  readonly habitat: string;
++  readonly seats: string;
++};
++
++export function seatTable(root: string): readonly SeatTableRow[] {
++  const compiled = compileCapsule({ root });
++  const model = compiled.model;
++  if (!model) {
++    return [];
++  }
++  const scale = model.precision.scale;
++  const calendar = model.calendars[model.calendarId];
++  const seasons = calendar ? calendar.seasons.map((season) => season.id) : [];
++  const rows: SeatTableRow[] = [];
++  for (const season of seasons) {
++    for (const offer of seasonSeats(model, season)) {
++      rows.push({
++        season,
++        species: offer.species,
++        region: offer.region,
++        habitat: offer.habitat,
++        seats: formatFixed(offer.seats, scale),
++      });
++    }
++  }
++  return rows;
++}
++
++export type PeakPressureRow = {
++  readonly species: string;
++  readonly region: string;
++  readonly tick: number;
++  readonly pressure: string;
++  readonly overSeats: boolean;
++};
++
++export function peakPressure(rows: readonly SeatPressureRow[]): readonly PeakPressureRow[] {
++  const peaks = new Map<string, PeakPressureRow>();
++  for (const row of rows) {
++    const key = `${row.species}:${row.region}`;
++    const seen = peaks.get(key);
++    if (
++      seen &&
++      parseFixed(seen.pressure, DEFAULT_SCALE) >= parseFixed(row.pressure, DEFAULT_SCALE)
++    ) {
++      continue;
++    }
++    peaks.set(key, {
++      species: row.species,
++      region: row.region,
++      tick: row.tick,
++      pressure: row.pressure,
++      overSeats: row.overSeats,
++    });
++  }
++  return [...peaks.values()].sort(
++    (left, right) =>
++      left.species.localeCompare(right.species) || left.region.localeCompare(right.region),
++  );
++}
++
+ export function loadBiome(root: string) {
+   return compileCapsule({ root });
+ }
+@@ -70,6 +168,15 @@ export function describeBiome(root: string) {
+     fingerprint: compiled.model?.fingerprint,
+     species: compiled.model ? Object.keys(compiled.model.species).sort() : [],
+     scenarios: compiled.model ? Object.keys(compiled.model.scenarios).sort() : [],
++    seats: compiled.model
++      ? [
++          ...new Set(
++            Object.values(compiled.model.habitats).flatMap((habitat) =>
++              Object.keys(habitat.capacity),
++            ),
++          ),
++        ].sort()
++      : [],
+   };
+ }
+ 
+diff --git a/packages/biomeweaver/src/index.ts b/packages/biomeweaver/src/index.ts
+index f661b5a..e6fef00 100644
+--- a/packages/biomeweaver/src/index.ts
++++ b/packages/biomeweaver/src/index.ts
+@@ -8,7 +8,13 @@ export {
+   renderMarkdownReport,
+   resourceSeries,
+   runScenario,
++  peakPressure,
++  seatPressure,
++  seatTable,
+   verifyRun,
++  type PeakPressureRow,
++  type SeatPressureRow,
++  type SeatTableRow,
+   type SimulationOutcome,
+ } from "./api.js";
+ export { compileCapsule } from "@biomeweaver/biome-model";
+diff --git a/packages/flow-explanations/src/flow.ts b/packages/flow-explanations/src/flow.ts
+index 57c0a2e..f12d6d5 100644
+--- a/packages/flow-explanations/src/flow.ts
++++ b/packages/flow-explanations/src/flow.ts
+@@ -64,6 +64,30 @@ export function resourceFlow(
+   };
+ }
+ 
++export function conditionFlow(
++  tick: number,
++  species: string,
++  stage: string,
++  region: string,
++  before: Fixed,
++  after: Fixed,
++  scale: bigint,
++  cause: string,
++  rule: string,
++): AttributedFlow {
++  const delta = after - before;
++  return {
++    tick,
++    kind: "condition-change",
++    species,
++    stage,
++    region,
++    quantity: formatFixed(delta < 0n ? -delta : delta, scale),
++    cause,
++    rule,
++  };
++}
++
+ export function explainFlows(
+   flows: readonly AttributedFlow[],
+   species: string,
+diff --git a/packages/flow-explanations/src/index.ts b/packages/flow-explanations/src/index.ts
+index 50e3254..e1983c4 100644
+--- a/packages/flow-explanations/src/index.ts
++++ b/packages/flow-explanations/src/index.ts
+@@ -1,4 +1,5 @@
+ export {
++  conditionFlow,
+   explainFlows,
+   populationFlow,
+   resourceFlow,
+diff --git a/packages/population-engine/src/crowding.ts b/packages/population-engine/src/crowding.ts
+new file mode 100644
+index 0000000..58f40a3
+--- /dev/null
++++ b/packages/population-engine/src/crowding.ts
+@@ -0,0 +1,270 @@
++import { cohortKey, type CompiledBiome, type SpeciesRecord } from "@biomeweaver/biome-model";
++import {
++  assignRemainders,
++  clampNonNegative,
++  div,
++  min,
++  mul,
++  proportionalShares,
++  type Fixed,
++} from "@biomeweaver/fixed-point";
++import type { CohortState } from "./cohorts.js";
++
++export type SeatCount = {
++  readonly species: string;
++  readonly region: string;
++  readonly seats: Fixed;
++  readonly occupied: Fixed;
++  readonly pressure: Fixed;
++};
++
++export type CrowdingRemoval = {
++  readonly species: string;
++  readonly stage: string;
++  readonly region: string;
++  readonly quantity: Fixed;
++  readonly rule: string;
++};
++
++export type ConditionChange = {
++  readonly species: string;
++  readonly stage: string;
++  readonly region: string;
++  readonly before: Fixed;
++  readonly after: Fixed;
++  readonly rule: string;
++};
++
++export type CrowdingResult = {
++  readonly cohorts: readonly CohortState[];
++  readonly removals: readonly CrowdingRemoval[];
++  readonly conditionChanges: readonly ConditionChange[];
++  readonly seats: readonly SeatCount[];
++};
++
++export function crowdingRule(species: string, region: string): string {
++  return `${species}.capacity.${region}`;
++}
++
++export function stageSpace(spec: SpeciesRecord | undefined, stage: string, scale: bigint): Fixed {
++  if (!spec) {
++    return scale;
++  }
++  const authored = spec.space[stage];
++  return authored === undefined ? scale : authored;
++}
++
++export function regionSeats(
++  model: CompiledBiome,
++  species: string,
++  region: string,
++  season: string,
++): Fixed | undefined {
++  const scale = model.precision.scale;
++  let total: Fixed | undefined;
++  for (const habitat of Object.values(model.habitats)) {
++    if (habitat.region !== region) {
++      continue;
++    }
++    const authored = habitat.capacity[species];
++    if (authored === undefined) {
++      continue;
++    }
++    const factor = habitat.modifiers[season]?.[`${species}-capacity`];
++    const seats = factor === undefined ? authored : mul(authored, factor, scale, "half-even");
++    total = (total ?? 0n) + seats;
++  }
++  return total;
++}
++
++export function cohortRoom(
++  model: CompiledBiome,
++  cohort: CohortState,
++  spec: SpeciesRecord | undefined,
++): Fixed {
++  const scale = model.precision.scale;
++  return mul(cohort.count, stageSpace(spec, cohort.stage, scale), scale, "half-even");
++}
++
++export function regionOccupancy(
++  model: CompiledBiome,
++  cohorts: readonly CohortState[],
++  species: string,
++  region: string,
++): Fixed {
++  const spec = model.species[species];
++  let occupied = 0n;
++  for (const cohort of cohorts) {
++    if (cohort.species !== species || cohort.region !== region) {
++      continue;
++    }
++    occupied += cohortRoom(model, cohort, spec);
++  }
++  return occupied;
++}
++
++function crowdedGroups(cohorts: readonly CohortState[]): { species: string; region: string }[] {
++  const seen = new Set<string>();
++  const groups: { species: string; region: string }[] = [];
++  for (const cohort of cohorts) {
++    const key = `${cohort.species}:${cohort.region}`;
++    if (seen.has(key)) {
++      continue;
++    }
++    seen.add(key);
++    groups.push({ species: cohort.species, region: cohort.region });
++  }
++  return groups.sort(
++    (left, right) =>
++      left.species.localeCompare(right.species) || left.region.localeCompare(right.region),
++  );
++}
++
++export function applyCrowding(
++  model: CompiledBiome,
++  cohorts: readonly CohortState[],
++  season: string,
++): CrowdingResult {
++  const scale = model.precision.scale;
++  const next = cohorts.map((cohort) => ({ ...cohort }));
++  const removals: CrowdingRemoval[] = [];
++  const conditionChanges: ConditionChange[] = [];
++  const seatCounts: SeatCount[] = [];
++
++  for (const group of crowdedGroups(next)) {
++    const seats = regionSeats(model, group.species, group.region, season);
++    if (seats === undefined) {
++      continue;
++    }
++    const occupied = regionOccupancy(model, next, group.species, group.region);
++    const pressure = seats === 0n ? 0n : div(occupied, seats, scale, "half-even");
++    seatCounts.push({
++      species: group.species,
++      region: group.region,
++      seats,
++      occupied,
++      pressure,
++    });
++    if (occupied <= seats) {
++      continue;
++    }
++
++    const spec = model.species[group.species];
++    const members = next
++      .map((cohort, index) => ({ cohort, index }))
++      .filter(
++        (entry) =>
++          entry.cohort.species === group.species &&
++          entry.cohort.region === group.region &&
++          cohortRoom(model, entry.cohort, spec) > 0n,
++      )
++      .sort((left, right) =>
++        cohortKey(left.cohort.species, left.cohort.stage, left.cohort.region).localeCompare(
++          cohortKey(right.cohort.species, right.cohort.stage, right.cohort.region),
++        ),
++      );
++    if (members.length === 0) {
++      continue;
++    }
++
++    const weights = members.map((entry) => ({
++      key: cohortKey(entry.cohort.species, entry.cohort.stage, entry.cohort.region),
++      amount: cohortRoom(model, entry.cohort, spec),
++    }));
++    const shares = proportionalShares(weights, occupied - seats);
++    const order = weights.map((weight) => weight.key);
++    const assigned = assignRemainders(shares.assigned, shares.remainder, order);
++    const byKey = new Map(assigned.map((share) => [share.key, share.amount]));
++
++    for (const entry of members) {
++      const key = cohortKey(entry.cohort.species, entry.cohort.stage, entry.cohort.region);
++      const room = byKey.get(key) ?? 0n;
++      const space = stageSpace(spec, entry.cohort.stage, scale);
++      const wanted = space === 0n ? 0n : div(room, space, scale, "half-even");
++      const removed = clampNonNegative(min(wanted, entry.cohort.count));
++      if (removed > 0n) {
++        removals.push({
++          species: entry.cohort.species,
++          stage: entry.cohort.stage,
++          region: entry.cohort.region,
++          quantity: removed,
++          rule: crowdingRule(entry.cohort.species, entry.cohort.region),
++        });
++      }
++      const condition =
++        pressure <= 0n
++          ? entry.cohort.condition
++          : div(entry.cohort.condition, pressure, scale, "half-even");
++      if (condition !== entry.cohort.condition) {
++        conditionChanges.push({
++          species: entry.cohort.species,
++          stage: entry.cohort.stage,
++          region: entry.cohort.region,
++          before: entry.cohort.condition,
++          after: condition,
++          rule: crowdingRule(entry.cohort.species, entry.cohort.region),
++        });
++      }
++      next[entry.index] = {
++        ...entry.cohort,
++        count: clampNonNegative(entry.cohort.count - removed),
++        condition,
++      };
++    }
++  }
++
++  return { cohorts: next, removals, conditionChanges, seats: seatCounts };
++}
++
++export type SeatOffer = {
++  readonly species: string;
++  readonly region: string;
++  readonly habitat: string;
++  readonly seats: Fixed;
++};
++
++export function seasonSeats(model: CompiledBiome, season: string): SeatOffer[] {
++  const scale = model.precision.scale;
++  const offers: SeatOffer[] = [];
++  for (const habitat of Object.values(model.habitats)) {
++    for (const [species, authored] of Object.entries(habitat.capacity)) {
++      const factor = habitat.modifiers[season]?.[`${species}-capacity`];
++      offers.push({
++        species,
++        region: habitat.region,
++        habitat: habitat.id,
++        seats: factor === undefined ? authored : mul(authored, factor, scale, "half-even"),
++      });
++    }
++  }
++  return offers.sort(
++    (left, right) =>
++      left.species.localeCompare(right.species) ||
++      left.region.localeCompare(right.region) ||
++      left.habitat.localeCompare(right.habitat),
++  );
++}
++
++export function seatPlan(
++  model: CompiledBiome,
++  cohorts: readonly CohortState[],
++  season: string,
++): SeatCount[] {
++  const scale = model.precision.scale;
++  const rows: SeatCount[] = [];
++  for (const group of crowdedGroups(cohorts)) {
++    const seats = regionSeats(model, group.species, group.region, season);
++    if (seats === undefined) {
++      continue;
++    }
++    const occupied = regionOccupancy(model, cohorts, group.species, group.region);
++    rows.push({
++      species: group.species,
++      region: group.region,
++      seats,
++      occupied,
++      pressure: seats === 0n ? 0n : div(occupied, seats, scale, "half-even"),
++    });
++  }
++  return rows;
++}
+diff --git a/packages/population-engine/src/index.ts b/packages/population-engine/src/index.ts
+index bc41087..3aced03 100644
+--- a/packages/population-engine/src/index.ts
++++ b/packages/population-engine/src/index.ts
+@@ -7,3 +7,18 @@ export {
+   mergeCohorts,
+   type CohortState,
+ } from "./cohorts.js";
++export {
++  applyCrowding,
++  cohortRoom,
++  crowdingRule,
++  regionOccupancy,
++  regionSeats,
++  seasonSeats,
++  seatPlan,
++  stageSpace,
++  type ConditionChange,
++  type CrowdingRemoval,
++  type CrowdingResult,
++  type SeatCount,
++  type SeatOffer,
++} from "./crowding.js";
+diff --git a/packages/tick-runtime/src/advance.ts b/packages/tick-runtime/src/advance.ts
+index 27159bf..b86ccb3 100644
+--- a/packages/tick-runtime/src/advance.ts
++++ b/packages/tick-runtime/src/advance.ts
+@@ -1,10 +1,16 @@
+ import type { CompiledBiome, ScenarioRecord } from "@biomeweaver/biome-model";
+ import { seasonAtWrapped } from "@biomeweaver/calendar-engine";
+-import { populationFlow, resourceFlow, type AttributedFlow } from "@biomeweaver/flow-explanations";
++import {
++  conditionFlow,
++  populationFlow,
++  resourceFlow,
++  type AttributedFlow,
++} from "@biomeweaver/flow-explanations";
+ import { applyPredation } from "@biomeweaver/predation-engine";
+ import {
+   advanceStage,
+   applyCondition,
++  applyCrowding,
+   applyMortality,
+   applyReproduction,
+   mergeCohorts,
+@@ -250,6 +256,39 @@ export function advanceTick(
+     return advanceStage(cohort, transition.afterTicks, transition.to);
+   });
+ 
++  const crowding = applyCrowding(model, cohorts, season);
++  cohorts = [...crowding.cohorts];
++  for (const removal of crowding.removals) {
++    flows.push(
++      populationFlow(
++        tick,
++        "population-decrease",
++        removal.species,
++        removal.stage,
++        removal.region,
++        removal.quantity,
++        scale,
++        "habitat-crowding",
++        removal.rule,
++      ),
++    );
++  }
++  for (const change of crowding.conditionChanges) {
++    flows.push(
++      conditionFlow(
++        tick,
++        change.species,
++        change.stage,
++        change.region,
++        change.before,
++        change.after,
++        scale,
++        "habitat-crowding",
++        change.rule,
++      ),
++    );
++  }
++
+   cohorts = cohorts.map((cohort) => ({ ...cohort, count: clampNonNegative(cohort.count) }));
+   pools = pools.map((pool) => ({ ...pool, quantity: clampNonNegative(pool.quantity) }));
+ 
+@@ -259,6 +298,11 @@ export function advanceTick(
+       alerts.push(`${cohort.species} in ${cohort.region} reached zero`);
+     }
+   }
++  for (const seat of crowding.seats) {
++    if (seat.occupied > seat.seats) {
++      alerts.push(`${seat.species} in ${seat.region} is over its seats`);
++    }
++  }
+ 
+   return {
+     tick,

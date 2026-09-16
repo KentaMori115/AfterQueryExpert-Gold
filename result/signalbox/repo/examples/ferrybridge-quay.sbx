@@ -1,0 +1,71 @@
+# Ferrybridge Quay: a three platform terminus on a single approach. Everything
+# is worked in both directions, because a terminus is nothing but reversals.
+#
+# The platforms are short and the approach is slow, so the scheme is drawn to a
+# reduced overlap rather than the standard one. The flank search has to reach
+# from the junction into the platforms, which is further than the default.
+
+scheme ferrybridge {
+    area "Ferrybridge Quay"
+    prefix Q
+}
+
+standards {
+    overlap 46
+    reduced_overlap 20
+    approach 90
+    flank 700
+}
+
+node WD boundary
+
+node P301 points throw 7
+node P302 points throw 7
+
+node JA1 plain
+node JA2 plain
+node JP1 plain
+node JP2 plain
+node JP3 plain
+
+node BUF1 buffer
+node BUF2 buffer
+node BUF3 buffer
+
+# the approach
+edge A1 from WD to JA1 length 700 speed 40 mileage "8m 20ch" direction bidirectional
+edge A2 from JA1 to P301.toe length 40 speed 25 direction bidirectional
+edge A3 from P301.normal to JA2 length 300 speed 25 direction bidirectional
+edge A4 from JA2 to P302.toe length 40 speed 15 direction bidirectional
+
+# the platforms
+edge PL1 from P302.normal to JP1 length 200 speed 15 direction bidirectional
+edge PL1B from JP1 to BUF1 length 20 speed 15 direction bidirectional
+edge PL2 from P302.reverse to JP2 length 200 speed 15 direction bidirectional
+edge PL2B from JP2 to BUF2 length 20 speed 15 direction bidirectional
+edge PL3 from P301.reverse to JP3 length 240 speed 15 direction bidirectional
+edge PL3B from JP3 to BUF3 length 20 speed 15 direction bidirectional
+
+section QA1 over A1
+section QA2 over A2
+section QA3 over A3
+section QA4 over A4
+section QP1 over PL1
+section QP1B counted over PL1B
+section QP2 over PL2
+section QP2B counted over PL2B
+section QP3 over PL3
+section QP3B counted over PL3B
+
+# arrivals
+signal Q1 on A1 at 700 facing forward direction down aspects 3
+signal Q3 on A3 at 300 facing forward direction down aspects 2
+
+# departures, at the country end of each platform so that a train standing
+# in the platform is behind its own starting signal
+signal Q2 on PL1 at 0 facing backward direction up aspects 2
+signal Q4 on PL2 at 0 facing backward direction up aspects 2
+signal Q6 on PL3 at 0 facing backward direction up aspects 2
+signal Q8 on A2 at 0 facing backward direction up aspects 2
+
+trap TP31 on PL3 at 20 facing backward

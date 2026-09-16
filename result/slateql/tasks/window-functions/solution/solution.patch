@@ -1,0 +1,1459 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 43213e6..fea5bfc 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,14 @@ versioning; the engine is pre-1.0, so minor versions may change behaviour.
+ 
+ ## Unreleased
+ 
++* Window functions: `OVER (PARTITION BY ... ORDER BY ...)` on any aggregate,
++  plus `ROW_NUMBER`, `RANK` and `DENSE_RANK`. A `Window` plan node computes
++  them between grouping and projection, and the rows it emits keep the order
++  they arrived in.
++* `ROWS` frames on a windowed aggregate, counted from the current row back to
++  a fixed number of rows or to the start of the partition, and `RANGE` frames
++  that reach back by a distance in the ordering value, peers included. Either
++  may end with `EXCLUDE CURRENT ROW`, `EXCLUDE TIES` or `EXCLUDE GROUP`.
+ * Continuous integration on GitHub Actions: the suite runs on Python 3.10
+   through 3.12, ruff lints the tree, and the example scripts and the command
+   line interface are smoke-tested on every push.
+diff --git a/README.md b/README.md
+index dbcdbdc..caff53b 100644
+--- a/README.md
++++ b/README.md
+@@ -72,12 +72,14 @@ scalar and aggregate functions.
+ | Grouping | `GROUP BY` on columns, expressions or ordinals |
+ | Ordering | `ORDER BY` with `ASC`/`DESC` and `NULLS FIRST`/`NULLS LAST` |
+ | Paging | `LIMIT`, `OFFSET` |
++| Windows | `OVER (PARTITION BY ... ORDER BY ... ROWS ...)`, `ROW_NUMBER`, `RANK`, `DENSE_RANK` |
+ | Set ops | `UNION`, `UNION ALL` |
+ | Expressions | arithmetic, `\|\|`, `CASE`, `CAST`, 60+ scalar and 13 aggregate functions |
+ | Metadata | `EXPLAIN`, `EXPLAIN VERBOSE`, `SHOW TABLES`, `SHOW COLUMNS`, `DESCRIBE` |
+ 
+-Not implemented yet: subqueries, common table expressions, window functions,
+-`INTERSECT`/`EXCEPT`, and writes of any kind. The engine is read-only.
++Not implemented yet: subqueries, common table expressions, window frames
++ending after the current row, `INTERSECT`/`EXCEPT`, and writes of any kind.
++The engine is read-only.
+ 
+ ## How a query flows through the engine
+ 
+diff --git a/docs/sql-reference.md b/docs/sql-reference.md
+index 983bb10..143c1a8 100644
+--- a/docs/sql-reference.md
++++ b/docs/sql-reference.md
+@@ -177,6 +177,78 @@ order.
+ 
+ `DISTINCT` is accepted by every aggregate except `ANY_VALUE`.
+ 
++## Window functions
++
++```sql
++SELECT name,
++       ROW_NUMBER() OVER (PARTITION BY city ORDER BY signup_date) AS nth,
++       SUM(total)   OVER (PARTITION BY city)                      AS city_total
++FROM customers
++```
++
++An `OVER` clause turns a call into a window function: the value is computed
++over a set of rows instead of over one row, and the query keeps every input
++row. `PARTITION BY` splits the input the way `GROUP BY` does, including its
++rule that two nulls are the same key; without it the whole input is one
++partition. The `ORDER BY` inside `OVER` accepts the same direction and null
++placement syntax as the statement's own, and defaults null placement from
++`null_ordering` in the same way.
++
++`ROW_NUMBER`, `RANK` and `DENSE_RANK` take no arguments and are only usable
++with `OVER`. Rows whose ordering values are all equal are peers: `ROW_NUMBER`
++numbers them anyway, `RANK` gives each the position its group started at, and
++`DENSE_RANK` counts groups. Any aggregate may take an `OVER` clause too, in
++which case it folds the whole partition when there is no `ORDER BY`, and
++otherwise every row through the end of the current peer group.
++
++A `ROWS` frame narrows what an aggregate folds, counting rows rather than
++peers:
++
++```sql
++SUM(total) OVER (ORDER BY day ROWS 6 PRECEDING)
++SUM(total) OVER (ORDER BY day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
++SUM(total) OVER (ORDER BY day ROWS UNBOUNDED PRECEDING)
++```
++
++Both spellings mean the same thing, the frame always ends at the current row,
++and `UNBOUNDED PRECEDING` reaches back to the start of the partition. Because
++the frame counts rows, two rows with equal ordering values sit at different
++positions and read different windows, which is the opposite of the peer rule
++above. A frame needs an ordering to count along, and a ranking function cannot
++take one.
++
++A `RANGE` frame measures its reach in the ordering value instead of in rows:
++
++```sql
++SUM(total) OVER (ORDER BY day RANGE 6 PRECEDING)
++SUM(total) OVER (ORDER BY day RANGE BETWEEN 6 PRECEDING AND CURRENT ROW)
++```
++
++Every row that sorts no later than the current one and whose `day` lies within
++6 of it is folded, and because peers sort together the frame runs through the
++current row's peers as well. The distance follows the ordering direction, so
++under `DESC` the frame reaches rows with larger values. A `RANGE` frame with a
++distance needs exactly one numeric ordering key, and a row whose ordering value
++is `NULL` has no distance to anything, so it folds its peers alone.
++`RANGE UNBOUNDED PRECEDING` is the default fold spelled out.
++
++A frame may end with an exclusion:
++
++```sql
++SUM(total) OVER (ORDER BY day ROWS 6 PRECEDING EXCLUDE CURRENT ROW)
++SUM(total) OVER (ORDER BY day RANGE 6 PRECEDING EXCLUDE TIES)
++SUM(total) OVER (ORDER BY day RANGE UNBOUNDED PRECEDING EXCLUDE GROUP)
++```
++
++`EXCLUDE CURRENT ROW` drops the current row from its frame, `EXCLUDE TIES`
++drops the current row's peers but keeps the row itself, and `EXCLUDE GROUP`
++drops both. `EXCLUDE NO OTHERS` spells out the default and drops nothing. A
++frame emptied this way folds no rows at all, so `COUNT` reads 0 and every
++other aggregate reads `NULL`.
++
++`DISTINCT` cannot be combined with `OVER`, and a window may only appear in the
++select list and in `ORDER BY`, never in `WHERE`, `GROUP BY` or `HAVING`.
++
+ ## Scalar functions
+ 
+ **Strings** `upper`/`ucase`, `lower`/`lcase`, `length`/`char_length`, `trim`,
+@@ -217,7 +289,8 @@ DESCRIBE customers            -- synonym for SHOW COLUMNS
+ 
+ ## Not implemented
+ 
+-Subqueries (scalar, `IN`, `EXISTS`), common table expressions, window functions
+-and `OVER`, `INTERSECT` and `EXCEPT`, `GROUPING SETS` / `ROLLUP` / `CUBE`,
++Subqueries (scalar, `IN`, `EXISTS`), common table expressions,
++frames ending after the current row, named `WINDOW` definitions, `INTERSECT`
++and `EXCEPT`, `GROUPING SETS` / `ROLLUP` / `CUBE`,
+ `INSERT` / `UPDATE` / `DELETE` / `CREATE`, transactions, and prepared statement
+ parameters.
+diff --git a/slateql/analyze/binder.py b/slateql/analyze/binder.py
+index 74cef4f..40bc7ae 100644
+--- a/slateql/analyze/binder.py
++++ b/slateql/analyze/binder.py
+@@ -36,6 +36,7 @@ from ..plan.logical import (
+     SetOpKind,
+     Sort,
+     SortItem,
++    Window,
+ )
+ from ..sql import ast_nodes as A
+ from ..storage.catalog import Catalog
+@@ -43,6 +44,7 @@ from ..types.coercion import unify
+ from ..types.schema import Field, Schema
+ from .aggregates import AggregateRewriter
+ from .scope import Scope
++from .windows import WindowRewriter
+ from .typecheck import ExpressionBinder, check_predicate, derive_name
+ from .validate import validate_plan
+ 
+@@ -196,6 +198,8 @@ class Binder:
+             scope,
+             self.registry,
+             allow_aggregates=aggregating,
++            allow_windows=True,
++            nulls_first_default=self.config.nulls_first_default,
+             clause="SELECT",
+         )
+ 
+@@ -238,6 +242,8 @@ class Binder:
+             if having is not None:
+                 plan = Filter(input=plan, predicate=having)
+ 
++        plan = self._apply_windows(plan, projections, sort_specs)
++
+         plan = self._apply_projection_and_sort(
+             plan,
+             projections,
+@@ -246,6 +252,31 @@ class Binder:
+         )
+         return self._apply_limit(plan, statement.limit, statement.offset)
+ 
++    def _apply_windows(
++        self,
++        plan: LogicalPlan,
++        projections: list[NamedExpr],
++        sort_specs: Sequence["_SortSpec"],
++    ) -> LogicalPlan:
++        """Lift window calls out of the select list and the sort keys.
++
++        The node lands above whatever grouping and filtering the query asked
++        for, because a window reads the rows the query has already settled on,
++        and below the projection, because the select list consumes its output.
++        """
++
++        rewriter = WindowRewriter(plan.schema.names)
++        for index, item in enumerate(projections):
++            rewritten = rewriter.rewrite(item.expression)
++            if rewritten is not item.expression:
++                projections[index] = NamedExpr(expression=rewritten, name=item.name)
++        for spec in sort_specs:
++            spec.expression = rewriter.rewrite(spec.expression)
++        functions = rewriter.functions
++        if not functions:
++            return plan
++        return Window(input=plan, functions=functions)
++
+     def _expand_projections(
+         self, statement: A.SelectStatement, scope: Scope
+     ) -> list[tuple[Optional[str], A.Expression]]:
+@@ -379,6 +410,8 @@ class Binder:
+             scope,
+             self.registry,
+             allow_aggregates=rewriter is not None,
++            allow_windows=True,
++            nulls_first_default=self.config.nulls_first_default,
+             clause="ORDER BY",
+         )
+         bound = binder.bind(node)
+diff --git a/slateql/analyze/typecheck.py b/slateql/analyze/typecheck.py
+index daa19c9..255eb2d 100644
+--- a/slateql/analyze/typecheck.py
++++ b/slateql/analyze/typecheck.py
+@@ -11,6 +11,7 @@ from typing import Optional, Sequence
+ 
+ from ..errors import BindingError, TypeMismatchError
+ from ..functions.registry import FunctionRegistry
++from ..functions.window_defs import is_ranking, ranking_return_type
+ from ..plan import expressions as X
+ from ..sql import ast_nodes as A
+ from ..types.coercion import (
+@@ -48,11 +49,15 @@ class ExpressionBinder:
+         registry: FunctionRegistry,
+         *,
+         allow_aggregates: bool = False,
++        allow_windows: bool = False,
++        nulls_first_default: bool = False,
+         clause: str = "expression",
+     ) -> None:
+         self.scope = scope
+         self.registry = registry
+         self.allow_aggregates = allow_aggregates
++        self.allow_windows = allow_windows
++        self.nulls_first_default = nulls_first_default
+         self.clause = clause
+ 
+     def bind(self, node: A.Expression) -> X.Expr:
+@@ -68,6 +73,8 @@ class ExpressionBinder:
+             return self._bind_binary(node)
+         if isinstance(node, A.FunctionCall):
+             return self._bind_call(node)
++        if isinstance(node, A.WindowFunction):
++            return self._bind_window(node)
+         if isinstance(node, A.Cast):
+             return self._bind_cast(node)
+         if isinstance(node, A.CaseExpr):
+@@ -176,6 +183,83 @@ class ExpressionBinder:
+             star=node.star,
+         )
+ 
++    def _bind_window(self, node: A.WindowFunction) -> X.Expr:
++        """Bind an ``OVER`` call site into a :class:`~slateql.plan.expressions.WindowCall`.
++
++        The partition and ordering expressions are bound here rather than left
++        on the side, so the resulting node carries every column it reads.
++        """
++
++        name = node.name.lower()
++        if not self.allow_windows:
++            raise BindingError(
++                f"window function {name}() is not allowed in {self.clause}",
++                hint="OVER may appear in SELECT and ORDER BY",
++            )
++        args = [self.bind(arg) for arg in node.args]
++        for arg in args:
++            if X.contains_window(arg):
++                raise BindingError("window functions cannot be nested")
++        frame = None
++        if node.spec.frame is not None:
++            if is_ranking(name):
++                raise BindingError(
++                    f"{name}() cannot take a frame",
++                    hint="a frame narrows what an aggregate folds",
++                )
++            if not node.spec.order_by:
++                raise BindingError(
++                    f"{name}() over a frame needs an ordering",
++                    hint="add ORDER BY inside the OVER clause",
++                )
++            frame = X.WindowFrame(
++                preceding=node.spec.frame.preceding,
++                by_value=node.spec.frame.by_value,
++                exclude=node.spec.frame.exclude,
++            )
++        order_by = tuple(
++            X.WindowOrder(
++                expression=self.bind(item.expression),
++                descending=item.descending,
++                nulls_first=(
++                    item.nulls_first
++                    if item.nulls_first is not None
++                    else self.nulls_first_default
++                ),
++            )
++            for item in node.spec.order_by
++        )
++        if frame is not None and frame.by_value and frame.preceding is not None:
++            # A distance in the ordering value only means something against
++            # one numeric key; two keys or a string have no such distance.
++            if len(order_by) != 1 or not order_by[0].expression.dtype.is_numeric:
++                raise BindingError(
++                    f"{name}() over a RANGE frame needs a single numeric ordering",
++                    hint="RANGE measures its reach in the ordering value",
++                )
++        if is_ranking(name):
++            dtype = ranking_return_type(name, len(args), star=node.star)
++        else:
++            if self.registry.has(name) and not self.registry.is_aggregate(name):
++                raise BindingError(
++                    f"{name}() cannot be used with OVER",
++                    hint="OVER applies to aggregates and to the ranking functions",
++                )
++            definition = self.registry.aggregate(name)
++            if node.star and not definition.accepts_star:
++                raise BindingError(f"{name}(*) is not supported")
++            name = definition.name
++            dtype = definition.return_type([arg.dtype for arg in args])
++        return X.WindowCall(
++            name=name,
++            dtype=dtype,
++            args=tuple(args),
++            partition_by=tuple(self.bind(item) for item in node.spec.partition_by),
++            order_by=order_by,
++            frame=frame,
++            star=node.star,
++        )
++
+     def _bind_cast(self, node: A.Cast) -> X.Expr:
+         operand = self.bind(node.operand)
+         target = parse_type_name(node.type_name)
+@@ -291,6 +375,8 @@ def derive_name(expression: X.Expr, fallback: str = "expr") -> str:
+         return expression.name
+     if isinstance(expression, X.AggregateCall):
+         return expression.output_name()
++    if isinstance(expression, X.WindowCall):
++        return expression.output_name()
+     if isinstance(expression, X.ScalarFunction):
+         return expression.name.lower()
+     if isinstance(expression, X.CastExpr):
+diff --git a/slateql/analyze/validate.py b/slateql/analyze/validate.py
+index 59f4e2c..966c41c 100644
+--- a/slateql/analyze/validate.py
++++ b/slateql/analyze/validate.py
+@@ -10,7 +10,7 @@ from __future__ import annotations
+ from typing import Iterable
+ 
+ from ..errors import PlanningError
+-from ..plan.expressions import AggregateCall, Column, Expr
++from ..plan.expressions import AggregateCall, Column, Expr, WindowCall
+ from ..plan.logical import (
+     Aggregate,
+     Filter,
+@@ -19,6 +19,7 @@ from ..plan.logical import (
+     Project,
+     SetOp,
+     Sort,
++    Window,
+ )
+ from ..types.datatypes import TypeKind
+ 
+@@ -41,10 +42,12 @@ def _validate_node(node: LogicalPlan) -> None:
+                 f"Filter predicate must be boolean, got {dtype}"
+             )
+         _reject_aggregates(node.predicate, "Filter")
++        _reject_windows(node.predicate, "Filter")
+         validate_expression_columns(node.predicate, node.input.schema, "Filter")
+     elif isinstance(node, Project):
+         for item in node.projections:
+             _reject_aggregates(item.expression, "Project")
++            _reject_windows(item.expression, "Project")
+             validate_expression_columns(item.expression, node.input.schema, "Project")
+     elif isinstance(node, Aggregate):
+         for item in node.group_by:
+@@ -57,9 +60,18 @@ def _validate_node(node: LogicalPlan) -> None:
+                 raise PlanningError("Aggregate outputs must be aggregate calls")
+             for arg in item.expression.args:
+                 validate_expression_columns(arg, node.input.schema, "Aggregate")
++    elif isinstance(node, Window):
++        for item in node.functions:
++            if not isinstance(item.expression, WindowCall):
++                raise PlanningError("Window outputs must be window calls")
++            _reject_aggregates(item.expression, "Window")
++            validate_expression_columns(
++                item.expression, node.input.schema, "Window"
++            )
+     elif isinstance(node, Sort):
+         for key in node.keys:
+             _reject_aggregates(key.expression, "Sort")
++            _reject_windows(key.expression, "Sort")
+             validate_expression_columns(key.expression, node.input.schema, "Sort")
+     elif isinstance(node, Join):
+         if node.condition is not None:
+@@ -77,6 +89,14 @@ def _reject_aggregates(expression: Expr, context: str) -> None:
+             )
+ 
+ 
++def _reject_windows(expression: Expr, context: str) -> None:
++    for inner in expression.walk():
++        if isinstance(inner, WindowCall):
++            raise PlanningError(
++                f"window call {inner.to_sql()} appeared in a {context} node"
++            )
++
++
+ def validate_expression_columns(expression: Expr, schema, context: str) -> None:
+     """Assert every column referenced by ``expression`` exists in ``schema``."""
+ 
+diff --git a/slateql/analyze/windows.py b/slateql/analyze/windows.py
+new file mode 100644
+index 0000000..fb3ed28
+--- /dev/null
++++ b/slateql/analyze/windows.py
+@@ -0,0 +1,59 @@
++"""Window extraction and rewriting.
++
++Window functions are computed after grouping and filtering but before the
++select list is projected, so the binder lifts every ``OVER`` call out of the
++expression that contains it and leaves a reference to the column a
++:class:`~slateql.plan.logical.Window` node produces.  That is the shape the
++aggregate rewriter already uses, for the same reason: whatever computes a
++value has to sit below whatever reads it.
++"""
++
++from __future__ import annotations
++
++from typing import Iterable
++
++from ..plan.expressions import Column, Expr, WindowCall
++from ..plan.logical import NamedExpr
++
++__all__ = ["WindowRewriter"]
++
++
++class WindowRewriter:
++    """Maps window calls onto the columns a Window node appends."""
++
++    def __init__(self, taken: Iterable[str] = ()) -> None:
++        self._functions: list[NamedExpr] = []
++        self._lookup: dict[WindowCall, Column] = {}
++        self._used_names: set[str] = set(taken)
++
++    @property
++    def functions(self) -> tuple[NamedExpr, ...]:
++        """The calls collected so far, in first-appearance order."""
++
++        return tuple(self._functions)
++
++    def rewrite(self, expression: Expr) -> Expr:
++        """Replace every window call inside ``expression`` with a reference."""
++
++        return expression.transform(self._substitute)
++
++    def _substitute(self, node: Expr) -> Expr:
++        if not isinstance(node, WindowCall):
++            return node
++        existing = self._lookup.get(node)
++        if existing is not None:
++            return existing
++        unique = self._unique_name(node.output_name())
++        reference = Column(name=unique, dtype=node.dtype)
++        self._functions.append(NamedExpr(expression=node, name=unique))
++        self._lookup[node] = reference
++        return reference
++
++    def _unique_name(self, name: str) -> str:
++        candidate = name
++        suffix = 2
++        while candidate in self._used_names:
++            candidate = f"{name}#{suffix}"
++            suffix += 1
++        self._used_names.add(candidate)
++        return candidate
+diff --git a/slateql/execution/operators/__init__.py b/slateql/execution/operators/__init__.py
+index 01a8042..8375f3b 100644
+--- a/slateql/execution/operators/__init__.py
++++ b/slateql/execution/operators/__init__.py
+@@ -12,6 +12,7 @@ from .scan import EmptyScan, SingleRowScan, TableScan
+ from .set_ops import UnionOperator
+ from .sort import SortOperator
+ from .values import ValuesOperator
++from .window import WindowOperator
+ 
+ __all__ = [
+     "AggregateOperator",
+@@ -31,4 +32,5 @@ __all__ = [
+     "UnionOperator",
+     "SortOperator",
+     "ValuesOperator",
++    "WindowOperator",
+ ]
+diff --git a/slateql/execution/operators/window.py b/slateql/execution/operators/window.py
+new file mode 100644
+index 0000000..0f2f947
+--- /dev/null
++++ b/slateql/execution/operators/window.py
+@@ -0,0 +1,313 @@
++"""Window function evaluation."""
++
++from __future__ import annotations
++
++from typing import Any, Iterator, Sequence
++
++from ...functions.window_defs import is_ranking, ranking_values
++from ...plan.expressions import AggregateCall, WindowCall
++from ...plan.logical import NamedExpr
++from ...types.schema import Field, Schema
++from ...util.ordering import SortKey, make_row_key
++from ..aggregators import GroupState, build_specs
++from ..batch import RecordBatch, batches_from_rows
++from ..context import ExecutionContext
++from ..evaluator import ExpressionEvaluator
++from ..keys import row_key
++from .base import Operator, UnaryOperator
++
++__all__ = ["WindowOperator"]
++
++
++class WindowOperator(UnaryOperator):
++    """Appends one column per window call to every input row.
++
++    Rows leave this operator in the order they arrived, whatever order the
++    windows themselves needed: partitioning and sorting happen over positions,
++    not over the rows, so a query without ORDER BY still reads its table the
++    way the rest of the engine promises.
++    """
++
++    def __init__(self, child: Operator, functions: Sequence[NamedExpr]) -> None:
++        super().__init__(child)
++        self._functions = tuple(functions)
++        self._schema = child.schema.merge(
++            Schema(
++                Field(name=item.name, dtype=item.expression.dtype)
++                for item in self._functions
++            )
++        )
++
++    @property
++    def schema(self) -> Schema:
++        return self._schema
++
++    def describe(self) -> str:
++        inner = ", ".join(item.describe() for item in self._functions)
++        return f"Window [{inner}]"
++
++    def execute(self, context: ExecutionContext) -> Iterator[RecordBatch]:
++        rows: list[list[Any]] = []
++        for batch in self.child.execute(context):
++            rows.extend(list(row) for row in batch.rows)
++        if not rows:
++            return
++        evaluator = ExpressionEvaluator(
++            context.registry, strict_casts=context.strict_casts
++        )
++        input_schema = self.child.schema
++        for item in self._functions:
++            values = self._compute(item, rows, input_schema, evaluator, context)
++            for row, value in zip(rows, values):
++                row.append(value)
++        for batch in batches_from_rows(self._schema, rows, context.batch_size):
++            context.metrics.record_batch(len(batch))
++            yield batch
++
++    # -- one window ------------------------------------------------------
++
++    def _compute(
++        self,
++        item: NamedExpr,
++        rows: Sequence[Sequence[Any]],
++        schema: Schema,
++        evaluator: ExpressionEvaluator,
++        context: ExecutionContext,
++    ) -> list[Any]:
++        call = item.expression
++        assert isinstance(call, WindowCall)
++        values: list[Any] = [None] * len(rows)
++        for positions in self._partitions(call, rows, schema, evaluator):
++            ordered = self._order(call, positions, rows, schema, evaluator)
++            starts = self._peer_starts(call, ordered, rows, schema, evaluator)
++            if is_ranking(call.name):
++                computed: Sequence[Any] = ranking_values(
++                    call.name, starts, len(ordered)
++                )
++            elif call.frame is not None:
++                computed = self._framed(
++                    call, ordered, starts, rows, schema, context
++                )
++            else:
++                computed = self._running(
++                    call, ordered, starts, rows, schema, context
++                )
++            for position, value in zip(ordered, computed):
++                values[position] = value
++        return values
++
++    def _partitions(
++        self,
++        call: WindowCall,
++        rows: Sequence[Sequence[Any]],
++        schema: Schema,
++        evaluator: ExpressionEvaluator,
++    ) -> list[list[int]]:
++        """Row positions grouped by partition key, NULLs grouped together."""
++
++        if not call.partition_by:
++            return [list(range(len(rows)))]
++        functions = evaluator.compile_all(list(call.partition_by), schema)
++        groups: dict[tuple, list[int]] = {}
++        order: list[tuple] = []
++        for position, row in enumerate(rows):
++            key = row_key([function(row) for function in functions])
++            bucket = groups.get(key)
++            if bucket is None:
++                bucket = []
++                groups[key] = bucket
++                order.append(key)
++            bucket.append(position)
++        return [groups[key] for key in order]
++
++    def _order(
++        self,
++        call: WindowCall,
++        positions: Sequence[int],
++        rows: Sequence[Sequence[Any]],
++        schema: Schema,
++        evaluator: ExpressionEvaluator,
++    ) -> list[int]:
++        if not call.order_by:
++            return list(positions)
++        sort_keys = [
++            SortKey(
++                getter=evaluator.compile(entry.expression, schema),
++                descending=entry.descending,
++                nulls_first=entry.nulls_first,
++            )
++            for entry in call.order_by
++        ]
++        key = make_row_key(sort_keys)
++        return sorted(positions, key=lambda position: key(rows[position]))
++
++    def _peer_starts(
++        self,
++        call: WindowCall,
++        ordered: Sequence[int],
++        rows: Sequence[Sequence[Any]],
++        schema: Schema,
++        evaluator: ExpressionEvaluator,
++    ) -> list[int]:
++        """Where each run of rows with equal ordering values begins."""
++
++        if not ordered:
++            return []
++        if not call.order_by:
++            return [0]
++        functions = evaluator.compile_all(
++            [entry.expression for entry in call.order_by], schema
++        )
++        starts = [0]
++        previous = row_key([f(rows[ordered[0]]) for f in functions])
++        for index in range(1, len(ordered)):
++            current = row_key([f(rows[ordered[index]]) for f in functions])
++            if current != previous:
++                starts.append(index)
++                previous = current
++        return starts
++
++    def _framed(
++        self,
++        call: WindowCall,
++        ordered: Sequence[int],
++        starts: Sequence[int],
++        rows: Sequence[Sequence[Any]],
++        schema: Schema,
++        context: ExecutionContext,
++    ) -> list[Any]:
++        """Fold an aggregate over an explicit frame, row by row.
++
++        A ``ROWS`` frame is counted in rows, so two rows with equal ordering
++        values sit at different positions and read different windows.  A
++        ``RANGE`` frame with a distance is measured on the single ordering
++        value: a row belongs when it sorts no later than the current row and
++        its value lies within the distance, whichever direction the ordering
++        runs; peers sort together, so the frame runs to the end of the current
++        run, and a row with no ordering value has no distance to anything but
++        its peers.  ``RANGE UNBOUNDED PRECEDING`` is the default fold spelled
++        out.  An ``EXCLUDE`` tail then removes the current row, its peers, or
++        both from whatever the frame covered; an emptied frame folds no rows.
++        """
++
++        spec = self._spec_for(call, schema, context)
++        frame = call.frame
++        reach = frame.preceding
++        run_end = self._run_ends(ordered, starts)
++        run_start = self._run_starts(ordered, starts)
++        keys: list[Any] = []
++        if frame.by_value and reach is not None:
++            entry = call.order_by[0]
++            evaluator = ExpressionEvaluator(
++                context.registry, strict_casts=context.strict_casts
++            )
++            getter = evaluator.compile(entry.expression, schema)
++            keys = [getter(rows[position]) for position in ordered]
++        out: list[Any] = []
++        for position in range(len(ordered)):
++            if not frame.by_value:
++                first = 0 if reach is None else max(0, position - reach)
++                last = position
++            else:
++                last = run_end[position]
++                if reach is None:
++                    first = 0
++                else:
++                    first = position
++                    current = keys[position]
++                    if current is not None:
++                        while first > 0 and keys[first - 1] is not None:
++                            gap = current - keys[first - 1]
++                            if call.order_by[0].descending:
++                                gap = -gap
++                            if gap > reach:
++                                break
++                            first -= 1
++                    else:
++                        first = run_start[position]
++            skipped: set[int] = set()
++            if frame.exclude == "current row":
++                skipped = {position}
++            elif frame.exclude == "group":
++                skipped = set(range(run_start[position], run_end[position] + 1))
++            elif frame.exclude == "ties":
++                skipped = set(range(run_start[position], run_end[position] + 1))
++                skipped.discard(position)
++            state = GroupState([spec], ())
++            for index in range(first, last + 1):
++                if index not in skipped:
++                    state.update([spec], rows[ordered[index]])
++            out.append(state.results()[0])
++        return out
++
++    @staticmethod
++    def _run_starts(ordered: Sequence[int], starts: Sequence[int]) -> list[int]:
++        """For every position, where its run of peers begins."""
++
++        out = [0] * len(ordered)
++        for begin in starts:
++            for index in range(begin, len(ordered)):
++                out[index] = begin
++        return out
++
++    @staticmethod
++    def _run_ends(ordered: Sequence[int], starts: Sequence[int]) -> list[int]:
++        """For every position, where its run of peers ends."""
++
++        out = [len(ordered) - 1] * len(ordered)
++        boundaries = list(starts) + [len(ordered)]
++        for group in range(len(starts)):
++            for index in range(boundaries[group], boundaries[group + 1]):
++                out[index] = boundaries[group + 1] - 1
++        return out
++
++    def _spec_for(
++        self, call: WindowCall, schema: Schema, context: ExecutionContext
++    ) -> Any:
++        """The aggregate machinery for one window call, reused per fold."""
++
++        return build_specs(
++            [
++                (
++                    call.name,
++                    AggregateCall(
++                        name=call.name,
++                        args=call.args,
++                        dtype=call.dtype,
++                        star=call.star,
++                    ),
++                )
++            ],
++            schema,
++            context.registry,
++            strict_casts=context.strict_casts,
++        )[0]
++
++    def _running(
++        self,
++        call: WindowCall,
++        ordered: Sequence[int],
++        starts: Sequence[int],
++        rows: Sequence[Sequence[Any]],
++        schema: Schema,
++        context: ExecutionContext,
++    ) -> list[Any]:
++        """Fold an aggregate over the partition, one peer group at a time.
++
++        Without ORDER BY the whole partition is one group, so every row sees
++        the same total.  With ORDER BY the fold stops at the end of the current
++        peer group, which is why tied rows still share a value.
++        """
++
++        spec = self._spec_for(call, schema, context)
++        state = GroupState([spec], ())
++        out: list[Any] = [None] * len(ordered)
++        boundaries = list(starts) + [len(ordered)]
++        for group in range(len(starts)):
++            begin, end = boundaries[group], boundaries[group + 1]
++            for index in range(begin, end):
++                state.update([spec], rows[ordered[index]])
++            value = state.results()[0]
++            for index in range(begin, end):
++                out[index] = value
++        return out
+diff --git a/slateql/execution/planner.py b/slateql/execution/planner.py
+index 712508e..1bb0b02 100644
+--- a/slateql/execution/planner.py
++++ b/slateql/execution/planner.py
+@@ -24,6 +24,7 @@ from ..plan.logical import (
+     Scan,
+     SetOp,
+     Sort,
++    Window,
+ )
+ from ..sql.ast_nodes import JoinKind
+ from ..storage.catalog import Catalog
+@@ -42,6 +43,7 @@ from .operators import (
+     SortOperator,
+     TableScan,
+     UnionOperator,
++    WindowOperator,
+ )
+ 
+ __all__ = ["PhysicalPlanner", "plan_to_operator", "extract_equi_keys"]
+@@ -71,6 +73,8 @@ class PhysicalPlanner:
+             return AggregateOperator(
+                 self.build(plan.input), plan.group_by, plan.aggregates
+             )
++        if isinstance(plan, Window):
++            return WindowOperator(self.build(plan.input), plan.functions)
+         if isinstance(plan, Sort):
+             return SortOperator(self.build(plan.input), plan.keys)
+         if isinstance(plan, Limit):
+diff --git a/slateql/functions/window_defs.py b/slateql/functions/window_defs.py
+new file mode 100644
+index 0000000..7876a5c
+--- /dev/null
++++ b/slateql/functions/window_defs.py
+@@ -0,0 +1,58 @@
++"""Ranking window functions.
++
++A ranking function has no meaning for a single row, so it is not part of the
++registry the binder consults for ordinary call sites: ``ROW_NUMBER()`` without
++``OVER`` stays an unknown function.  Everything else that may carry an ``OVER``
++clause is an ordinary aggregate, folded over the rows of a window instead of
++over the rows of a group.
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++from ..errors import BindingError
++from ..types.datatypes import INTEGER, DataType
++
++__all__ = [
++    "RANKING_FUNCTIONS",
++    "is_ranking",
++    "ranking_return_type",
++    "ranking_values",
++]
++
++RANKING_FUNCTIONS = ("row_number", "rank", "dense_rank")
++
++
++def is_ranking(name: str) -> bool:
++    """Whether ``name`` is one of the ranking functions."""
++
++    return name.lower() in RANKING_FUNCTIONS
++
++
++def ranking_return_type(name: str, argument_count: int, *, star: bool) -> DataType:
++    """Type of a ranking call, rejecting arguments it cannot take."""
++
++    if star or argument_count:
++        raise BindingError(f"{name}() takes no arguments")
++    return INTEGER.as_nullable(False)
++
++
++def ranking_values(name: str, peer_starts: Sequence[int], size: int) -> list[int]:
++    """Rank of every row of one partition, in window order.
++
++    ``peer_starts`` holds the position where each peer group begins.  Peers are
++    what separates the three functions: ROW_NUMBER ignores them, RANK hands
++    every peer the position its group started at, DENSE_RANK counts groups.
++    """
++
++    key = name.lower()
++    if key == "row_number":
++        return list(range(1, size + 1))
++    values = [0] * size
++    for group, start in enumerate(peer_starts):
++        end = peer_starts[group + 1] if group + 1 < len(peer_starts) else size
++        value = group + 1 if key == "dense_rank" else start + 1
++        for position in range(start, end):
++            values[position] = value
++    return values
+diff --git a/slateql/plan/expressions.py b/slateql/plan/expressions.py
+index 2f4cb37..a5c6630 100644
+--- a/slateql/plan/expressions.py
++++ b/slateql/plan/expressions.py
+@@ -28,6 +28,9 @@ __all__ = [
+     "BinaryExpr",
+     "ScalarFunction",
+     "AggregateCall",
++    "WindowCall",
++    "WindowFrame",
++    "WindowOrder",
+     "CastExpr",
+     "CaseExpr",
+     "CaseBranch",
+@@ -39,6 +42,8 @@ __all__ = [
+     "columns_of",
+     "aggregates_of",
+     "contains_aggregate",
++    "windows_of",
++    "contains_window",
+     "conjuncts",
+     "combine_and",
+     "replace_columns",
+@@ -273,6 +278,121 @@ class AggregateCall(Expr):
+         return f"{self.name.upper()}({prefix}{inner})"
+ 
+ 
++@dataclass(frozen=True)
++class WindowOrder:
++    """One ORDER BY entry of an OVER clause, with its null placement resolved."""
++
++    expression: Expr
++    descending: bool = False
++    nulls_first: bool = False
++
++    def to_sql(self) -> str:
++        text = self.expression.to_sql()
++        text += " DESC" if self.descending else " ASC"
++        return text + (" NULLS FIRST" if self.nulls_first else " NULLS LAST")
++
++
++@dataclass(frozen=True)
++class WindowFrame:
++    """A ``ROWS`` or ``RANGE`` frame ending at the current row.
++
++    ``preceding`` is how far back the frame reaches, ``None`` reaching the
++    start of the partition.  A ``ROWS`` frame counts rows, so a call carrying
++    one is folded row by row rather than peer group by peer group.  A
++    ``RANGE`` frame (``by_value``) measures the reach in the ordering value
++    and keeps peers together.
++    """
++
++    preceding: Optional[float] = None
++    by_value: bool = False
++    exclude: Optional[str] = None
++
++    def to_sql(self) -> str:
++        start = "UNBOUNDED" if self.preceding is None else str(self.preceding)
++        unit = "RANGE" if self.by_value else "ROWS"
++        text = f"{unit} BETWEEN {start} PRECEDING AND CURRENT ROW"
++        if self.exclude is not None:
++            text += f" EXCLUDE {self.exclude.upper()}"
++        return text
++
++
++@dataclass(frozen=True)
++class WindowCall(Expr):
++    """A call evaluated over a window of rows rather than over one row.
++
++    The partition and ordering expressions are children like the arguments
++    are, so every helper that reasons about an expression through
++    :meth:`Expr.children` -- column collection, substitution, validation,
++    pruning -- sees the columns a window reads even when the query never
++    selects them.
++    """
++
++    name: str
++    dtype: DataType
++    args: tuple[Expr, ...] = ()
++    partition_by: tuple[Expr, ...] = ()
++    order_by: tuple[WindowOrder, ...] = ()
++    frame: Optional[WindowFrame] = None
++    star: bool = False
++
++    def children(self) -> Sequence[Expr]:
++        return (
++            *self.args,
++            *self.partition_by,
++            *(item.expression for item in self.order_by),
++        )
++
++    def with_children(self, children: Sequence[Expr]) -> Expr:
++        args = len(self.args)
++        partition = args + len(self.partition_by)
++        return WindowCall(
++            name=self.name,
++            dtype=self.dtype,
++            args=tuple(children[:args]),
++            partition_by=tuple(children[args:partition]),
++            order_by=tuple(
++                WindowOrder(
++                    expression=expression,
++                    descending=item.descending,
++                    nulls_first=item.nulls_first,
++                )
++                for item, expression in zip(self.order_by, children[partition:])
++            ),
++            frame=self.frame,
++            star=self.star,
++        )
++
++    @property
++    def is_constant(self) -> bool:
++        """Never constant: the value depends on the other rows of the window,
++        which no amount of plan-time evaluation can see."""
++
++        return False
++
++    def output_name(self) -> str:
++        """Stable name for this window's output column."""
++
++        return f"{self.name}({'*' if self.star else self._args_sql()}) over"
++
++    def _args_sql(self) -> str:
++        return ", ".join(arg.to_sql() for arg in self.args)
++
++    def to_sql(self) -> str:
++        inner = "*" if self.star else self._args_sql()
++        parts = []
++        if self.partition_by:
++            parts.append(
++                "PARTITION BY " + ", ".join(e.to_sql() for e in self.partition_by)
++            )
++        if self.order_by:
++            parts.append(
++                "ORDER BY " + ", ".join(item.to_sql() for item in self.order_by)
++            )
++        if self.frame is not None:
++            parts.append(self.frame.to_sql())
++        return f"{self.name.upper()}({inner}) OVER ({' '.join(parts)})"
++
++
+ @dataclass(frozen=True)
+ class CastExpr(Expr):
+     """An explicit type conversion."""
+@@ -445,6 +565,16 @@ def contains_aggregate(expression: Expr) -> bool:
+     return any(isinstance(node, AggregateCall) for node in expression.walk())
+ 
+ 
++def windows_of(expression: Expr) -> list["WindowCall"]:
++    """Every window call in ``expression``, outermost first."""
++
++    return [node for node in expression.walk() if isinstance(node, WindowCall)]
++
++
++def contains_window(expression: Expr) -> bool:
++    return any(isinstance(node, WindowCall) for node in expression.walk())
++
++
+ def conjuncts(expression: Optional[Expr]) -> list[Expr]:
+     """Split a predicate into its top-level AND operands."""
+ 
+diff --git a/slateql/plan/logical.py b/slateql/plan/logical.py
+index afaaf62..661a4c6 100644
+--- a/slateql/plan/logical.py
++++ b/slateql/plan/logical.py
+@@ -19,7 +19,7 @@ from typing import Iterator, Optional, Sequence
+ from ..errors import PlanningError
+ from ..sql.ast_nodes import JoinKind
+ from ..types.schema import Field, Schema
+-from .expressions import AggregateCall, Column, Expr
++from .expressions import AggregateCall, Column, Expr, WindowCall
+ 
+ __all__ = [
+     "LogicalPlan",
+@@ -30,6 +30,7 @@ __all__ = [
+     "Filter",
+     "Project",
+     "Aggregate",
++    "Window",
+     "Sort",
+     "Limit",
+     "Distinct",
+@@ -327,6 +328,48 @@ class Aggregate(LogicalPlan):
+         return f"Aggregate aggs=[{aggs}]"
+ 
+ 
++@dataclass(frozen=True)
++class Window(LogicalPlan):
++    """Append window function columns to every row of the input.
++
++    The node keeps the input tuple intact and adds one column per call, so it
++    never changes the meaning of anything below or above it.  Each call owns
++    its own partitioning and ordering, which is why several ``OVER`` clauses
++    in one select list still need only a single node.
++    """
++
++    input: LogicalPlan
++    functions: tuple[NamedExpr, ...] = ()
++
++    def __post_init__(self) -> None:
++        for item in self.functions:
++            if not isinstance(item.expression, WindowCall):
++                raise PlanningError(
++                    "Window node expects window calls, got "
++                    f"{type(item.expression).__name__}"
++                )
++
++    @property
++    def schema(self) -> Schema:
++        return self.input.schema.merge(
++            Schema(item.to_field() for item in self.functions)
++        )
++
++    def children(self) -> Sequence[LogicalPlan]:
++        return (self.input,)
++
++    def with_children(self, children: Sequence[LogicalPlan]) -> LogicalPlan:
++        (child,) = children
++        return replace(self, input=child)
++
++    def expressions(self) -> Sequence[Expr]:
++        return tuple(item.expression for item in self.functions)
++
++    def describe(self) -> str:
++        inner = ", ".join(item.describe() for item in self.functions)
++        return f"Window [{inner}]"
++
++
+ @dataclass(frozen=True)
+ class Sort(LogicalPlan):
+     """Order rows by one or more keys."""
+diff --git a/slateql/plan/visitor.py b/slateql/plan/visitor.py
+index b6a418f..014dc5a 100644
+--- a/slateql/plan/visitor.py
++++ b/slateql/plan/visitor.py
+@@ -22,6 +22,7 @@ from .logical import (
+     Scan,
+     Sort,
+     SortItem,
++    Window,
+ )
+ 
+ __all__ = [
+@@ -85,6 +86,11 @@ def map_expressions(plan: LogicalPlan, rule: ExprRewrite) -> LogicalPlan:
+             group_by=groups if groups is not None else plan.group_by,
+             aggregates=aggs if aggs is not None else plan.aggregates,
+         )
++    if isinstance(plan, Window):
++        functions = _map_named(plan.functions, rule)
++        if functions is None:
++            return plan
++        return replace(plan, functions=functions)
+     if isinstance(plan, Sort):
+         keys: list[SortItem] = []
+         changed = False
+diff --git a/slateql/sql/ast_nodes.py b/slateql/sql/ast_nodes.py
+index 8d97735..be27970 100644
+--- a/slateql/sql/ast_nodes.py
++++ b/slateql/sql/ast_nodes.py
+@@ -23,6 +23,9 @@ __all__ = [
+     "UnaryOp",
+     "BinaryOp",
+     "FunctionCall",
++    "WindowFunction",
++    "WindowSpec",
++    "WindowFrame",
+     "Cast",
+     "CaseExpr",
+     "WhenClause",
+@@ -134,6 +137,24 @@ class FunctionCall(Expression):
+         return self.args
+ 
+ 
++@dataclass(frozen=True)
++class WindowFunction(Expression):
++    """A call site carrying an ``OVER`` clause, such as ``RANK() OVER (...)``.
++
++    The window is kept separate from :class:`FunctionCall` on purpose: a
++    windowed call does not turn its query into a grouped one, so nothing that
++    hunts for aggregate call sites should find it.
++    """
++
++    name: str
++    spec: "WindowSpec"
++    args: tuple[Expression, ...] = ()
++    star: bool = False
++
++    def children(self) -> Sequence[Node]:
++        return (*self.args, self.spec)
++
++
+ @dataclass(frozen=True)
+ class Cast(Expression):
+     """``CAST(expr AS type)``."""
+@@ -325,6 +346,33 @@ class OrderByItem(Node):
+         return (self.expression,)
+ 
+ 
++@dataclass(frozen=True)
++class WindowFrame(Node):
++    """A ``ROWS`` or ``RANGE`` frame reaching back from the current row.
++
++    ``preceding`` is how far back the frame reaches; ``None`` is
++    ``UNBOUNDED PRECEDING``, the start of the partition.  A ``ROWS`` frame
++    counts rows, a ``RANGE`` frame (``by_value``) measures the distance in the
++    ordering value itself.
++    """
++
++    preceding: Optional[float] = None
++    by_value: bool = False
++    exclude: Optional[str] = None
++
++
++@dataclass(frozen=True)
++class WindowSpec(Node):
++    """The ``(PARTITION BY ... ORDER BY ... ROWS ...)`` body of an OVER clause."""
++
++    partition_by: tuple[Expression, ...] = ()
++    order_by: tuple[OrderByItem, ...] = ()
++    frame: Optional[WindowFrame] = None
++
++    def children(self) -> Sequence[Node]:
++        return (*self.partition_by, *self.order_by)
++
++
+ # ---------------------------------------------------------------------------
+ # Statements
+ # ---------------------------------------------------------------------------
+diff --git a/slateql/sql/keywords.py b/slateql/sql/keywords.py
+index 9f618cd..b2dffad 100644
+--- a/slateql/sql/keywords.py
++++ b/slateql/sql/keywords.py
+@@ -76,6 +76,18 @@ NON_RESERVED = frozenset(
+         "VALUES",
+         "USING",
+         "NATURAL",
++        "OVER",
++        "PARTITION",
++        "ROWS",
++        "RANGE",
++        "EXCLUDE",
++        "TIES",
++        "OTHERS",
++        "NO",
++        "UNBOUNDED",
++        "PRECEDING",
++        "CURRENT",
++        "ROW",
+     }
+ )
+ 
+diff --git a/slateql/sql/parser.py b/slateql/sql/parser.py
+index 732666b..bb7eb6f 100644
+--- a/slateql/sql/parser.py
++++ b/slateql/sql/parser.py
+@@ -6,6 +6,7 @@ The grammar covers the SlateQL subset of SQL:
+ 
+     statement   := explain | show | query
+     query       := select ( UNION [ALL] select )* [order_by] [limit] [offset]
++    over        := OVER '(' [PARTITION BY expr_list] [ORDER BY sort_list] ')'
+     select      := SELECT [DISTINCT] select_list [FROM from_item]
+                    [WHERE expr] [GROUP BY expr_list [HAVING expr]]
+                    [ORDER BY sort_list] [LIMIT n] [OFFSET n]
+@@ -48,6 +49,9 @@ from .ast_nodes import (
+     TableRef,
+     UnaryOp,
+     WhenClause,
++    WindowFrame,
++    WindowFunction,
++    WindowSpec,
+ )
+ from .keywords import TYPE_KEYWORDS, is_reserved
+ from .lexer import tokenize
+@@ -600,20 +604,110 @@ class Parser:
+ 
+     def _parse_function_call(self, name: str) -> Expression:
+         self._expect_punctuation("(")
++        star = False
++        distinct = False
++        args: list[Expression] = []
+         if self.current.is_operator("*"):
+             self._advance()
+-            self._expect_punctuation(")")
+-            return FunctionCall(name=name, args=(), star=True)
+-        distinct = self._match_keyword("DISTINCT")
+-        args: list[Expression] = []
+-        if not self.current.is_punctuation(")"):
+-            args.append(self._parse_expression())
+-            while self._match_punctuation(","):
++            star = True
++        else:
++            distinct = self._match_keyword("DISTINCT")
++            if not self.current.is_punctuation(")"):
+                 args.append(self._parse_expression())
++                while self._match_punctuation(","):
++                    args.append(self._parse_expression())
+         self._expect_punctuation(")")
+         if distinct and not args:
+             raise self._error("DISTINCT requires at least one argument")
+-        return FunctionCall(name=name, args=tuple(args), distinct=distinct)
++        if self.current.is_keyword("OVER"):
++            self._advance()
++            if distinct:
++                raise self._error("DISTINCT cannot be combined with OVER")
++            return WindowFunction(
++                name=name,
++                spec=self._parse_window_spec(),
++                args=tuple(args),
++                star=star,
++            )
++        return FunctionCall(
++            name=name, args=tuple(args), distinct=distinct, star=star
++        )
++
++    def _parse_window_spec(self) -> WindowSpec:
++        self._expect_punctuation("(")
++        partition: tuple[Expression, ...] = ()
++        if self._match_keyword("PARTITION"):
++            self._expect_keyword("BY")
++            items = [self._parse_expression()]
++            while self._match_punctuation(","):
++                items.append(self._parse_expression())
++            partition = tuple(items)
++        order = self._parse_order_by()
++        frame = self._parse_window_frame()
++        self._expect_punctuation(")")
++        return WindowSpec(partition_by=partition, order_by=order, frame=frame)
++
++    def _parse_window_frame(self) -> Optional[WindowFrame]:
++        if self._match_keyword("ROWS"):
++            by_value = False
++        elif self._match_keyword("RANGE"):
++            by_value = True
++        else:
++            return None
++        if self._match_keyword("BETWEEN"):
++            preceding = self._parse_frame_bound(by_value)
++            self._expect_keyword("AND")
++            self._expect_keyword("CURRENT")
++            self._expect_keyword("ROW")
++        else:
++            preceding = self._parse_frame_bound(by_value)
++        return WindowFrame(
++            preceding=preceding,
++            by_value=by_value,
++            exclude=self._parse_frame_exclusion(),
++        )
++
++    def _parse_frame_exclusion(self) -> Optional[str]:
++        """The optional ``EXCLUDE`` tail of a frame."""
++
++        if not self._match_keyword("EXCLUDE"):
++            return None
++        if self._match_keyword("CURRENT"):
++            self._expect_keyword("ROW")
++            return "current row"
++        if self._match_keyword("GROUP"):
++            return "group"
++        if self._match_keyword("TIES"):
++            return "ties"
++        if self._match_keyword("NO"):
++            self._expect_keyword("OTHERS")
++            return None
++        raise self._error("EXCLUDE requires CURRENT ROW, GROUP, TIES or NO OTHERS")
++
++    def _parse_frame_bound(self, by_value: bool) -> Optional[float]:
++        """One frame bound: a distance, or UNBOUNDED for the whole partition.
++
++        A ``ROWS`` bound is a row count and must be an integer; a ``RANGE``
++        bound is measured in the ordering value and may carry a fraction.
++        """
++
++        if self._match_keyword("UNBOUNDED"):
++            self._expect_keyword("PRECEDING")
++            return None
++        token = self.current
++        value = token.value
++        if (
++            token.type is not TokenType.NUMBER
++            or isinstance(value, bool)
++            or (not by_value and not isinstance(value, int))
++        ):
++            what = "a number" if by_value else "an integer"
++            raise self._error(f"frame bound requires {what} or UNBOUNDED")
++        if value < 0:
++            raise self._error("frame bound must not be negative")
++        self._advance()
++        self._expect_keyword("PRECEDING")
++        return value
+ 
+     def _parse_cast(self) -> Expression:
+         self._expect_keyword("CAST")
+diff --git a/slateql/sql/unparser.py b/slateql/sql/unparser.py
+index 111f10c..d42018a 100644
+--- a/slateql/sql/unparser.py
++++ b/slateql/sql/unparser.py
+@@ -36,6 +36,8 @@ from .ast_nodes import (
+     Statement,
+     TableRef,
+     UnaryOp,
++    WindowFunction,
++    WindowSpec,
+ )
+ 
+ __all__ = ["unparse", "unparse_expression", "literal_sql"]
+@@ -77,6 +79,8 @@ def unparse_expression(expression: Expression) -> str:
+         return f"({left} {expression.op} {right})"
+     if isinstance(expression, FunctionCall):
+         return _unparse_function(expression)
++    if isinstance(expression, WindowFunction):
++        return _unparse_window(expression)
+     if isinstance(expression, Cast):
+         inner = unparse_expression(expression.operand)
+         return f"CAST({inner} AS {expression.type_name.upper()})"
+@@ -117,6 +121,37 @@ def _unparse_function(call: FunctionCall) -> str:
+     return f"{name}({prefix}{args})"
+ 
+ 
++def _unparse_window(call: WindowFunction) -> str:
++    name = call.name.upper()
++    inner = "*" if call.star else ", ".join(
++        unparse_expression(arg) for arg in call.args
++    )
++    return f"{name}({inner}) OVER ({_unparse_window_spec(call.spec)})"
++
++
++def _unparse_window_spec(spec: WindowSpec) -> str:
++    parts: list[str] = []
++    if spec.partition_by:
++        parts.append(
++            "PARTITION BY "
++            + ", ".join(unparse_expression(item) for item in spec.partition_by)
++        )
++    if spec.order_by:
++        parts.append(
++            "ORDER BY "
++            + ", ".join(_unparse_order_item(item) for item in spec.order_by)
++        )
++    if spec.frame is not None:
++        start = (
++            "UNBOUNDED" if spec.frame.preceding is None else str(spec.frame.preceding)
++        )
++        unit = "RANGE" if spec.frame.by_value else "ROWS"
++        parts.append(f"{unit} BETWEEN {start} PRECEDING AND CURRENT ROW")
++        if spec.frame.exclude is not None:
++            parts.append(f"EXCLUDE {spec.frame.exclude.upper()}")
++    return " ".join(parts)
++
++
+ def _unparse_case(case: CaseExpr) -> str:
+     parts = ["CASE"]
+     if case.operand is not None:

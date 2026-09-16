@@ -1,0 +1,713 @@
+diff --git a/tests/aggregation.rs b/tests/aggregation.rs
+index e6b1ccc..e90cbd3 100644
+--- a/tests/aggregation.rs
++++ b/tests/aggregation.rs
+@@ -175,3 +175,13 @@ fn bare_aggregate_over_empty_input_yields_one_row() {
+     );
+     assert_eq!(rows, vec![vec!["0", "NULL"]]);
+ }
++
++#[test]
++fn group_concat_joins_in_first_seen_order() {
++    let mut db = seeded();
++    let joined = scalar(
++        &mut db,
++        "SELECT GROUP_CONCAT(name) FROM employees WHERE dept_id = 2",
++    );
++    assert_eq!(joined, "Margaret,Dennis");
++}
+diff --git a/tests/ddl_and_dml.rs b/tests/ddl_and_dml.rs
+index f1852c9..d255b91 100644
+--- a/tests/ddl_and_dml.rs
++++ b/tests/ddl_and_dml.rs
+@@ -124,3 +124,14 @@ fn script_runs_multiple_statements() {
+     assert_eq!(outcomes.len(), 3);
+     assert_eq!(common::scalar(&mut db, "SELECT COUNT(*) FROM t"), "2");
+ }
++
++#[test]
++fn a_rejected_row_leaves_the_table_empty() {
++    let mut db = Database::new();
++    db.execute("CREATE TABLE t (id INTEGER NOT NULL)").unwrap();
++    let err = db
++        .execute("INSERT INTO t VALUES (1), (NULL), (3)")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Api);
++    assert_eq!(common::scalar(&mut db, "SELECT COUNT(*) FROM t"), "0");
++}
+diff --git a/tests/null_semantics.rs b/tests/null_semantics.rs
+index 0dc342b..095ddd2 100644
+--- a/tests/null_semantics.rs
++++ b/tests/null_semantics.rs
+@@ -119,3 +119,12 @@ fn distinct_treats_nulls_as_equal() {
+     // manager_ids: NULL, 1, 4, 6 -> 4 distinct
+     assert_eq!(result.row_count(), 4);
+ }
++
++#[test]
++fn a_null_operand_makes_arithmetic_null() {
++    let mut db = seeded();
++    assert_eq!(
++        scalar(&mut db, "SELECT salary + dept_id FROM employees WHERE id = 8"),
++        "NULL"
++    );
++}
+diff --git a/tests/order_and_limit.rs b/tests/order_and_limit.rs
+index 4e1cb13..7578e87 100644
+--- a/tests/order_and_limit.rs
++++ b/tests/order_and_limit.rs
+@@ -116,3 +116,10 @@ fn order_is_stable_for_equal_keys() {
+     let ids: Vec<String> = rows.into_iter().map(|r| r[0].clone()).collect();
+     assert_eq!(ids, vec!["1", "2", "3", "4", "5", "6", "7", "8"]);
+ }
++
++#[test]
++fn offset_past_the_end_yields_nothing() {
++    let mut db = seeded();
++    let rows = query_strings(&mut db, "SELECT id FROM employees ORDER BY id LIMIT 3 OFFSET 20");
++    assert!(rows.is_empty());
++}
+diff --git a/tests/row_deletion.rs b/tests/row_deletion.rs
+new file mode 100644
+index 0000000..ab3a5db
+--- /dev/null
++++ b/tests/row_deletion.rs
+@@ -0,0 +1,253 @@
++//! `DELETE`: which rows go, which stay, in what order, and what the statement
++//! reports back.
++
++use tanager::{Database, ErrorKind, Outcome};
++
++/// A small table with one nullable column, so a predicate over it can come out
++/// unknown rather than false.
++fn seeded() -> Database {
++    let mut db = Database::new();
++    db.execute(
++        "CREATE TABLE parts (\
++            id INTEGER NOT NULL, \
++            code TEXT NOT NULL, \
++            stock INTEGER)",
++    )
++    .unwrap();
++    db.execute(
++        "INSERT INTO parts (id, code, stock) VALUES \
++            (1, 'bolt',   40), \
++            (2, 'washer', 12), \
++            (3, 'nut',    NULL), \
++            (4, 'clip',   7), \
++            (5, 'pin',    NULL)",
++    )
++    .unwrap();
++    db
++}
++
++/// The `id` column of every stored row, in stored order.
++fn ids(db: &mut Database) -> Vec<String> {
++    db.query("SELECT id FROM parts")
++        .unwrap()
++        .rows()
++        .iter()
++        .map(|row| row.values()[0].to_string())
++        .collect()
++}
++
++fn deleted(db: &mut Database, sql: &str) -> usize {
++    match db.execute(sql).unwrap() {
++        Outcome::Deleted(n) => n,
++        other => panic!("expected a delete outcome, got {:?}", other),
++    }
++}
++
++#[test]
++fn reports_the_rows_it_removed() {
++    let mut db = seeded();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE id = 2"), 1);
++    assert_eq!(ids(&mut db), vec!["1", "3", "4", "5"]);
++}
++
++#[test]
++fn without_a_where_it_empties_the_table() {
++    let mut db = seeded();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts"), 5);
++    assert!(db.query("SELECT id FROM parts").unwrap().is_empty());
++    // The table itself is still there and still accepts rows.
++    assert!(db.has_table("parts"));
++    db.execute("INSERT INTO parts (id, code, stock) VALUES (9, 'new', 1)")
++        .unwrap();
++    assert_eq!(ids(&mut db), vec!["9"]);
++}
++
++#[test]
++fn only_rows_where_the_predicate_is_true() {
++    let mut db = seeded();
++    // Rows 3 and 5 hold a NULL stock, where `stock < 20` is unknown.
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE stock < 20"), 2);
++    assert_eq!(ids(&mut db), vec!["1", "3", "5"]);
++}
++
++#[test]
++fn an_unknown_predicate_can_be_asked_for_directly() {
++    let mut db = seeded();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE stock IS NULL"), 2);
++    assert_eq!(ids(&mut db), vec!["1", "2", "4"]);
++}
++
++#[test]
++fn survivors_keep_their_stored_order() {
++    let mut db = seeded();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE id = 1 OR id = 3"), 2);
++    assert_eq!(ids(&mut db), vec!["2", "4", "5"]);
++    let codes: Vec<String> = db
++        .query("SELECT code FROM parts")
++        .unwrap()
++        .rows()
++        .iter()
++        .map(|row| row.values()[0].to_string())
++        .collect();
++    assert_eq!(codes, vec!["washer", "clip", "pin"]);
++}
++
++#[test]
++fn every_column_shrinks_together() {
++    let mut db = seeded();
++    deleted(&mut db, "DELETE FROM parts WHERE id = 2 OR id = 4");
++    let rows: Vec<Vec<String>> = db
++        .query("SELECT id, code, stock FROM parts")
++        .unwrap()
++        .rows()
++        .iter()
++        .map(|row| row.values().iter().map(|v| v.to_string()).collect())
++        .collect();
++    assert_eq!(
++        rows,
++        vec![
++            vec!["1".to_string(), "bolt".to_string(), "40".to_string()],
++            vec!["3".to_string(), "nut".to_string(), "NULL".to_string()],
++            vec!["5".to_string(), "pin".to_string(), "NULL".to_string()],
++        ]
++    );
++}
++
++#[test]
++fn a_predicate_that_matches_nothing_reports_zero() {
++    let mut db = seeded();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE id = 77"), 0);
++    assert_eq!(ids(&mut db), vec!["1", "2", "3", "4", "5"]);
++}
++
++#[test]
++fn deleting_from_an_empty_table_reports_zero() {
++    let mut db = seeded();
++    deleted(&mut db, "DELETE FROM parts");
++    assert_eq!(deleted(&mut db, "DELETE FROM parts"), 0);
++}
++
++#[test]
++fn aggregates_over_the_table_follow_the_removal() {
++    let mut db = seeded();
++    deleted(&mut db, "DELETE FROM parts WHERE id = 1");
++    let count = db.query("SELECT COUNT(*) FROM parts").unwrap();
++    assert_eq!(count.value(0, 0).unwrap().to_string(), "4");
++    let total = db.query("SELECT SUM(stock) FROM parts").unwrap();
++    assert_eq!(total.value(0, 0).unwrap().to_string(), "19");
++}
++
++#[test]
++fn an_alias_qualifies_the_predicate_columns() {
++    let mut db = seeded();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts AS p WHERE p.id > 3"), 2);
++    assert_eq!(ids(&mut db), vec!["1", "2", "3"]);
++}
++
++#[test]
++fn an_unknown_table_is_a_catalog_error() {
++    let mut db = seeded();
++    let err = db.execute("DELETE FROM widgets WHERE id = 1").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Catalog);
++}
++
++#[test]
++fn an_unknown_column_is_a_binder_error() {
++    let mut db = seeded();
++    let err = db.execute("DELETE FROM parts WHERE colour = 'red'").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++    assert_eq!(ids(&mut db), vec!["1", "2", "3", "4", "5"]);
++}
++
++#[test]
++fn a_where_that_is_not_boolean_is_a_binder_error() {
++    let mut db = seeded();
++    let err = db.execute("DELETE FROM parts WHERE code").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn an_aggregate_has_no_place_in_a_delete() {
++    let mut db = seeded();
++    let err = db
++        .execute("DELETE FROM parts WHERE stock > AVG(stock)")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn the_table_is_named_after_from() {
++    let mut db = seeded();
++    // `DELETE parts` is not the accepted form.
++    assert!(db.execute("DELETE parts WHERE id = 1").is_err());
++    assert_eq!(ids(&mut db), vec!["1", "2", "3", "4", "5"]);
++}
++
++#[test]
++fn a_delete_runs_inside_a_script() {
++    let mut db = seeded();
++    let outcomes = db
++        .execute_script("DELETE FROM parts WHERE id = 5; DELETE FROM parts WHERE stock IS NULL")
++        .unwrap();
++    assert_eq!(outcomes[0], Outcome::Deleted(1));
++    assert_eq!(outcomes[1], Outcome::Deleted(1));
++    assert_eq!(ids(&mut db), vec!["1", "2", "4"]);
++}
++
++#[test]
++fn a_compound_predicate_selects_the_rows() {
++    let mut db = seeded();
++    assert_eq!(
++        deleted(
++            &mut db,
++            "DELETE FROM parts WHERE (id = 1 OR code = 'clip') AND stock > 5"
++        ),
++        2
++    );
++    assert_eq!(ids(&mut db), vec!["2", "3", "5"]);
++}
++
++#[test]
++fn a_negated_predicate_still_needs_to_be_true() {
++    let mut db = seeded();
++    // NOT of unknown stays unknown, so the NULL rows survive again.
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE NOT stock < 20"), 1);
++    assert_eq!(ids(&mut db), vec!["2", "3", "4", "5"]);
++}
++
++#[test]
++fn deletes_can_follow_one_another() {
++    let mut db = seeded();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE id = 1"), 1);
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE id = 1"), 0);
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE id IN (2, 5)"), 2);
++    assert_eq!(ids(&mut db), vec!["3", "4"]);
++}
++
++#[test]
++fn rows_added_after_a_delete_sit_behind_the_survivors() {
++    let mut db = seeded();
++    deleted(&mut db, "DELETE FROM parts WHERE id < 4");
++    db.execute("INSERT INTO parts (id, code, stock) VALUES (6, 'stud', 3)")
++        .unwrap();
++    assert_eq!(ids(&mut db), vec!["4", "5", "6"]);
++}
++
++#[test]
++fn a_predicate_may_compare_two_columns() {
++    let mut db = seeded();
++    db.execute("INSERT INTO parts (id, code, stock) VALUES (7, 'cap', 7)")
++        .unwrap();
++    assert_eq!(deleted(&mut db, "DELETE FROM parts WHERE stock = id"), 1);
++    assert_eq!(ids(&mut db), vec!["1", "2", "3", "4", "5"]);
++}
++
++#[test]
++fn a_delete_leaves_other_tables_alone() {
++    let mut db = seeded();
++    db.execute("CREATE TABLE spares (id INTEGER NOT NULL)").unwrap();
++    db.execute("INSERT INTO spares (id) VALUES (1), (2)").unwrap();
++    deleted(&mut db, "DELETE FROM parts");
++    let kept = db.query("SELECT id FROM spares").unwrap();
++    assert_eq!(kept.row_count(), 2);
++}
+diff --git a/tests/select_basic.rs b/tests/select_basic.rs
+index 136fc88..67dd267 100644
+--- a/tests/select_basic.rs
++++ b/tests/select_basic.rs
+@@ -122,3 +122,10 @@ fn case_expression() {
+     assert_eq!(rows[0], vec!["Ada", "senior"]);
+     assert_eq!(rows[2], vec!["Linus", "staff"]);
+ }
++
++#[test]
++fn a_projection_may_repeat_a_column() {
++    let mut db = seeded();
++    let rows = common::query_strings(&mut db, "SELECT id, id FROM employees WHERE id = 4");
++    assert_eq!(rows, vec![vec!["4", "4"]]);
++}
+diff --git a/tests/set_assignments.rs b/tests/set_assignments.rs
+new file mode 100644
+index 0000000..b017cef
+--- /dev/null
++++ b/tests/set_assignments.rs
+@@ -0,0 +1,364 @@
++//! `UPDATE`: which rows it touches, what the assignments read, what it reports,
++//! and what it leaves behind when a row cannot be stored.
++
++use tanager::{Database, ErrorKind, Outcome};
++
++/// A table whose columns cover every rule an assignment has to respect: a
++/// `NOT NULL` key, a nullable integer, a float that an integer widens into, and
++/// text.
++fn seeded() -> Database {
++    let mut db = Database::new();
++    db.execute(
++        "CREATE TABLE parts (\
++            id INTEGER NOT NULL, \
++            code TEXT NOT NULL, \
++            stock INTEGER, \
++            spare INTEGER, \
++            weight FLOAT)",
++    )
++    .unwrap();
++    db.execute(
++        "INSERT INTO parts (id, code, stock, spare, weight) VALUES \
++            (1, 'bolt',   40,   5, 8.0), \
++            (2, 'washer', 12,   6, 1.5), \
++            (3, 'nut',    NULL, 7, 2.0), \
++            (4, 'clip',   7,    8, 0.5)",
++    )
++    .unwrap();
++    db
++}
++
++/// Every stored row, as strings, in stored order.
++fn dump(db: &mut Database) -> Vec<Vec<String>> {
++    let result = db
++        .query("SELECT id, code, stock, spare, weight FROM parts")
++        .unwrap();
++    result
++        .rows()
++        .iter()
++        .map(|row| row.values().iter().map(|v| v.to_string()).collect())
++        .collect()
++}
++
++/// One cell of the row carrying `id`.
++fn cell(db: &mut Database, id: i64, column: &str) -> String {
++    let sql = format!("SELECT {} FROM parts WHERE id = {}", column, id);
++    db.query(&sql).unwrap().value(0, 0).unwrap().to_string()
++}
++
++fn updated(db: &mut Database, sql: &str) -> usize {
++    match db.execute(sql).unwrap() {
++        Outcome::Updated(n) => n,
++        other => panic!("expected an update outcome, got {:?}", other),
++    }
++}
++
++#[test]
++fn reports_the_rows_it_changed() {
++    let mut db = seeded();
++    assert_eq!(updated(&mut db, "UPDATE parts SET stock = 99 WHERE id = 2"), 1);
++    assert_eq!(cell(&mut db, 2, "stock"), "99");
++    assert_eq!(cell(&mut db, 1, "stock"), "40");
++}
++
++#[test]
++fn without_a_where_it_takes_every_row() {
++    let mut db = seeded();
++    assert_eq!(updated(&mut db, "UPDATE parts SET code = 'x'"), 4);
++    let codes: Vec<String> = dump(&mut db).into_iter().map(|r| r[1].clone()).collect();
++    assert_eq!(codes, vec!["x", "x", "x", "x"]);
++}
++
++#[test]
++fn assignments_read_the_row_as_it_was() {
++    let mut db = seeded();
++    // Two columns exchange values in one statement.
++    assert_eq!(
++        updated(
++            &mut db,
++            "UPDATE parts SET stock = spare, spare = stock WHERE id = 1"
++        ),
++        1
++    );
++    assert_eq!(cell(&mut db, 1, "stock"), "5");
++    assert_eq!(cell(&mut db, 1, "spare"), "40");
++}
++
++#[test]
++fn one_assignment_cannot_see_another() {
++    let mut db = seeded();
++    // `stock` is set to 500 here, but the second assignment still reads 12.
++    assert_eq!(
++        updated(
++            &mut db,
++            "UPDATE parts SET stock = 500, weight = stock WHERE id = 2"
++        ),
++        1
++    );
++    assert_eq!(cell(&mut db, 2, "stock"), "500");
++    assert_eq!(cell(&mut db, 2, "weight"), "12.0");
++}
++
++#[test]
++fn only_rows_where_the_predicate_is_true() {
++    let mut db = seeded();
++    // Row 3 holds a NULL stock, so `stock > 10` is unknown there.
++    assert_eq!(updated(&mut db, "UPDATE parts SET code = 'hit' WHERE stock > 10"), 2);
++    let codes: Vec<String> = dump(&mut db).into_iter().map(|r| r[1].clone()).collect();
++    assert_eq!(codes, vec!["hit", "hit", "nut", "clip"]);
++}
++
++#[test]
++fn a_false_predicate_changes_nothing() {
++    let mut db = seeded();
++    assert_eq!(updated(&mut db, "UPDATE parts SET code = 'no' WHERE id > 900"), 0);
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn an_integer_widens_into_a_float_column() {
++    let mut db = seeded();
++    assert_eq!(updated(&mut db, "UPDATE parts SET weight = 6 WHERE id = 4"), 1);
++    assert_eq!(cell(&mut db, 4, "weight"), "6.0");
++}
++
++#[test]
++fn a_row_that_comes_out_identical_is_not_counted() {
++    let mut db = seeded();
++    // Row 1 already weighs 8.0, and 8 widens to exactly that.
++    assert_eq!(updated(&mut db, "UPDATE parts SET weight = 8 WHERE id = 1"), 0);
++    assert_eq!(cell(&mut db, 1, "weight"), "8.0");
++}
++
++#[test]
++fn a_null_written_over_a_null_is_not_a_change() {
++    let mut db = seeded();
++    assert_eq!(updated(&mut db, "UPDATE parts SET stock = NULL WHERE id = 3"), 0);
++    assert_eq!(cell(&mut db, 3, "stock"), "NULL");
++    // The same assignment on a row holding a value does count.
++    assert_eq!(updated(&mut db, "UPDATE parts SET stock = NULL WHERE id = 4"), 1);
++    assert_eq!(cell(&mut db, 4, "stock"), "NULL");
++}
++
++#[test]
++fn a_mixed_statement_counts_only_the_rows_that_moved() {
++    let mut db = seeded();
++    // Every row matches; rows 1 and 3 already hold what is assigned.
++    let n = updated(
++        &mut db,
++        "UPDATE parts SET weight = CASE id WHEN 1 THEN 8.0 WHEN 3 THEN 2.0 ELSE 100.0 END",
++    );
++    assert_eq!(n, 2);
++    let weights: Vec<String> = dump(&mut db).into_iter().map(|r| r[4].clone()).collect();
++    assert_eq!(weights, vec!["8.0", "100.0", "2.0", "100.0"]);
++}
++
++#[test]
++fn changed_rows_stay_where_they_were() {
++    let mut db = seeded();
++    updated(&mut db, "UPDATE parts SET code = 'z' WHERE id = 1");
++    let ids: Vec<String> = dump(&mut db).into_iter().map(|r| r[0].clone()).collect();
++    assert_eq!(ids, vec!["1", "2", "3", "4"]);
++}
++
++#[test]
++fn a_narrowing_value_is_a_type_error() {
++    let mut db = seeded();
++    let err = db.execute("UPDATE parts SET stock = 1.5").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Type);
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn text_cannot_be_stored_in_an_integer_column() {
++    let mut db = seeded();
++    let err = db.execute("UPDATE parts SET stock = 'many'").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Type);
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn a_null_into_a_not_null_column_rejects_the_statement() {
++    let mut db = seeded();
++    assert!(db.execute("UPDATE parts SET code = NULL WHERE id = 2").is_err());
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn a_computed_null_is_caught_the_same_way() {
++    let mut db = seeded();
++    // Concatenating NULL yields NULL, which `code` refuses.
++    assert!(db
++        .execute("UPDATE parts SET code = code || NULL WHERE id = 1")
++        .is_err());
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn one_bad_row_holds_back_the_good_ones() {
++    let mut db = seeded();
++    // Rows 1, 2 and 4 would store fine; row 3 has a NULL stock, which turns
++    // into a NULL code and is refused.
++    assert!(db
++        .execute("UPDATE parts SET code = CASE WHEN stock IS NULL THEN NULL ELSE 'ok' END")
++        .is_err());
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn a_value_that_cannot_be_computed_leaves_the_table_alone() {
++    let mut db = seeded();
++    assert!(db.execute("UPDATE parts SET stock = stock / 0").is_err());
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn assigning_one_column_twice_is_rejected() {
++    let mut db = seeded();
++    let err = db
++        .execute("UPDATE parts SET stock = 1, stock = 2 WHERE id = 1")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++    assert_eq!(dump(&mut db), dump(&mut seeded()));
++}
++
++#[test]
++fn an_unknown_column_is_a_binder_error() {
++    let mut db = seeded();
++    let err = db.execute("UPDATE parts SET colour = 'red'").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++    let err = db.execute("UPDATE parts SET stock = 1 WHERE colour = 'red'").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn an_unknown_table_is_a_catalog_error() {
++    let mut db = seeded();
++    let err = db.execute("UPDATE widgets SET stock = 1").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Catalog);
++}
++
++#[test]
++fn a_where_that_is_not_boolean_is_a_binder_error() {
++    let mut db = seeded();
++    let err = db.execute("UPDATE parts SET stock = 1 WHERE stock").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn an_aggregate_has_no_place_in_an_update() {
++    let mut db = seeded();
++    let err = db.execute("UPDATE parts SET stock = SUM(stock)").unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++    let err = db
++        .execute("UPDATE parts SET stock = 1 WHERE stock > AVG(stock)")
++        .unwrap_err();
++    assert_eq!(err.kind(), ErrorKind::Binder);
++}
++
++#[test]
++fn an_alias_qualifies_the_columns() {
++    let mut db = seeded();
++    assert_eq!(
++        updated(
++            &mut db,
++            "UPDATE parts AS p SET stock = p.stock + 1 WHERE p.id = 4"
++        ),
++        1
++    );
++    assert_eq!(cell(&mut db, 4, "stock"), "8");
++}
++
++#[test]
++fn several_matched_rows_change_together() {
++    let mut db = seeded();
++    assert_eq!(
++        updated(&mut db, "UPDATE parts SET stock = 0 WHERE id < 4"),
++        3
++    );
++    let stocks: Vec<String> = dump(&mut db).into_iter().map(|r| r[2].clone()).collect();
++    assert_eq!(stocks, vec!["0", "0", "0", "7"]);
++}
++
++#[test]
++fn an_assignment_may_read_several_columns() {
++    let mut db = seeded();
++    assert_eq!(
++        updated(
++            &mut db,
++            "UPDATE parts SET stock = stock + spare, code = code || '-x' WHERE id = 2"
++        ),
++        1
++    );
++    assert_eq!(cell(&mut db, 2, "stock"), "18");
++    assert_eq!(cell(&mut db, 2, "code"), "washer-x");
++}
++
++#[test]
++fn the_not_null_column_can_be_written_too() {
++    let mut db = seeded();
++    assert_eq!(updated(&mut db, "UPDATE parts SET id = id + 100"), 4);
++    let ids: Vec<String> = dump(&mut db).into_iter().map(|r| r[0].clone()).collect();
++    assert_eq!(ids, vec!["101", "102", "103", "104"]);
++}
++
++#[test]
++fn a_widened_value_that_differs_does_count() {
++    let mut db = seeded();
++    // 2 widens to 2.0, which row 4 does not already hold.
++    assert_eq!(updated(&mut db, "UPDATE parts SET weight = 2 WHERE id = 4"), 1);
++    assert_eq!(cell(&mut db, 4, "weight"), "2.0");
++}
++
++#[test]
++fn a_null_predicate_column_keeps_its_row_out_of_every_form() {
++    let mut db = seeded();
++    // Row 3 has a NULL stock, so none of these three reach it.
++    assert_eq!(updated(&mut db, "UPDATE parts SET code = 'a' WHERE stock = 0"), 0);
++    assert_eq!(updated(&mut db, "UPDATE parts SET code = 'b' WHERE NOT stock = 0"), 3);
++    assert_eq!(
++        updated(&mut db, "UPDATE parts SET code = 'c' WHERE stock > 0 AND id > 0"),
++        3
++    );
++    assert_eq!(cell(&mut db, 3, "code"), "nut");
++}
++
++#[test]
++fn a_statement_that_fails_reports_nothing_at_all() {
++    let mut db = seeded();
++    // The count belongs to a statement that ran; this one did not.
++    let before = dump(&mut db);
++    assert!(db.execute("UPDATE parts SET id = NULL WHERE id = 1").is_err());
++    assert!(db.execute("UPDATE parts SET stock = 'x' WHERE id = 1").is_err());
++    assert!(db.execute("UPDATE parts SET nope = 1").is_err());
++    assert_eq!(dump(&mut db), before);
++}
++
++#[test]
++fn an_update_touches_only_its_own_table() {
++    let mut db = seeded();
++    db.execute("CREATE TABLE spares (id INTEGER NOT NULL, stock INTEGER)")
++        .unwrap();
++    db.execute("INSERT INTO spares (id, stock) VALUES (1, 3), (2, 4)")
++        .unwrap();
++    assert_eq!(updated(&mut db, "UPDATE parts SET stock = 1"), 4);
++    let kept: Vec<String> = db
++        .query("SELECT stock FROM spares")
++        .unwrap()
++        .rows()
++        .iter()
++        .map(|row| row.values()[0].to_string())
++        .collect();
++    assert_eq!(kept, vec!["3", "4"]);
++}
++
++#[test]
++fn an_update_runs_inside_a_script() {
++    let mut db = seeded();
++    let outcomes = db
++        .execute_script("UPDATE parts SET stock = 5 WHERE id = 1; UPDATE parts SET stock = 5 WHERE id = 1")
++        .unwrap();
++    assert_eq!(outcomes[0], Outcome::Updated(1));
++    // The second statement finds the value already there.
++    assert_eq!(outcomes[1], Outcome::Updated(0));
++}

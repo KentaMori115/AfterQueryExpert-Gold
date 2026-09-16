@@ -1,0 +1,440 @@
+import { describe, expect, it } from 'vitest'
+
+import { type RandomSource, buildSeededRng } from '../dice/roll'
+import type { CalendarDay, CalendarShape } from '../lib/inworld-calendar'
+
+import { planJourney } from './journey'
+import { type Climate, type Season, type TravelPace, weatherOptions } from './weather'
+
+const shape: CalendarShape = { monthsPerYear: 12, daysPerMonth: 30 }
+const start: CalendarDay = { year: 812, month: 3, day: 27 }
+
+// Weather comes off a weighted table, so a fixed draw picks a known row: 0 is
+// always the first row of a climate and season, 0.999 always the last.
+function rngFrom(values: ReadonlyArray<number>): RandomSource {
+  let i = 0
+  return () => values[Math.min(i++, values.length - 1)] ?? 0
+}
+
+const clear = 0
+const worst = 0.999
+
+interface Leg {
+  name: string
+  miles: number
+  costPerMile: number
+  climate: Climate
+  season: Season
+  pace: TravelPace
+}
+
+interface Party {
+  size: number
+  milesPerDay: number
+  rations: number
+  exhaustion: number
+}
+
+function leg(over: Partial<Leg> = {}): Leg {
+  return {
+    name: 'River road',
+    miles: 30,
+    costPerMile: 1,
+    climate: 'temperate',
+    season: 'summer',
+    pace: 'normal',
+    ...over,
+  }
+}
+
+function party(over: Partial<Party> = {}): Party {
+  return { size: 4, milesPerDay: 24, rations: 40, exhaustion: 0, ...over }
+}
+
+function walk(legs: ReadonlyArray<Leg>, over: Partial<Party> = {}, draws = [clear]) {
+  return planJourney({
+    legs,
+    party: party(over),
+    start,
+    calendar: shape,
+    rng: rngFrom(draws),
+  })
+}
+
+describe('planJourney over open road', () => {
+  it('spends a clear day at the party open road pace', () => {
+    const report = walk([leg({ miles: 100 })])
+    expect(report.days[0]!.allowance).toBe(24)
+    expect(report.days[0]!.covered).toBe(24)
+  })
+
+  it('starts on the day the plan starts and advances one day at a time', () => {
+    const report = walk([leg({ miles: 100 })])
+    expect(report.days[0]!.date).toEqual({ year: 812, month: 3, day: 27 })
+    expect(report.days[1]!.date).toEqual({ year: 812, month: 3, day: 28 })
+    expect(report.days[3]!.date).toEqual({ year: 812, month: 3, day: 30 })
+  })
+
+  it('rolls over the end of a month on the way', () => {
+    const report = walk([leg({ miles: 200 })])
+    expect(report.days[4]!.date).toEqual({ year: 812, month: 4, day: 1 })
+  })
+
+  it('arrives on the day the last mile is walked', () => {
+    const report = walk([leg({ miles: 48 })])
+    expect(report.days).toHaveLength(2)
+    expect(report.arrived).toBe(true)
+    expect(report.stalled).toBe(false)
+    expect(report.arrivalDate).toEqual({ year: 812, month: 3, day: 28 })
+    expect(report.milesLeft).toBe(0)
+  })
+
+  it('arrives without spending another day when the road ends exactly on the allowance', () => {
+    const report = walk([leg({ miles: 24 })])
+    expect(report.days).toHaveLength(1)
+    expect(report.days[0]!.covered).toBe(24)
+    expect(report.arrived).toBe(true)
+  })
+
+  it('leaves the unused part of the last day on the road', () => {
+    const report = walk([leg({ miles: 30 })])
+    expect(report.days[1]!.allowance).toBe(24)
+    expect(report.days[1]!.covered).toBe(6)
+  })
+
+  it('walks nothing and arrives at once when the route is empty', () => {
+    const report = walk([])
+    expect(report.days).toEqual([])
+    expect(report.arrived).toBe(true)
+    expect(report.stalled).toBe(false)
+    expect(report.milesLeft).toBe(0)
+    expect(report.rationsLeft).toBe(40)
+  })
+
+  it('steps over a leg with no miles on it', () => {
+    const report = walk([leg({ name: 'Ferry', miles: 0 }), leg({ name: 'Hill track', miles: 10 })])
+    expect(report.days[0]!.legName).toBe('Hill track')
+    expect(report.days).toHaveLength(1)
+  })
+})
+
+describe('planJourney over rough ground', () => {
+  it('spends the day against the cost of the ground, not the miles', () => {
+    const report = walk([leg({ miles: 40, costPerMile: 2 })])
+    expect(report.days[0]!.allowance).toBe(24)
+    expect(report.days[0]!.covered).toBe(12)
+  })
+
+  it('runs the rest of the day on into the next leg', () => {
+    const report = walk([
+      leg({ name: 'Kingsroad', miles: 10 }),
+      leg({ name: 'Fen track', miles: 40, costPerMile: 2 }),
+    ])
+    expect(report.days[0]!.covered).toBe(17)
+    expect(report.days[0]!.legName).toBe('Kingsroad')
+  })
+
+  it('keeps the pace of the leg the party woke up on for the whole day', () => {
+    const report = walk(
+      [
+        leg({ name: 'Kingsroad', miles: 10, pace: 'slow' }),
+        leg({
+          name: 'Fen track',
+          miles: 40,
+          costPerMile: 2,
+          climate: 'coastal',
+          season: 'winter',
+          pace: 'fast',
+        }),
+      ],
+      {},
+      [clear, clear],
+    )
+    expect(report.days[0]!.allowance).toBe(18)
+    expect(report.days[0]!.covered).toBe(14)
+  })
+
+  it('keeps the sky of the leg the party woke up on for the whole day', () => {
+    const report = walk(
+      [
+        leg({ name: 'Kingsroad', miles: 10, pace: 'slow' }),
+        leg({
+          name: 'Fen track',
+          miles: 40,
+          costPerMile: 2,
+          climate: 'coastal',
+          season: 'winter',
+          pace: 'fast',
+        }),
+      ],
+      {},
+      [clear, clear],
+    )
+    expect(report.days[0]!.severity).toBe(weatherOptions('temperate', 'summer')[0]!.severity)
+    expect(report.days[1]!.severity).toBe(weatherOptions('coastal', 'winter')[0]!.severity)
+    expect(report.days[1]!.allowance).toBe(21)
+  })
+
+  it('walks a cautious day short and a pressed day long', () => {
+    const slow = walk([leg({ miles: 100, pace: 'slow' })])
+    const fast = walk([leg({ miles: 100, pace: 'fast' })])
+    expect(slow.days[0]!.allowance).toBe(18)
+    expect(fast.days[0]!.allowance).toBe(30)
+  })
+
+  it('covers more than the day is worth on ground that costs less than a mile', () => {
+    const report = walk([leg({ miles: 60, costPerMile: 0.5 })])
+    expect(report.days[0]!.covered).toBe(48)
+    expect(report.days[1]!.covered).toBe(12)
+    expect(report.days).toHaveLength(2)
+  })
+
+  it('crosses more than one leg in a day when the legs are short', () => {
+    const report = walk([
+      leg({ name: 'Ford', miles: 5 }),
+      leg({ name: 'Orchard lane', miles: 5 }),
+      leg({ name: 'Scree', miles: 100, costPerMile: 2 }),
+    ])
+    expect(report.days[0]!.legName).toBe('Ford')
+    expect(report.days[0]!.covered).toBe(17)
+  })
+
+  it('carries the tail of a day into the next leg to a tenth of a mile', () => {
+    const report = walk(
+      [leg({ miles: 6, costPerMile: 3, pace: 'slow' }), leg({ miles: 100, pace: 'slow' })],
+      { milesPerDay: 25 },
+    )
+    expect(report.days[0]!.allowance).toBe(18.8)
+    expect(report.days[0]!.covered).toBe(6.8)
+  })
+
+  it('rounds a day to a tenth of a mile once, after every multiplier', () => {
+    const report = walk([leg({ miles: 10, costPerMile: 3, pace: 'slow' })], { milesPerDay: 25 })
+    expect(report.days[0]!.allowance).toBe(18.8)
+    expect(report.days[0]!.covered).toBe(6.3)
+    expect(report.days[1]!.covered).toBe(3.7)
+    expect(report.arrived).toBe(true)
+  })
+})
+
+describe('planJourney under weather', () => {
+  it('takes the weather penalty off the day', () => {
+    const report = walk([leg({ miles: 100 })], {}, [worst])
+    expect(report.days[0]!.severity).toBe('severe')
+    expect(report.days[0]!.allowance).toBe(14.4)
+  })
+
+  it('rolls the sky once a day', () => {
+    const report = walk([leg({ miles: 100 })], {}, [clear, worst, clear])
+    expect(report.days.map((d) => d.severity)).toEqual([
+      'clear',
+      'severe',
+      'clear',
+      'clear',
+      'clear',
+    ])
+  })
+
+  it('reads the severity off the climate table', () => {
+    const table = weatherOptions('temperate', 'summer')
+    const report = walk([leg({ miles: 100 })], {}, [worst])
+    expect(report.days[0]!.severity).toBe(table[table.length - 1]!.severity)
+  })
+})
+
+describe('planJourney and the exhaustion a march leaves', () => {
+  it('costs a level for every day of forced march', () => {
+    const report = walk([leg({ miles: 200, pace: 'forced' })])
+    expect(report.days[0]!.exhaustion).toBe(1)
+    expect(report.days[1]!.exhaustion).toBe(2)
+  })
+
+  it('leaves a normal pace alone', () => {
+    const report = walk([leg({ miles: 200 })])
+    expect(report.days.map((d) => d.exhaustion)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0])
+  })
+
+  it('walks the day the level was gained at the old speed', () => {
+    const report = walk([leg({ miles: 200, pace: 'forced' })], { milesPerDay: 20 })
+    expect(report.days[0]!.allowance).toBe(30)
+    expect(report.days[1]!.allowance).toBe(30)
+    expect(report.days[2]!.allowance).toBe(15)
+  })
+
+  it('halves the day from the second level', () => {
+    const report = walk([leg({ miles: 200 })], { exhaustion: 2 })
+    expect(report.days[0]!.allowance).toBe(12)
+  })
+
+  it('does not halve a party carrying one level', () => {
+    const report = walk([leg({ miles: 200 })], { exhaustion: 1 })
+    expect(report.days[0]!.allowance).toBe(24)
+  })
+
+  it('never walks a level back off on the road', () => {
+    const report = walk([leg({ miles: 60 })], { exhaustion: 3 })
+    expect(report.days.map((d) => d.exhaustion)).toEqual([3, 3, 3, 3, 3])
+    expect(report.exhaustion).toBe(3)
+  })
+
+  it('stalls the walk on the day the party can no longer move', () => {
+    const report = walk([leg({ miles: 200, pace: 'forced' })], { milesPerDay: 20 })
+    expect(report.days).toHaveLength(6)
+    expect(report.days[5]!.allowance).toBe(0)
+    expect(report.days[5]!.covered).toBe(0)
+    expect(report.stalled).toBe(true)
+    expect(report.arrived).toBe(false)
+    expect(report.arrivalDate).toBeNull()
+    expect(report.milesLeft).toBe(95)
+  })
+
+  it('still feeds the party on the day it stalls', () => {
+    const report = walk([leg({ miles: 200, pace: 'forced' })], { milesPerDay: 20, size: 2 })
+    expect(report.days[5]!.rationsLeft).toBe(28)
+    expect(report.exhaustion).toBe(6)
+  })
+
+  it('caps the track at six', () => {
+    const report = walk([leg({ miles: 400, pace: 'forced' })], { milesPerDay: 20, exhaustion: 5 })
+    expect(report.days[0]!.exhaustion).toBe(6)
+    expect(report.stalled).toBe(true)
+  })
+})
+
+describe('planJourney reporting', () => {
+  it('reads the sky off the middle of the table when the roll lands there', () => {
+    const report = walk([leg({ miles: 100 })], {}, [0.6])
+    expect(report.days[0]!.severity).toBe('mild')
+    expect(report.days[0]!.allowance).toBe(21.6)
+  })
+
+  it('ends on the exhaustion and the packs of the last day', () => {
+    const report = walk([leg({ miles: 200, pace: 'forced' })], { milesPerDay: 20 })
+    const last = report.days[report.days.length - 1]!
+    expect(report.exhaustion).toBe(last.exhaustion)
+    expect(report.rationsLeft).toBe(last.rationsLeft)
+  })
+
+  it('stalls at once when the party sets out too worn to move', () => {
+    const report = walk([leg({ miles: 40 })], { exhaustion: 5 })
+    expect(report.days).toHaveLength(1)
+    expect(report.days[0]!.allowance).toBe(0)
+    expect(report.stalled).toBe(true)
+    expect(report.milesLeft).toBe(40)
+  })
+
+  it('stalls when the party has no pace to give', () => {
+    const report = walk([leg({ miles: 40 })], { milesPerDay: 0 })
+    expect(report.days).toHaveLength(1)
+    expect(report.days[0]!.covered).toBe(0)
+    expect(report.stalled).toBe(true)
+    expect(report.arrived).toBe(false)
+  })
+
+  it('counts the miles still ahead across every leg left', () => {
+    const report = walk(
+      [leg({ miles: 30 }), leg({ miles: 45, costPerMile: 2 })],
+      { exhaustion: 5 },
+    )
+    expect(report.milesLeft).toBe(75)
+  })
+})
+
+describe('planJourney across the calendar', () => {
+  it('wraps the month and the year on a homebrew calendar', () => {
+    const report = planJourney({
+      legs: [leg({ miles: 200 })],
+      party: party(),
+      start: { year: 3, month: 2, day: 4 },
+      calendar: { monthsPerYear: 2, daysPerMonth: 5 },
+      rng: rngFrom([clear]),
+    })
+    expect(report.days[1]!.date).toEqual({ year: 3, month: 2, day: 5 })
+    expect(report.days[2]!.date).toEqual({ year: 4, month: 1, day: 1 })
+  })
+
+  it('reads the sky even on the day the party cannot move', () => {
+    const report = walk([leg({ miles: 40 })], { exhaustion: 5 }, [worst])
+    expect(report.days[0]!.severity).toBe('severe')
+    expect(report.days).toHaveLength(1)
+  })
+
+  it('arrives over a leg with nothing left to walk on the end of the route', () => {
+    const report = walk([leg({ miles: 24 }), leg({ name: 'Gate', miles: 0 })])
+    expect(report.days).toHaveLength(1)
+    expect(report.arrived).toBe(true)
+    expect(report.milesLeft).toBe(0)
+  })
+
+  it('only costs a forced level on a day that begins on the forced leg', () => {
+    const report = walk([leg({ miles: 24 }), leg({ miles: 100, pace: 'forced' })])
+    expect(report.days[0]!.exhaustion).toBe(0)
+    expect(report.days[1]!.allowance).toBe(36)
+    expect(report.days[1]!.exhaustion).toBe(1)
+  })
+
+  it('goes without hunger when the packs run out on the last evening', () => {
+    const report = walk([leg({ miles: 100 })], { milesPerDay: 20, rations: 20 })
+    const last = report.days[report.days.length - 1]!
+    expect(last.rationsLeft).toBe(0)
+    expect(last.hungry).toBe(false)
+    expect(report.arrived).toBe(true)
+  })
+})
+
+describe('planJourney and its weather source', () => {
+  it('walks the same road twice for the same seeded source', () => {
+    const plan = (rng: RandomSource) => ({
+      legs: [leg({ miles: 120 })],
+      party: party(),
+      start,
+      calendar: shape,
+      rng,
+    })
+    const first = planJourney(plan(buildSeededRng(7)))
+    const second = planJourney(plan(buildSeededRng(7)))
+    expect(second).toEqual(first)
+    expect(first.days.length).toBeGreaterThan(1)
+  })
+
+  it('draws once a day, so the second day reads the second draw', () => {
+    const report = walk([leg({ miles: 200 })], {}, [clear, worst])
+    expect(report.days[0]!.severity).toBe('clear')
+    expect(report.days[1]!.severity).toBe('severe')
+    expect(report.days[2]!.severity).toBe('severe')
+  })
+})
+
+describe('planJourney writes each day down', () => {
+  it('names the leg the day started on, not the one it ended in', () => {
+    const report = walk([
+      leg({ name: 'Ford', miles: 5 }),
+      leg({ name: 'Scree', miles: 100, costPerMile: 2 }),
+    ])
+    expect(report.days[0]!.legName).toBe('Ford')
+    expect(report.days[0]!.covered).toBe(14.5)
+    expect(report.days[1]!.legName).toBe('Scree')
+  })
+
+  it('carries the level the party sleeps on, not the one it woke with', () => {
+    const report = walk([leg({ miles: 200, pace: 'forced' })])
+    expect(report.days[0]!.allowance).toBe(36)
+    expect(report.days[0]!.exhaustion).toBe(1)
+  })
+
+  it('counts the packs once everyone has eaten and the weather has spoiled what it spoils', () => {
+    const report = walk([leg({ miles: 100 })], {}, [worst])
+    expect(report.days[0]!.rationsLeft).toBe(35)
+    expect(report.days[0]!.hungry).toBe(false)
+  })
+
+  it('writes the day nobody moves before it stops walking', () => {
+    const report = walk([leg({ miles: 500 })], { rations: 0 })
+    const last = report.days[report.days.length - 1]!
+    expect(report.days).toHaveLength(6)
+    expect(last.allowance).toBe(0)
+    expect(last.covered).toBe(0)
+    expect(last.exhaustion).toBe(6)
+    expect(report.stalled).toBe(true)
+  })
+})

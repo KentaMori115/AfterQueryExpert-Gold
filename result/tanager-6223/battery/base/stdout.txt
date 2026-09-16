@@ -1,0 +1,262 @@
+[verifier] no model.patch submitted — grading pristine base state
+[verifier] Resetting files touched by test.patch
+[verifier] Applying test.patch
+[verifier] cargo: cargo
+[verifier] building from a private copy
+[verifier] test binaries run unprivileged: setpriv --reuid=65534 --regid=65534 --clear-groups
+[verifier] target set_assignments produced no test binary
+[verifier] target row_deletion produced no test binary
+[verifier] 6 planted checks all reported as chosen
+[verifier] p2p: 68 ids, 0 failed
+[verifier] f2p: 53 ids, 53 failed
+===== raw suite output: run.log =====
+   Compiling tanager v0.6.0 (/tmp/tmp.Rl8Bvsg4Gf/app)
+error: could not compile `tanager` (test "set_assignments") due to 3 previous errors
+   Compiling tanager v0.6.0 (/tmp/tmp.Rl8Bvsg4Gf/app)
+error: could not compile `tanager` (test "row_deletion") due to 3 previous errors
+   Compiling tanager v0.6.0 (/tmp/tmp.Rl8Bvsg4Gf/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.02s
+   Compiling tanager v0.6.0 (/tmp/tmp.Rl8Bvsg4Gf/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.02s
+   Compiling tanager v0.6.0 (/tmp/tmp.Rl8Bvsg4Gf/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.79s
+   Compiling tanager v0.6.0 (/tmp/tmp.Rl8Bvsg4Gf/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.61s
+   Compiling tanager v0.6.0 (/tmp/tmp.Rl8Bvsg4Gf/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.02s
+===== cargo: base f41774c98127aceee8bb0f84.log =====
+ok aggregate_expression_in_projection
+ok avg_is_float
+ok bare_aggregate_over_empty_input_yields_one_row
+ok count_column_ignores_nulls
+ok count_distinct
+ok count_star_counts_rows
+ok group_by_with_multiple_aggregates
+ok group_concat_distinct
+ok group_concat_joins_in_first_seen_order
+ok group_concat_joins_values_in_order
+ok grouped_aggregate_over_empty_input_is_empty
+ok having_can_reference_aggregate_not_in_projection
+ok having_filters_groups
+ok min_and_max
+ok population_variance_and_stddev
+ok stddev_of_empty_is_null
+ok sum_of_integers_is_integer
+===== cargo: base ffdc6b6f8e52d10d490cdfad.log =====
+ok a_projection_may_repeat_a_column
+ok arithmetic_precedence_is_respected
+ok case_expression
+ok comparison_and_between
+ok computed_column_with_alias
+ok constant_select_without_from
+ok distinct_removes_duplicates
+ok in_list_filter
+ok integer_and_float_arithmetic_typing
+ok like_filter
+ok modulo_operator
+ok projects_named_columns
+ok where_with_boolean_connectives
+ok wildcard_projects_all_columns_in_order
+===== cargo: base 56161e7f3d4962ef525b0b46.log =====
+ok a_null_operand_makes_arithmetic_null
+ok aggregates_skip_nulls
+ok between_with_null_bound
+ok case_with_no_match_and_no_else_is_null
+ok comparison_with_null_is_unknown_and_filters_out
+ok distinct_treats_nulls_as_equal
+ok in_list_with_null_is_unknown
+ok is_null_and_is_not_null
+ok not_in_with_null_is_unknown
+ok not_null_is_null
+ok null_never_matches_case_operand
+ok null_propagates_through_arithmetic
+ok three_valued_and_or
+===== cargo: base 6051229e0362cc79e34089f9.log =====
+ok a_rejected_row_leaves_the_table_empty
+ok create_insert_select_roundtrip
+ok create_table_rejects_duplicate_columns
+ok drop_table_removes_it
+ok duplicate_table_errors_unless_if_not_exists
+ok insert_is_atomic_on_failure
+ok insert_widens_integer_into_float_column
+ok insert_with_explicit_columns_fills_missing_with_null
+ok not_null_violation_is_rejected
+ok script_runs_multiple_statements
+ok wrong_arity_insert_is_rejected
+===== cargo: base 2b6b3be9e939644eecacdac4.log =====
+ok limit_and_offset
+ok limit_zero_returns_nothing
+ok nulls_first_by_default_descending
+ok nulls_first_override
+ok nulls_sort_last_by_default_ascending
+ok offset_past_end_returns_nothing
+ok offset_past_the_end_yields_nothing
+ok order_ascending_by_default
+ok order_by_multiple_keys
+ok order_by_non_projected_column
+ok order_by_position
+ok order_descending
+ok order_is_stable_for_equal_keys
+===== grade =====
+[verifier] ===== FAILURES (53) =====
+[verifier] ✗ [f2p] row_deletion.a_compound_predicate_selects_the_rows
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.a_delete_leaves_other_tables_alone
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.a_delete_runs_inside_a_script
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.a_negated_predicate_still_needs_to_be_true
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.a_predicate_may_compare_two_columns
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.a_predicate_that_matches_nothing_reports_zero
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.a_where_that_is_not_boolean_is_a_binder_error
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.aggregates_over_the_table_follow_the_removal
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.an_aggregate_has_no_place_in_a_delete
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.an_alias_qualifies_the_predicate_columns
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.an_unknown_column_is_a_binder_error
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.an_unknown_predicate_can_be_asked_for_directly
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.an_unknown_table_is_a_catalog_error
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.deletes_can_follow_one_another
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.deleting_from_an_empty_table_reports_zero
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.every_column_shrinks_together
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.only_rows_where_the_predicate_is_true
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.reports_the_rows_it_removed
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.rows_added_after_a_delete_sit_behind_the_survivors
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.survivors_keep_their_stored_order
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.the_table_is_named_after_from
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] row_deletion.without_a_where_it_empties_the_table
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_computed_null_is_caught_the_same_way
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_false_predicate_changes_nothing
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_mixed_statement_counts_only_the_rows_that_moved
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_narrowing_value_is_a_type_error
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_null_into_a_not_null_column_rejects_the_statement
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_null_predicate_column_keeps_its_row_out_of_every_form
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_null_written_over_a_null_is_not_a_change
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_row_that_comes_out_identical_is_not_counted
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_statement_that_fails_reports_nothing_at_all
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_value_that_cannot_be_computed_leaves_the_table_alone
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_where_that_is_not_boolean_is_a_binder_error
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.a_widened_value_that_differs_does_count
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_aggregate_has_no_place_in_an_update
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_alias_qualifies_the_columns
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_assignment_may_read_several_columns
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_integer_widens_into_a_float_column
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_unknown_column_is_a_binder_error
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_unknown_table_is_a_catalog_error
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_update_runs_inside_a_script
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.an_update_touches_only_its_own_table
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.assigning_one_column_twice_is_rejected
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.assignments_read_the_row_as_it_was
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.changed_rows_stay_where_they_were
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.one_assignment_cannot_see_another
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.one_bad_row_holds_back_the_good_ones
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.only_rows_where_the_predicate_is_true
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.reports_the_rows_it_changed
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.several_matched_rows_change_together
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.text_cannot_be_stored_in_an_integer_column
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.the_not_null_column_can_be_written_too
+    not reported by any run
+    not reported by any run
+[verifier] ✗ [f2p] set_assignments.without_a_where_it_takes_every_row
+    not reported by any run
+    not reported by any run
+P2P 68/68 pass 0 fail; F2P 0/53 pass 53 fail; PARTIAL 0.5619834710743802; BINARY 0
+[verifier] reward.json={"reward": 0, "f2p_total": 53, "f2p_passed": 0, "p2p_total": 68, "p2p_passed": 68, "f2p": 0.0, "p2p": 1.0, "partial": 0.5619834710743802}

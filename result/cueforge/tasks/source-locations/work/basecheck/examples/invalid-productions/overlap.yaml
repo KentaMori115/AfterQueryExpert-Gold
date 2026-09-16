@@ -1,0 +1,20 @@
+version: 1
+production: projector_fight
+time_unit: ms
+
+resources:
+  main_projector:
+    kind: video_output
+    capacity: 1
+
+cues:
+  - id: video_a
+    department: video
+    trigger: {at: 0}
+    duration: 5000
+    uses: [main_projector]
+  - id: video_b
+    department: video
+    trigger: {at: 2000}
+    duration: 5000
+    uses: [main_projector]

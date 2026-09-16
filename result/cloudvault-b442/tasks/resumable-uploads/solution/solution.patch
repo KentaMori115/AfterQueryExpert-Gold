@@ -1,0 +1,529 @@
+diff --git a/lib/upload-assembly.ts b/lib/upload-assembly.ts
+new file mode 100644
+index 0000000..4e3f626
+--- /dev/null
++++ b/lib/upload-assembly.ts
+@@ -0,0 +1,88 @@
++// Turning a finished session into the file record the rest of the service
++// already reads.
++//
++// The upload route stores one canonical metadata document per file, and a
++// chunked file is described there by its parts: the first part's identifiers
++// stand for the file, and the full lists sit alongside them in part order. A
++// file that went up in one piece carries no lists at all, and the download path
++// tells the two apart by exactly that.
++
++import { getExtension } from "./file-utils"
++import { partsFor, type FilePart } from "./upload-parts"
++import { uploadStatus, type UploadSession } from "./upload-session"
++
++export interface PartUpload {
++    index: number
++    fileId: string
++    filePath: string
++}
++
++export interface AssembledUpload {
++    fileId: string
++    filePath: string
++    originalFilename: string
++    extension: string
++    size: number
++    chunks?: string[]
++    chunkPaths?: string[]
++}
++
++/**
++ * Builds the metadata for a completed session.
++ *
++ * Every part has to be accounted for exactly once, and the session itself has
++ * to be whole: a record written for a file that is still missing bytes would
++ * serve a truncated download for as long as it sat in the collection.
++ */
++/**
++ * Puts the results in part order, refusing anything that would leave the file
++ * unservable.
++ *
++ * Telegram hands an identifier back per message, in whatever order the sends
++ * finished, so what arrives here is a bag rather than a sequence. A part named
++ * twice, a part the file does not have, and a part nobody reported are all
++ * failures of the same kind: the download path walks the lists by position, and
++ * a list that does not line up with the grid serves the wrong bytes.
++ */
++function orderResults(parts: FilePart[], uploaded: PartUpload[]): PartUpload[] {
++    const byIndex = new Map<number, PartUpload>()
++
++    for (const result of uploaded) {
++        const known =
++            Number.isInteger(result.index) && result.index >= 0 && result.index < parts.length
++        if (!known) {
++            throw new Error("Upload result names a part the file does not have")
++        }
++        if (byIndex.has(result.index)) {
++            throw new Error("Upload result reports a part twice")
++        }
++        byIndex.set(result.index, result)
++    }
++    if (byIndex.size !== parts.length) {
++        throw new Error("Upload result is missing a part")
++    }
++    return parts.map((part) => byIndex.get(part.index)!)
++}
++
++export function assembleUpload(session: UploadSession, uploaded: PartUpload[]): AssembledUpload {
++    if (!uploadStatus(session).complete) {
++        throw new Error("Upload session is not complete")
++    }
++
++    const parts = partsFor(session.totalSize)
++    const ordered = orderResults(parts, uploaded)
++    const first = ordered[0]
++    const record: AssembledUpload = {
++        fileId: first.fileId,
++        filePath: first.filePath,
++        originalFilename: session.filename,
++        extension: getExtension(session.filename),
++        size: session.totalSize,
++    }
++
++    if (ordered.length > 1) {
++        record.chunks = ordered.map((part) => part.fileId)
++        record.chunkPaths = ordered.map((part) => part.filePath)
++    }
++    return record
++}
+diff --git a/lib/upload-parts.ts b/lib/upload-parts.ts
+new file mode 100644
+index 0000000..505d515
+--- /dev/null
++++ b/lib/upload-parts.ts
+@@ -0,0 +1,116 @@
++// The fixed grid a session is flushed onto.
++//
++// Telegram takes one document per message, so a large file reaches it as a run
++// of 45MB parts. A part can only be sent once every byte of it has arrived,
++// which is rarely the moment a chunk lands: a client sending 10MB pieces fills
++// part 0 after four and a half of them, and a piece that straddles a boundary
++// leaves both sides short.
++//
++// The grid is a property of the file's size alone, not of how the bytes were
++// delivered, so two clients uploading the same file in different pieces still
++// produce the same parts under the same names. That is what lets a resumed
++// upload finish what an abandoned one started.
++
++import { MAX_PART_SIZE, type UploadSession } from "./upload-session"
++
++export interface FilePart {
++    index: number
++    start: number
++    end: number
++}
++
++/**
++ * Cuts a file of this size into the parts it will be sent as.
++ *
++ * Every part but the last is a full 45MB, the last is whatever remains, and a
++ * file that fits inside one part is a single part covering all of it.
++ */
++export function partsFor(totalSize: number): FilePart[] {
++    const parts: FilePart[] = []
++    let start = 0
++    let index = 0
++
++    while (start < totalSize) {
++        const end = Math.min(start + MAX_PART_SIZE, totalSize) - 1
++        parts.push({ index, start, end })
++        start = end + 1
++        index += 1
++    }
++    return parts
++}
++
++// The name a part travels under. A file small enough to go in one piece keeps
++// its own name, the way a single-shot upload sends it; anything cut up carries
++// the part it is and the count it belongs to.
++function partFilename(filename: string, index: number, total: number): string {
++    if (total <= 1) {
++        return filename
++    }
++    return `${filename}.part${index + 1}_of_${total}`
++}
++
++// Whether one run of held bytes spans the whole part. The session merges what
++// it receives, so a part filled by five separate arrivals is one run by the
++// time this is asked; a part missing a byte anywhere inside it is not covered
++// by any run, however much of it has arrived.
++function covers(session: UploadSession, part: FilePart): boolean {
++    for (const range of session.received) {
++        if (range.start <= part.start && range.end >= part.end) {
++            return true
++        }
++    }
++    return false
++}
++
++// Parts that are whole and have not been handed over yet, lowest first. A part
++// held together out of several chunks counts, since the session merges what it
++// receives; a part still missing a byte anywhere inside it does not.
++function readyParts(session: UploadSession): number[] {
++    const ready: number[] = []
++
++    for (const part of partsFor(session.totalSize)) {
++        if (session.flushedParts.includes(part.index)) {
++            continue
++        }
++        if (covers(session, part)) {
++            ready.push(part.index)
++        }
++    }
++    return ready
++}
++
++export interface PartUploadPlan {
++    index: number
++    name: string
++    start: number
++    end: number
++    size: number
++}
++
++/**
++ * What to send to Telegram now, and the record that it has been sent.
++ *
++ * The whole parts are handed over lowest first, each with the byte window to
++ * read out of the file and the name it travels under, and are marked off as
++ * they go: asking again gives the caller only what became whole in between, so
++ * no part is sent twice. The names count against the parts the file has, not
++ * against how many happen to be ready.
++ */
++export function nextUploadBatch(session: UploadSession): PartUploadPlan[] {
++    const parts = partsFor(session.totalSize)
++    const batch: PartUploadPlan[] = []
++
++    for (const index of readyParts(session)) {
++        const part = parts[index]
++        batch.push({
++            index,
++            name: partFilename(session.filename, index, parts.length),
++            start: part.start,
++            end: part.end,
++            size: part.end - part.start + 1,
++        })
++        session.flushedParts.push(index)
++    }
++    session.flushedParts.sort((a, b) => a - b)
++    return batch
++}
+diff --git a/lib/upload-session.ts b/lib/upload-session.ts
+new file mode 100644
+index 0000000..de11c5b
+--- /dev/null
++++ b/lib/upload-session.ts
+@@ -0,0 +1,203 @@
++// Resumable upload sessions.
++//
++// A client that loses its connection halfway through a 200MB upload should not
++// have to start again. A session records which byte ranges of the file have
++// actually arrived, in whatever order they arrive, and answers the two
++// questions a resuming client asks: how much is here, and where do I carry on
++// from.
++
++import { MAX_FILE_SIZE } from "./file-utils"
++
++// Telegram refuses a document above 50MB, so the upload route cuts anything
++// larger into 45MB pieces. A session is measured against the same grid.
++export const MAX_PART_SIZE = 45 * 1024 * 1024
++
++// A session that has taken no traffic for six hours is abandoned.
++export const SESSION_IDLE_MS = 6 * 60 * 60 * 1000
++
++// A closed interval of file offsets: both ends are byte positions that belong
++// to the range, the same numbers a Content-Range header carries. Half open
++// bounds would be easier to add up, but every client sending these is reading
++// them off an HTTP header, and translating at the door is one fewer place for
++// an off by one to live.
++export interface ByteRange {
++    start: number
++    end: number
++}
++
++export interface UploadSession {
++    id: string
++    userId: string
++    filename: string
++    totalSize: number
++    startedAt: number
++    updatedAt: number
++    received: ByteRange[]
++    flushedParts: number[]
++}
++
++export interface UploadStatus {
++    receivedBytes: number
++    nextOffset: number
++    missing: ByteRange[]
++    complete: boolean
++}
++
++function isWholeNumber(value: number): boolean {
++    return Number.isInteger(value) && value >= 0
++}
++
++/**
++ * Checks an arriving range against the file it claims to belong to.
++ *
++ * Called before anything is written, so a client asking for something the file
++ * cannot hold leaves the session in the state it was already in rather than
++ * half edited.
++ */
++function assertRange(session: UploadSession, start: number, end: number): void {
++    if (!isWholeNumber(start) || !isWholeNumber(end)) {
++        throw new Error("Chunk bounds must be whole byte offsets")
++    }
++    if (end < start) {
++        throw new Error("Chunk ends before it starts")
++    }
++    if (end > session.totalSize - 1) {
++        throw new Error("Chunk reaches past the end of the file")
++    }
++}
++
++/**
++ * Folds one range into a sorted list, keeping it disjoint.
++ *
++ * Two ranges join when they overlap and also when they merely touch, since
++ * bytes 0 to 9 followed by 10 to 19 is one run of twenty bytes and a client
++ * resuming from it should be told so.
++ */
++function mergeInto(held: ByteRange[], incoming: ByteRange): ByteRange[] {
++    const all = [...held, incoming].sort((a, b) => a.start - b.start)
++    const merged: ByteRange[] = []
++
++    for (const range of all) {
++        const last = merged[merged.length - 1]
++        if (last && range.start <= last.end + 1) {
++            last.end = Math.max(last.end, range.end)
++        } else {
++            merged.push({ start: range.start, end: range.end })
++        }
++    }
++    return merged
++}
++
++/**
++ * Opens a session for a file of a known size. Nothing has arrived yet, so the
++ * received list starts empty and the session counts as active from startedAt.
++ */
++export function createUploadSession(
++    id: string,
++    userId: string,
++    filename: string,
++    totalSize: number,
++    startedAt: number,
++): UploadSession {
++    const name = filename.trim()
++    if (!name) {
++        throw new Error("Upload session needs a filename")
++    }
++    if (!isWholeNumber(totalSize) || totalSize < 1) {
++        throw new Error("Upload session needs a positive total size")
++    }
++    if (totalSize > MAX_FILE_SIZE) {
++        throw new Error("File size exceeds the limit of 250MB")
++    }
++
++    return {
++        id,
++        userId,
++        filename: name,
++        totalSize,
++        startedAt,
++        updatedAt: startedAt,
++        received: [],
++        flushedParts: [],
++    }
++}
++
++/**
++ * Folds one arrived range into the session.
++ *
++ * Ranges may arrive in any order, may overlap what is already held, and may sit
++ * directly against a neighbour; the stored list stays sorted, disjoint and with
++ * no two entries touching, so a byte delivered twice is still one byte.
++ *
++ * Bounds are checked before anything moves. A client that asks for something
++ * the file cannot hold gets an error and a session in the state it was already
++ * in, rather than half an edit it has no way to see.
++ */
++export function recordChunk(
++    session: UploadSession,
++    start: number,
++    end: number,
++    at: number,
++): void {
++    assertRange(session, start, end)
++
++    session.received = mergeInto(session.received, { start, end })
++    session.updatedAt = at
++}
++
++/**
++ * Bytes held, counted once each however many times they were delivered.
++ *
++ * A client that lost its connection mid-request often resends a range it had
++ * already finished, so the raw sum of what arrived overstates progress; the
++ * held list is disjoint, which makes this the honest figure to bill and to
++ * report.
++ */
++function heldBytes(session: UploadSession): number {
++    let held = 0
++    for (const range of session.received) {
++        held += range.end - range.start + 1
++    }
++    return held
++}
++
++/**
++ * Where a resuming client carries on from: the first offset that has not
++ * arrived. A file missing its opening byte resumes at zero however much of the
++ * tail is already held.
++ */
++function resumeOffset(session: UploadSession): number {
++    const first = session.received[0]
++    if (!first || first.start !== 0) {
++        return 0
++    }
++    return first.end + 1
++}
++
++/** The holes below the end of the file, in offset order. */
++function gapsOf(session: UploadSession): ByteRange[] {
++    const gaps: ByteRange[] = []
++    let cursor = 0
++
++    for (const range of session.received) {
++        if (range.start > cursor) {
++            gaps.push({ start: cursor, end: range.start - 1 })
++        }
++        cursor = range.end + 1
++    }
++    if (cursor <= session.totalSize - 1) {
++        gaps.push({ start: cursor, end: session.totalSize - 1 })
++    }
++    return gaps
++}
++
++/** What a client asking after a broken upload is told. */
++export function uploadStatus(session: UploadSession): UploadStatus {
++    const receivedBytes = heldBytes(session)
++    return {
++        receivedBytes,
++        nextOffset: resumeOffset(session),
++        missing: gapsOf(session),
++        complete: receivedBytes === session.totalSize,
++    }
++}
+diff --git a/lib/upload-store.ts b/lib/upload-store.ts
+new file mode 100644
+index 0000000..9ab2b06
+--- /dev/null
++++ b/lib/upload-store.ts
+@@ -0,0 +1,98 @@
++// Where open sessions live between requests.
++//
++// An upload in progress is not a file yet: nothing of it belongs in the files
++// collection until every part has reached Telegram. Sessions are held here in
++// front of that, keyed by the user who opened them, and are dropped once they
++// stop taking traffic.
++//
++// Every read takes the moment it is being asked at rather than reading a clock
++// of its own, so a request that spans a session's expiry sees one answer for
++// its whole length, and a sweep run from a job queue can be replayed over a
++// past instant without deleting what is live now.
++
++import { SESSION_IDLE_MS, type UploadSession } from "./upload-session"
++
++// How many uploads one account may have in flight at once.
++export const MAX_OPEN_SESSIONS = 4
++
++export interface SessionStore {
++    sessions: Map<string, UploadSession>
++}
++
++export function createSessionStore(): SessionStore {
++    return { sessions: new Map<string, UploadSession>() }
++}
++
++/**
++ * Idle is measured from the last chunk, not from the start: a slow client that
++ * keeps sending stays alive however long the file takes.
++ */
++function isIdle(session: UploadSession, now: number): boolean {
++    return now - session.updatedAt >= SESSION_IDLE_MS
++}
++
++function liveSessionsOf(store: SessionStore, userId: string, now: number): UploadSession[] {
++    const live: UploadSession[] = []
++
++    for (const session of store.sessions.values()) {
++        if (session.userId === userId && !isIdle(session, now)) {
++            live.push(session)
++        }
++    }
++    live.sort((a, b) => a.startedAt - b.startedAt)
++    return live
++}
++
++/**
++ * Takes a session into the store.
++ *
++ * An account already holding the maximum is refused, though sessions that have
++ * gone idle no longer occupy a place even when nothing has swept them out yet.
++ * An id the store is already holding is refused too: overwriting it would lose
++ * whatever the earlier session had taken in, and the client would be told to
++ * resume from an offset nothing stands behind.
++ */
++export function openSession(store: SessionStore, session: UploadSession, now: number): void {
++    if (store.sessions.has(session.id)) {
++        throw new Error("Upload session id is already open")
++    }
++    if (liveSessionsOf(store, session.userId, now).length >= MAX_OPEN_SESSIONS) {
++        throw new Error("Too many uploads in progress")
++    }
++    store.sessions.set(session.id, session)
++}
++
++/** One session, if it belongs to this account and is still alive. */
++export function getSession(
++    store: SessionStore,
++    userId: string,
++    id: string,
++    now: number,
++): UploadSession | null {
++    const session = store.sessions.get(id)
++    if (!session || session.userId !== userId || isIdle(session, now)) {
++        return null
++    }
++    return session
++}
++
++/**
++ * Drops what has gone idle and reports it, so the caller can bill or log the
++ * bytes that were abandoned.
++ *
++ * The ids come back sorted as text rather than in whatever order the store
++ * happened to hold them, so two sweeps over the same set of abandoned uploads
++ * read the same way in a log.
++ */
++export function sweepSessions(store: SessionStore, now: number): string[] {
++    const dropped: string[] = []
++
++    for (const session of [...store.sessions.values()]) {
++        if (isIdle(session, now)) {
++            dropped.push(session.id)
++            store.sessions.delete(session.id)
++        }
++    }
++    dropped.sort()
++    return dropped
++}

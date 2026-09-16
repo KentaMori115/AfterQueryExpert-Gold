@@ -1,0 +1,908 @@
+diff --git a/src/cli/commands/bounce.ts b/src/cli/commands/bounce.ts
+new file mode 100644
+index 0000000..8044771
+--- /dev/null
++++ b/src/cli/commands/bounce.ts
+@@ -0,0 +1,151 @@
++/**
++ * `sheave bounce` — the rope as a spring, and what a stop puts in it.
++ *
++ * The command that says why a deep winder cannot be landed where the
++ * drum says it is. A kilometre of rope with a loaded skip on it
++ * stretches better than a metre and a half and takes two or three
++ * seconds to do it, so the conveyance is still moving after the winder
++ * has stopped and is still moving when the brake goes on.
++ *
++ * The sweep is the part worth looking at. It walks the rope up the
++ * shaft and shows the spring getting harder and the swinging mass
++ * getting heavier at the same time, which is the fact behind the whole
++ * of it: where the worst stop in a wind happens depends on whether
++ * there is a balance rope, and the two answers are at opposite ends of
++ * the shaft.
++ */
++
++import type { Args } from "../args.ts";
++import { flag, number, onlyKnown, option, quantity } from "../args.ts";
++import {
++  DEEPEST_FACTOR,
++  LAID_MODULUS,
++  LOCKED_MODULUS,
++  MOVING_THIRD,
++  SUDDEN,
++  bounceMass,
++  bouncePeriod,
++  bouncesAMinute,
++  breakingLoad,
++  constructionNamed,
++  describeShock,
++  describeSpring,
++  goesSlack,
++  hang,
++  hardestDown,
++  hardestUp,
++  leastPull,
++  ownStretch,
++  peakPull,
++  pullModulus,
++  rope,
++  shockFactor,
++  slackRun,
++  snatchPull,
++  springRate,
++  staticPull,
++  steadyRise,
++  stopShare,
++  stretchUnder,
++  wholeStretch,
++} from "../../rope/index.ts";
++import { weightOf } from "../../units/index.ts";
++import { EMERGENCY_BRAKE } from "../../safety/index.ts";
++import {
++  factor as sayFactor,
++  force,
++  heading,
++  line,
++  metres,
++  places,
++  seconds,
++  share,
++  verdict,
++  wrapped,
++} from "../../report/format.ts";
++import { blocks, left, right, table } from "../../report/table.ts";
++
++const KNOWN = ["diameter", "construction", "grade", "ropes", "length", "carried", "balance", "speed", "retardation", "sweep"];
++
++/** Run it. */
++export function bounceCommand(args: Args): string[] {
++  onlyKnown(args, KNOWN);
++  const made = constructionNamed(option(args, "construction") ?? "6x36");
++  const diameter = option(args, "diameter") === undefined ? 52 : quantity(args, "diameter") * 1000;
++  const line0 = rope(Math.round(diameter * 1000) / 1000, made, number(args, "grade", 1960));
++  const length = option(args, "length") === undefined ? 984 : quantity(args, "length");
++  const carried = option(args, "carried") === undefined ? 17_040 : quantity(args, "carried");
++  const balance = option(args, "balance") === undefined ? 0 : quantity(args, "balance");
++  const one = hang({ rope: line0, length, ropes: number(args, "ropes", 1), carried, balance });
++  const going = option(args, "speed") === undefined ? 15 : quantity(args, "speed");
++  const retardation = number(args, "retardation", EMERGENCY_BRAKE);
++
++  const rows: Array<readonly [string, string]> = [
++    ["rope from the sheave", metres(one.length, 0)],
++    ["the modulus it stretches to", `${places(pullModulus(one.rope), 0)} N/mm²`],
++    ["how stiff that makes it", `${places(springRate(one), 1)} kN/m`],
++    ["what hangs on it", force(staticPull(one))],
++    ["the load stretches it", metres(stretchUnder(one, weightOf(one.carried + one.balance)), 3)],
++    ["its own weight stretches it", metres(ownStretch(one), 3)],
++    ["altogether", metres(wholeStretch(one), 3)],
++    ["what swings on the end", `${places(bounceMass(one) / 1000, 2)} t`],
++    ["the period it bounces at", seconds(bouncePeriod(one))],
++    ["which is, a minute", places(bouncesAMinute(one), 1)],
++    ["it runs on while the rope takes up", metres(slackRun(one, going), 1)],
++    ["a stop adds, steadily", force(steadyRise(one, retardation))],
++    ["and at worst", force(SUDDEN * steadyRise(one, retardation))],
++    ["so the rope carries, rising", force(peakPull(one, retardation))],
++    ["at a factor of", sayFactor(shockFactor(one, retardation))],
++    ["which clears the floor", verdict(shockFactor(one, retardation) >= DEEPEST_FACTOR)],
++    ["and carries, falling", force(leastPull(one, retardation))],
++    ["it goes slack falling above", `${places(hardestDown(one), 2)} m/s²`],
++    ["and loses the floor rising above", `${places(hardestUp(one, DEEPEST_FACTOR), 2)} m/s²`],
++    ["one stop uses, of breaking", share(stopShare(one, retardation))],
++    ["a snatch at that speed would be", force(snatchPull(one, going))],
++    ["against a breaking load of", force(breakingLoad(one.rope) * one.ropes)],
++  ];
++
++  const out: string[] = [
++    ...heading(describeSpring(one)),
++    ...table([left(""), right("")], rows.map((each) => [each[0], each[1]])),
++  ];
++
++  if (flag(args, "sweep")) {
++    out.push(
++      "",
++      ...heading("the same rope, wound up the shaft"),
++      ...table(
++        [right("from the sheave"), right("stiffness"), right("swinging"), right("a bounce"), right("stopped at"), left("slack falling")],
++        [1, 0.75, 0.5, 0.25, 0.05].map((at) => {
++          const there = hang({ ...one, length: Math.max(1, one.length * at) });
++          return [
++            metres(there.length, 0),
++            `${places(springRate(there), 0)} kN/m`,
++            `${places(bounceMass(there) / 1000, 1)} t`,
++            seconds(bouncePeriod(there)),
++            sayFactor(shockFactor(there, retardation)),
++            verdict(goesSlack(there, retardation)),
++          ];
++        }),
++      ),
++    );
++  }
++
++  return blocks(
++    out,
++    [
++      line("a round strand rope keeps", share(LAID_MODULUS)),
++      line("and a locked coil one", share(LOCKED_MODULUS)),
++      line("of the rope's own mass swings", share(MOVING_THIRD)),
++      line("a sudden load does", `${places(SUDDEN, 0)} times a gentle one`),
++      line("the stop itself", describeShock(one, retardation)),
++    ],
++    wrapped(
++      "A balance rope hangs from the conveyance rather than from the sheave, so the whole of it " +
++        "goes where the conveyance goes and the whole of it has to be retarded with it. Only a " +
++        "third of the winding rope does. That is why a balanced winder is hardest on its rope at " +
++        "the top of the shaft, where the winding rope is nearly all wound up and the balance rope " +
++        "is nearly all hanging, and an unbalanced one is hardest on it at the bottom.",
++    ),
++  );
++}
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 2909b45..706d51e 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -1,6 +1,7 @@
+ /** Every command the program has. */
+ 
+ export * from "./audit.ts";
++export * from "./bounce.ts";
+ export * from "./capel.ts";
+ export * from "./checks.ts";
+ export * from "./conveyance.ts";
+diff --git a/src/cli/main.ts b/src/cli/main.ts
+index 3abefd5..712e35b 100644
+--- a/src/cli/main.ts
++++ b/src/cli/main.ts
+@@ -16,6 +16,7 @@ import { parseArgs } from "./args.ts";
+ import { heading, wrapped } from "../report/format.ts";
+ import { left, table } from "../report/table.ts";
+ import { auditCommand } from "./commands/audit.ts";
++import { bounceCommand } from "./commands/bounce.ts";
+ import { capelCommand } from "./commands/capel.ts";
+ import { checksCommand } from "./commands/checks.ts";
+ import { conveyanceCommand } from "./commands/conveyance.ts";
+@@ -46,6 +47,7 @@ export interface Command {
+ const COMMANDS: readonly Command[] = [
+   { name: "rope", says: "what a rope stands, what it weighs, and the depth where the second beats the first", run: ropeCommand },
+   { name: "wear", says: "when a rope comes off, and the rule whose factor falls with depth", run: wearCommand },
++  { name: "bounce", says: "the rope as a spring, and what an emergency stop puts into it", run: bounceCommand },
+   { name: "capel", says: "the termination, and the calendar it puts on a sound rope", run: capelCommand },
+   { name: "shaft", says: "what will and will not go down the hole", run: shaftCommand },
+   { name: "guides", says: "what keeps a conveyance from swinging, and the span the formula wants", run: guidesCommand },
+diff --git a/src/design/checks.ts b/src/design/checks.ts
+index 9cb6fab..4504a28 100644
+--- a/src/design/checks.ts
++++ b/src/design/checks.ts
+@@ -17,7 +17,7 @@
+ import { WindingError, insist, positive } from "../errors.ts";
+ import { round } from "../units/round.ts";
+ import { weightOf } from "../units/measure.ts";
+-import { LEAST_RATIO, breakingLoad, factorFor, lifeIn, ratioOf } from "../rope/index.ts";
++import { DEEPEST_FACTOR, LEAST_RATIO, breakingLoad, factorFor, lifeIn, ratioOf } from "../rope/index.ts";
+ import { MOST_FLEET, capacity, fleetAngle } from "../drum/cylindrical.ts";
+ import { MOST_SWAY, SHOE_SPAN, guides, lateralLoad, sway } from "../shaft/guides.ts";
+ import { overwindRoom, stoppableFrom, sumpFor, widestConveyance } from "../shaft/shaft.ts";
+@@ -37,6 +37,7 @@ import {
+   peak,
+   ropeWanted,
+   windLength,
++  worstShock,
+ } from "../winder/model.ts";
+ 
+ /** One figure and the band it was meant to be in. */
+@@ -78,6 +79,8 @@ export interface Bands {
+   readonly swing: number;
+   /** The greatest share of what is hoisted that may be dead weight. */
+   readonly dead: number;
++  /** The least factor of safety the rope may work at while a wind is stopped. */
++  readonly stop: number;
+ }
+ 
+ /** The ordinary bands, which a caller may replace one at a time. */
+@@ -91,6 +94,7 @@ export function bands(over: Partial<Bands> = {}): Bands {
+     overload: over.overload ?? 2.5,
+     swing: over.swing ?? 40,
+     dead: over.dead ?? 0.75,
++    stop: over.stop ?? DEEPEST_FACTOR,
+   };
+ }
+ 
+@@ -179,6 +183,13 @@ export function checks(one: Winder, want = bands()): Check[] {
+       12,
+       "how far the conveyance creeps on and off the keps, in metres",
+     ),
++    check(
++      "stop",
++      worstShock(one).factor,
++      want.stop,
++      undefined,
++      "the factor the rope works at when an emergency stop is worst",
++    ),
+     check(
+       "acceleration",
+       Math.max(one.profile.accelerate, one.profile.decelerate),
+diff --git a/src/rope/dynamics.ts b/src/rope/dynamics.ts
+new file mode 100644
+index 0000000..f08077f
+--- /dev/null
++++ b/src/rope/dynamics.ts
+@@ -0,0 +1,257 @@
++/**
++ * The rope as a spring, which is what it is and what nothing else in
++ * this library has so far admitted.
++ *
++ * Every other module treats a winding rope as a string of no thickness
++ * that either holds or does not. It is nothing of the kind. A kilometre
++ * of fifty-two millimetre rope with a loaded skip on the end of it
++ * stretches better than a metre and a half, and it stretches slowly
++ * enough to be watched: a skip landed at the pit bottom settles onto
++ * the keps two or three seconds after the winder has stopped, and the
++ * banksman at the top sees nothing at all happen for the same two or
++ * three seconds after he sets it away.
++ *
++ * Three things come out of that and all of them matter.
++ *
++ * The first is the stretch itself, which is why a deep winder's
++ * landings are never where the drum says they are and why creeping
++ * exists at all. The second is that the rope has a period of its own,
++ * so a wind that stops does not stop: it bounces, at something between
++ * two and five seconds a swing, with nothing to damp it but the
++ * friction of the guides. The third is the one that puts ropes on the
++ * scrapheap, and it is in `shock.ts`.
++ *
++ * The modulus wanted here is the rope's and not the steel's. A laid
++ * rope stretches partly because its wires stretch and partly because
++ * the lay closes up, so it gives more than a solid bar of the same
++ * steel area does — a little over half as stiff for round strand, three
++ * quarters for locked coil, whose wires lie nearly along the rope. It
++ * is a fitted figure and it is the one figure here worth arguing with.
++ */
++
++import { insist, nonNegative, positive, within } from "../errors.ts";
++import { round } from "../units/round.ts";
++import { weightOf } from "../units/measure.ts";
++import { type Rope, massPerMetre, steelArea } from "./construction.ts";
++import { YOUNGS } from "./wear.ts";
++
++/**
++ * How much of steel's modulus a round strand rope keeps.
++ *
++ * Fitted to a 6x36 rope measured at 110 kN/mm² of steel area against
++ * the 200 the wire itself is drawn to. The missing half is the lay
++ * closing: every wire in the rope runs helically and a pull straightens
++ * it a little before it stretches it, and a rope that has been worked
++ * for a year is stiffer than a new one for that reason alone.
++ */
++export const LAID_MODULUS = 0.55;
++
++/**
++ * And how much a locked coil rope keeps.
++ *
++ * Three quarters, because its shaped wires interlock and lie nearly
++ * along the rope, so there is very little lay left to close. It is
++ * stiffer, which is an advantage at depth and the reason it is used
++ * there — and it is also why a locked coil rope is unforgiving of a
++ * shock, since a spring that gives less takes more.
++ */
++export const LOCKED_MODULUS = 0.75;
++
++/**
++ * The modulus a rope actually stretches to, in newtons a square
++ * millimetre of steel area.
++ *
++ * Not the modulus of steel, which is what a first calculation uses and
++ * which gives a stretch half of what a deep winder really shows.
++ */
++export function pullModulus(one: Rope): number {
++  const share = one.construction.strands === 1 ? LOCKED_MODULUS : LAID_MODULUS;
++  return round(YOUNGS * share, 1);
++}
++
++/**
++ * A rope hanging in a shaft with something on the end of it.
++ *
++ * The length is from the sheave to the conveyance and not the depth of
++ * the shaft: the rope between the sheave and the bank is under the same
++ * tension and stretches with the rest of it, and on a shaft with a
++ * forty metre headgear that is another forty metres of spring.
++ */
++export interface Hang {
++  /** The rope it hangs on. */
++  readonly rope: Rope;
++  /** From the sheave down to the conveyance, in metres. */
++  readonly length: number;
++  /** How many ropes are pulling together. */
++  readonly ropes: number;
++  /** What is on the end of them, in kilograms. */
++  readonly carried: number;
++  /** The balance rope hanging under that, in kilograms. */
++  readonly balance: number;
++}
++
++/** A hang, checked. */
++export function hang(over: Partial<Hang> & Pick<Hang, "rope" | "length" | "carried">): Hang {
++  const found: Hang = {
++    rope: over.rope,
++    length: over.length,
++    ropes: over.ropes ?? 1,
++    carried: over.carried,
++    balance: over.balance ?? 0,
++  };
++  positive(found.length, "length");
++  within(found.ropes, 1, 6, "ropes");
++  positive(found.carried, "carried");
++  nonNegative(found.balance, "balance");
++  return found;
++}
++
++/**
++ * How stiff that hang is, in kilonewtons a metre.
++ *
++ * The modulus times the steel area over the length, and the ropes of a
++ * multi-rope winder add: four ropes are four springs side by side and
++ * are four times as stiff as one. The length is on the bottom, which is
++ * the whole of what follows — a rope at the pit bottom is a soft spring
++ * and the same rope at the bank is a hard one, and the same wind is a
++ * different mechanical problem at the two ends of it.
++ */
++export function springRate(one: Hang): number {
++  const area = steelArea(one.rope) * one.ropes;
++  return round((pullModulus(one.rope) * area) / (1000 * one.length), 4);
++}
++
++/** How far a stated pull stretches it, in metres. */
++export function stretchUnder(one: Hang, pull: number): number {
++  nonNegative(pull, "pull");
++  const rate = springRate(one);
++  insist(rate > 0, "that rope has no stiffness at all", "length");
++  return round(pull / rate, 4);
++}
++
++/**
++ * How far the rope's own weight stretches it, in metres.
++ *
++ * Half what the same weight hung on the end would, because the top of
++ * the rope carries all of it and the bottom of it carries none. It is a
++ * small figure on a shallow shaft and it is a quarter of the whole
++ * stretch at a thousand metres, at which point a colliery that has
++ * ignored it is landing its cages a hand's breadth out.
++ */
++export function ownStretch(one: Hang): number {
++  const own = weightOf(massPerMetre(one.rope) * one.ropes * one.length);
++  return round(stretchUnder(one, own / 2), 4);
++}
++
++/** What hangs on the rope, in kilonewtons, the rope itself included. */
++export function staticPull(one: Hang): number {
++  const own = massPerMetre(one.rope) * one.ropes * one.length;
++  return round(weightOf(one.carried + one.balance + own), 4);
++}
++
++/**
++ * How far the whole arrangement stretches, in metres.
++ *
++ * The load on the end, the balance rope under it, and the winding
++ * rope's own weight at half effect. On a deep winder it is the figure
++ * that decides how much creep the landing wants, and it is not the same
++ * at the two ends of the wind, which is the awkward part: a shaft is
++ * landed accurately at one end and approximately at the other unless
++ * somebody has thought about it.
++ */
++export function wholeStretch(one: Hang): number {
++  return round(stretchUnder(one, weightOf(one.carried + one.balance)) + ownStretch(one), 4);
++}
++
++/**
++ * How much of a hanging rope's own mass moves with the conveyance.
++ *
++ * A third. The rope is a spring with its mass spread along it, and the
++ * bottom of it moves with the load while the top of it does not move at
++ * all; the third is what an equal-energy argument gives and it is close
++ * enough to measurement that nobody has ever needed a better one.
++ */
++export const MOVING_THIRD = 1 / 3;
++
++/**
++ * What is actually swinging on the end of the spring, in kilograms.
++ *
++ * The conveyance, a third of the winding rope, and the whole of the
++ * balance rope — the last of those being the part that surprises
++ * people. A balance rope hangs from the conveyance rather than from the
++ * sheave, so every metre of it goes where the conveyance goes and every
++ * metre of it counts. It is the reason a balanced winder bounces harder
++ * at the top of the shaft than at the bottom, which is the opposite way
++ * round from an unbalanced one and is not what anybody expects.
++ */
++export function bounceMass(one: Hang): number {
++  const own = massPerMetre(one.rope) * one.ropes * one.length;
++  return round(one.carried + one.balance + own * MOVING_THIRD, 3);
++}
++
++/**
++ * The period the conveyance bounces at, in seconds.
++ *
++ * The ordinary period of a mass on a spring, with the mass above and
++ * the stiffness above it. Two to five seconds on anything deep, which
++ * is slow enough to see and slow enough to be dangerous: it is of the
++ * same order as the time a brake takes to stop a wind, so a stop and a
++ * bounce arrive together and the second of them lands on top of the
++ * first.
++ */
++export function bouncePeriod(one: Hang): number {
++  const rate = springRate(one) * 1000;
++  const mass = bounceMass(one);
++  insist(rate > 0 && mass > 0, "that hang has nothing to bounce", "carried");
++  return round(2 * Math.PI * Math.sqrt(mass / rate), 3);
++}
++
++/** How many times a minute it swings. */
++export function bouncesAMinute(one: Hang): number {
++  const period = bouncePeriod(one);
++  insist(period > 0, "that hang has no period at all", "carried");
++  return round(60 / period, 2);
++}
++
++/**
++ * How far the conveyance travels while the rope is taking up the load,
++ * in metres.
++ *
++ * A quarter of a period at the speed being wound at. It is the figure
++ * that says why a deep winder cannot be stopped where it is wanted: at
++ * fifteen metres a second and a two and a half second period the answer
++ * is nine metres, and nine metres is the whole of an inset.
++ */
++export function slackRun(one: Hang, speed: number): number {
++  positive(speed, "speed");
++  return round((speed * bouncePeriod(one)) / 4, 3);
++}
++
++/**
++ * The depth at which a rope's own stretch reaches a stated share of the
++ * whole, in metres.
++ *
++ * Searched rather than solved, because the carried load stretches the
++ * rope in proportion to the length and the rope's own weight stretches
++ * it as the square of it, so the share moves with depth in a way that
++ * no single figure describes. It is the depth below which the rope
++ * itself is the thing being weighed.
++ */
++export function ownStretchReaches(one: Hang, share = 0.25): number {
++  within(share, 0.01, 0.99, "share");
++  for (let at = 10; at <= 4000; at += 10) {
++    const trial = hang({ ...one, length: at });
++    const whole = wholeStretch(trial);
++    if (whole > 0 && ownStretch(trial) / whole >= share) return at;
++  }
++  return 0;
++}
++
++/** The spring described in a line. */
++export function describeSpring(one: Hang): string {
++  return (
++    `${round(one.length, 0)} m of rope at ${springRate(one)} kN/m: ` +
++    `${wholeStretch(one)} m of stretch, ${bounceMass(one)} kg swinging, ` +
++    `${bouncePeriod(one)} s a bounce`
++  );
++}
+diff --git a/src/rope/index.ts b/src/rope/index.ts
+index a40fc15..9ba7fb6 100644
+--- a/src/rope/index.ts
++++ b/src/rope/index.ts
+@@ -3,3 +3,5 @@
+ export * from "./construction.ts";
+ export * from "./wear.ts";
+ export * from "./capping.ts";
++export * from "./dynamics.ts";
++export * from "./shock.ts";
+diff --git a/src/rope/shock.ts b/src/rope/shock.ts
+new file mode 100644
+index 0000000..bfce22c
+--- /dev/null
++++ b/src/rope/shock.ts
+@@ -0,0 +1,196 @@
++/**
++ * What a wind that stops suddenly puts into the rope.
++ *
++ * A winding rope is never broken by the load it was designed for. It is
++ * broken by a load nobody designed for at all, and the commonest of
++ * those is the ordinary emergency stop: the brake goes on, the drum
++ * stops in a couple of seconds, and the conveyance a kilometre below it
++ * has no idea anything has happened until the rope tells it.
++ *
++ * The arithmetic is the oldest in the subject and it is still the piece
++ * most often left out. A load put on a spring all at once does twice
++ * what the same load put on gently does. So a retardation applied to
++ * the drum does not raise the tension by mass times retardation: it
++ * raises it by that much and then the conveyance swings past by the
++ * same amount again, and the rope sees the sum for as long as the first
++ * half-swing lasts.
++ *
++ * The direction the conveyance was going decides which way that lands.
++ * A rising conveyance stopped hard is pulled harder — the rope takes
++ * the whole of it and the figures below say whether it stands. A
++ * falling one stopped hard is pulled *less*, because the retardation is
++ * upward and the rope is being unloaded, and if it is unloaded past
++ * zero the rope goes slack. That is the dangerous one. A slack winding
++ * rope is a rope with a conveyance falling free underneath it, and when
++ * it comes taut again it does so at whatever speed the conveyance has
++ * picked up in the meantime, against a spring that no longer has a
++ * second and a half to take up the load. Every rope this library would
++ * condemn on a factor of safety has been condemned on paper. The ones
++ * that part in a shaft part on a snatch.
++ */
++
++import { insist, nonNegative, positive } from "../errors.ts";
++import { round } from "../units/round.ts";
++import { type Hang, bounceMass, springRate, staticPull } from "./dynamics.ts";
++import { breakingLoad } from "./construction.ts";
++
++/**
++ * How much more a load put on all at once does than the same load put
++ * on gently.
++ *
++ * Twice, and the two is not an allowance or a factor of ignorance. It
++ * is what a spring does: the mass arrives at the new resting place with
++ * the speed it picked up getting there and carries straight on past it
++ * by as far again, so the worst the spring sees is double and the mean
++ * it settles to is single.
++ */
++export const SUDDEN = 2;
++
++/**
++ * The steady part of what a retardation adds, in kilonewtons.
++ *
++ * Mass times retardation, on the mass that is actually swinging rather
++ * than on everything hanging in the shaft. That distinction is the
++ * whole of the difference between this and a first calculation: a third
++ * of the winding rope is moving with the conveyance and the rest of it
++ * is being held by the drum, so a rope's own weight counts once in the
++ * static pull and a third of a time here.
++ */
++export function steadyRise(one: Hang, retardation: number): number {
++  positive(retardation, "retardation");
++  return round((bounceMass(one) * retardation) / 1000, 4);
++}
++
++/**
++ * The most the rope carries when a rising wind is stopped, in
++ * kilonewtons.
++ *
++ * What was already hanging, plus twice what the retardation adds. It is
++ * reached about a quarter of a bounce after the brake goes on and it
++ * does not last: half a period later the tension is back to the static
++ * figure and the rope has forgotten about it. The rope has forgotten
++ * about it; the wires have not.
++ */
++export function peakPull(one: Hang, retardation: number): number {
++  return round(staticPull(one) + SUDDEN * steadyRise(one, retardation), 4);
++}
++
++/**
++ * The least it carries when a falling wind is stopped, in kilonewtons.
++ *
++ * The same arithmetic the other way up, because retarding a descending
++ * conveyance means holding it back, and the rope holds it back by
++ * pulling less. Nought is not a floor: the figure goes negative on
++ * paper and what a negative rope tension means in a shaft is that there
++ * is no rope tension at all.
++ */
++export function leastPull(one: Hang, retardation: number): number {
++  return round(staticPull(one) - SUDDEN * steadyRise(one, retardation), 4);
++}
++
++/** Whether stopping a descending wind that hard leaves the rope slack. */
++export function goesSlack(one: Hang, retardation: number): boolean {
++  return leastPull(one, retardation) <= 0;
++}
++
++/**
++ * The hardest a descending wind may be stopped before the rope goes
++ * slack, in metres a second squared.
++ *
++ * The retardation at which twice the steady rise eats the whole static
++ * pull. It is a real limit on how hard a winder may be braked going
++ * down and it is tightest exactly where nobody wants it to be: at the
++ * top of a deep shaft, where a balance rope has put its whole weight
++ * into the swinging mass and the winding rope has taken most of its own
++ * weight out of the static pull.
++ */
++export function hardestDown(one: Hang): number {
++  const mass = bounceMass(one);
++  insist(mass > 0, "that hang has nothing to retard", "carried");
++  return round((staticPull(one) * 1000) / (SUDDEN * mass), 4);
++}
++
++/**
++ * What the rope sees when a slack rope comes taut, in kilonewtons.
++ *
++ * A free conveyance meeting a spring, which is a different problem from
++ * a load on a spring and a very much worse one: the tension is the
++ * speed times the root of the stiffness and the mass together, and it
++ * takes no account whatever of what the thing weighs. It is why a
++ * snatch is measured against the breaking load rather than against the
++ * factor of safety — a factor of safety is about a load and this is
++ * about an energy.
++ */
++export function snatchPull(one: Hang, speed: number): number {
++  positive(speed, "speed");
++  const stiffness = springRate(one) * 1000;
++  const mass = bounceMass(one);
++  insist(stiffness > 0 && mass > 0, "that hang has nothing to snatch", "carried");
++  return round((speed * Math.sqrt(stiffness * mass)) / 1000, 3);
++}
++
++/**
++ * The factor of safety the rope is working at while a rising wind is
++ * stopped.
++ *
++ * The breaking load of the whole set over the peak pull. It is not the
++ * factor the rules ask for, which is a static figure about a rope
++ * hanging still, and it is always lower — the question a design asks of
++ * it is whether it stays above the floor the rules will not go below
++ * however deep the shaft is.
++ */
++export function shockFactor(one: Hang, retardation: number): number {
++  const peak = peakPull(one, retardation);
++  insist(peak > 0, "nothing is hanging on that rope", "carried");
++  return round((breakingLoad(one.rope) * one.ropes) / peak, 3);
++}
++
++/** Whether that factor stays above a stated floor. */
++export function standsTheStop(one: Hang, retardation: number, wanted: number): boolean {
++  positive(wanted, "wanted");
++  return shockFactor(one, retardation) >= wanted;
++}
++
++/**
++ * The hardest a rising wind may be stopped and still keep a stated
++ * factor, in metres a second squared.
++ *
++ * Solved rather than searched, because the peak pull is a straight line
++ * in the retardation. Nought comes back where the rope will not keep
++ * that factor standing still, which is a fact about the rope and the
++ * shaft and not about the brake, and no brake setting whatever will
++ * mend it.
++ */
++export function hardestUp(one: Hang, wanted: number): number {
++  positive(wanted, "wanted");
++  const allowed = (breakingLoad(one.rope) * one.ropes) / wanted;
++  const spare = allowed - staticPull(one);
++  if (spare <= 0) return 0;
++  const mass = bounceMass(one);
++  insist(mass > 0, "that hang has nothing to retard", "carried");
++  return round((spare * 1000) / (SUDDEN * mass), 4);
++}
++
++/**
++ * How much of the rope's strength one stop uses up, as a share.
++ *
++ * The peak pull over the breaking load. It is the figure to quote at
++ * somebody who says an emergency stop is free: it is not free, it is a
++ * cycle of stress at a share of breaking that no ordinary wind comes
++ * near, and a winder whose overspeed gear trips twice a shift is
++ * spending rope on it.
++ */
++export function stopShare(one: Hang, retardation: number): number {
++  const breaking = breakingLoad(one.rope) * one.ropes;
++  insist(breaking > 0, "that rope stands nothing", "rope");
++  return round(peakPull(one, retardation) / breaking, 4);
++}
++
++/** The stop described in a line. */
++export function describeShock(one: Hang, retardation: number): string {
++  return (
++    `stopping at ${retardation} m/s² takes it to ${peakPull(one, retardation)} kN, ` +
++    `a factor of ${shockFactor(one, retardation)}, ` +
++    `${goesSlack(one, retardation) ? "and slack going down" : `and ${leastPull(one, retardation)} kN going down`}`
++  );
++}
+diff --git a/src/winder/audit.ts b/src/winder/audit.ts
+index 8fe482f..c64fd30 100644
+--- a/src/winder/audit.ts
++++ b/src/winder/audit.ts
+@@ -18,6 +18,7 @@
+ import { round } from "../units/round.ts";
+ import { weightOf } from "../units/measure.ts";
+ import {
++  DEEPEST_FACTOR,
+   LEAST_RATIO,
+   bendingStress,
+   breakingLoad,
+@@ -49,6 +50,7 @@ import { hookBand, retardationFor, EMERGENCY_BRAKE } from "../safety/index.ts";
+ import {
+   type Winder,
+   balanceSwing,
++  bounceAt,
+   cycleLasts,
+   deadShare,
+   drumOf,
+@@ -63,6 +65,9 @@ import {
+   rms,
+   ropeStrongEnough,
+   ropeWanted,
++  slackAt,
++  stretchAt,
++  worstShock,
+   wheelOf,
+   windLength,
+ } from "./model.ts";
+@@ -108,6 +113,35 @@ export function ropeFindings(one: Winder): Finding[] {
+       ),
+     );
+   }
++  const worst = worstShock(one);
++  if (worst.factor < DEEPEST_FACTOR) {
++    out.push(
++      finding(
++        "error",
++        "rope",
++        `stopped at ${EMERGENCY_BRAKE} m/s² ${worst.up} m up the wind the rope works at ${worst.factor}, ` +
++          `where ${DEEPEST_FACTOR} is the floor no rope is put on below: the brake is asking more of it than the shaft does`,
++      ),
++    );
++  }
++  if (slackAt(one, worst.up)) {
++    out.push(
++      finding(
++        "warning",
++        "rope",
++        `stopping a descending wind ${worst.up} m up at ${EMERGENCY_BRAKE} m/s² unloads the rope past nothing: ` +
++          `it goes slack and comes taut again with the conveyance already moving, and a snatch is not a load but an energy`,
++      ),
++    );
++  }
++  out.push(
++    finding(
++      "note",
++      "rope",
++      `it stretches ${stretchAt(one, 0)} m at the pit bottom and bounces every ${bounceAt(one, 0)} s; ` +
++        `an emergency stop is worst ${worst.up} m up, at a factor of ${worst.factor}`,
++    ),
++  );
+   out.push(
+     finding(
+       "note",
+diff --git a/src/winder/model.ts b/src/winder/model.ts
+index 87d39cf..dedd49a 100644
+--- a/src/winder/model.ts
++++ b/src/winder/model.ts
+@@ -17,7 +17,23 @@
+ import { insist, nonNegative, positive, within } from "../errors.ts";
+ import { round } from "../units/round.ts";
+ import { weightOf } from "../units/measure.ts";
+-import { type Rope, breakingLoad, factorAt, factorFor, massPerMetre, staticRopeLoad } from "../rope/index.ts";
++import {
++  type Hang,
++  DEEPEST_FACTOR,
++  breakingLoad,
++  bouncePeriod,
++  factorAt,
++  factorFor,
++  goesSlack,
++  hang,
++  massPerMetre,
++  peakPull,
++  shockFactor,
++  staticRopeLoad,
++  wholeStretch,
++  type Rope,
++} from "../rope/index.ts";
++import { EMERGENCY_BRAKE } from "../safety/index.ts";
+ import { type Shaft, ropeLength } from "../shaft/index.ts";
+ import { type Drum, type Koepe } from "../drum/index.ts";
+ import { type Conveyance, gross } from "../cage/index.ts";
+@@ -275,3 +291,96 @@ export function outputPerYear(one: Winder, days = 300): number {
+   positive(days, "days");
+   return round(outputPerDay(one) * days, 0);
+ }
++
++/**
++ * The rope hanging in the shaft with the rising conveyance a stated
++ * height above the lowest inset, in metres.
++ *
++ * The rope is measured from the sheave and not from the bank, so a
++ * conveyance standing at the bank still has the headgear's worth of
++ * rope above it and is not on a spring of no length. The balance rope
++ * under it is as long as the conveyance is high, which is what a
++ * balance rope is for and is why the static pull hardly moves across a
++ * wind while the mass that swings on it moves a great deal.
++ */
++export function hangAt(one: Winder, up: number): Hang {
++  nonNegative(up, "up");
++  within(up, 0, windLength(one), "up");
++  return hang({
++    rope: one.rope,
++    length: ropeWanted(one) - up,
++    ropes: one.ropes,
++    carried: gross(one.rising),
++    balance: one.balance * up,
++  });
++}
++
++/** How far the rope has stretched at that point in the wind, in metres. */
++export function stretchAt(one: Winder, up: number): number {
++  return wholeStretch(hangAt(one, up));
++}
++
++/** The period it bounces at there, in seconds. */
++export function bounceAt(one: Winder, up: number): number {
++  return bouncePeriod(hangAt(one, up));
++}
++
++/**
++ * The factor of safety the rope works at when a rising wind is stopped
++ * there.
++ *
++ * The set's factor, cut by the same unevenness the static factor is
++ * cut by: the worst rope of a set carries more than an even share, so
++ * it reaches its own limit before the set reaches the set's. A single
++ * rope is cut by nothing, there being nothing for it to be unequal
++ * with.
++ */
++export function shockFactorAt(one: Winder, up: number, retardation = EMERGENCY_BRAKE): number {
++  const uneven = worstShare(one.ropes) * one.ropes;
++  insist(uneven > 0, "that winder has no ropes on it", "ropes");
++  return round(shockFactor(hangAt(one, up), retardation) / uneven, 3);
++}
++
++/** Whether stopping a descending wind there leaves the rope slack. */
++export function slackAt(one: Winder, up: number, retardation = EMERGENCY_BRAKE): boolean {
++  return goesSlack(hangAt(one, up), retardation);
++}
++
++/** A point in the wind, and what the rope is working at there. */
++export interface Worst {
++  /** How far above the lowest inset it is, in metres. */
++  readonly up: number;
++  /** The factor of safety found there. */
++  readonly factor: number;
++}
++
++/**
++ * Where in the wind an emergency stop is worst, and what it comes to.
++ *
++ * Walked in whole metres from the lowest inset to the bank, because the
++ * answer is not at the end anybody expects and is not always at the
++ * same end. On a winder with no balance rope the worst is at the
++ * bottom, where the winding rope's own weight is all in the shaft. On a
++ * balanced one it is at the top, because the balance rope's whole mass
++ * swings with the conveyance while only a third of the winding rope's
++ * does — so the mass being retarded grows as the wind rises while the
++ * load hanging stays where it was.
++ */
++export function worstShock(one: Winder, retardation = EMERGENCY_BRAKE): Worst {
++  const wind = Math.floor(windLength(one));
++  let where = 0;
++  let most = peakPull(hangAt(one, 0), retardation);
++  for (let up = 1; up <= wind; up += 1) {
++    const found = peakPull(hangAt(one, up), retardation);
++    if (found > most) {
++      most = found;
++      where = up;
++    }
++  }
++  return { up: where, factor: shockFactorAt(one, where, retardation) };
++}
++
++/** Whether the rope stands an emergency stop anywhere in the wind. */
++export function standsAStop(one: Winder, retardation = EMERGENCY_BRAKE): boolean {
++  return worstShock(one, retardation).factor >= DEEPEST_FACTOR;
++}

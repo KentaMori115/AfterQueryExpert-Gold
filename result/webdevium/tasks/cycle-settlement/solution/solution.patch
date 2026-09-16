@@ -1,0 +1,690 @@
+diff --git a/lib/ops/billing/allowance.ts b/lib/ops/billing/allowance.ts
+new file mode 100644
+index 0000000..8d62562
+--- /dev/null
++++ b/lib/ops/billing/allowance.ts
+@@ -0,0 +1,128 @@
++import { centsFromHours, roundHalfEven } from './money'
++import type { Plan } from './proration'
++import { totalUsageByWindow } from './usage'
++import type { UsageEvent } from './ledger'
++
++/**
++ * One plan period inside a billing cycle, exactly as prorateCycle reports it.
++ * Nothing here recomputes the split or the subscription cents: the period is
++ * taken as given so a statement and an invoice never disagree about what the
++ * client was on and what the seat cost.
++ */
++export type CycleSegment = {
++  plan: Plan
++  start: number
++  end: number
++  ratio: number
++  cents: number
++}
++
++/**
++ * A period once usage has been attributed to it and the included-hour
++ * allowance has been spent against that usage. Everything on this row is an
++ * exact figure: rounding belongs to the statement, not to the running total,
++ * or a long cycle would drift a hundredth at a time.
++ */
++export type AllowanceRow = {
++  segment: CycleSegment
++  hours: number
++  allowanceHours: number
++  carriedInHours: number
++  overageHours: number
++  spentAllowanceHours: number
++  carryOutHours: number
++}
++
++/** Hours are quoted in hundredths, the way a timesheet records them. */
++export const HOUR_SCALE = 2
++
++export function roundHours(hours: number) {
++  return roundHalfEven(hours, HOUR_SCALE)
++}
++
++/**
++ * What a single period earned in its own right, before anything an earlier
++ * period handed it. A plan that covered a third of the cycle earns a third of
++ * its included hours, which is the same proportion the seat is billed at.
++ */
++export function earnedHours(segment: CycleSegment) {
++  return segment.plan.includedHours * segment.ratio
++}
++
++/**
++ * Spend one period's usage against the hours available to it and report what
++ * moves on. Hours never travel backwards: a period that overran is settled
++ * before the next period's allowance exists, so an overrun stands even when
++ * the client ends the cycle with hours to spare.
++ */
++export function spendPeriod(
++  segment: CycleSegment,
++  hours: number,
++  carriedIn: number
++): AllowanceRow {
++  const earned = earnedHours(segment)
++  const available = earned + carriedIn
++  const spent = Math.min(hours, available)
++
++  return {
++    segment,
++    hours,
++    allowanceHours: earned,
++    carriedInHours: carriedIn,
++    overageHours: hours - spent,
++    spentAllowanceHours: spent,
++    carryOutHours: available - spent,
++  }
++}
++
++/**
++ * Walk the cycle forwards, handing each period whatever the one before it
++ * left on the table.
++ */
++export function spreadAllowance(
++  segments: CycleSegment[],
++  hoursBySegment: number[]
++): AllowanceRow[] {
++  const rows: AllowanceRow[] = []
++  let carried = 0
++
++  for (let index = 0; index < segments.length; index += 1) {
++    const row = spendPeriod(segments[index], hoursBySegment[index] ?? 0, carried)
++    rows.push(row)
++    carried = row.carryOutHours
++  }
++
++  return rows
++}
++
++/** What the client paid for and did not use by the time the cycle closed. */
++export function unusedAllowanceHours(rows: AllowanceRow[]) {
++  if (rows.length === 0) return 0
++  return rows[rows.length - 1].carryOutHours
++}
++
++/**
++ * Overage is priced by the plan that was live while the hours were logged,
++ * off the figure the statement shows rather than the raw float behind it, so
++ * the arithmetic on the page is the arithmetic that was charged.
++ */
++export function overageCents(row: AllowanceRow) {
++  const billable = roundHours(row.overageHours)
++  return centsFromHours(billable, row.segment.plan.overageCentsPerHour)
++}
++
++/**
++ * Total the hours each period has to answer for, using the period windows the
++ * cycle split already fixed.
++ */
++export function attributeUsage(
++  segments: CycleSegment[],
++  usage: UsageEvent[],
++  clientId: string
++) {
++  return totalUsageByWindow(
++    segments.map((segment) => ({ start: segment.start, end: segment.end })),
++    usage,
++    clientId
++  )
++}
+diff --git a/lib/ops/billing/credits.ts b/lib/ops/billing/credits.ts
+new file mode 100644
+index 0000000..0ac38b5
+--- /dev/null
++++ b/lib/ops/billing/credits.ts
+@@ -0,0 +1,121 @@
++/**
++ * A prepaid balance a client can spend against a settled cycle. The money is
++ * already in hand, so a balance is worth using before it lapses rather than
++ * after.
++ */
++export type SettlementCredit = {
++  id: string
++  remainingCents: number
++  expiresAt: number | null
++}
++
++/** One draw against one balance, in the currency the client is billed in. */
++export type CreditApplication = {
++  creditId: string
++  cents: number
++}
++
++export type CreditOutcome = {
++  applications: CreditApplication[]
++  appliedCents: number
++  owedCents: number
++  credits: SettlementCredit[]
++}
++
++/**
++ * A balance is spendable while it still has money on it and has not lapsed by
++ * the time the cycle closes. A balance with no expiry never lapses, which is
++ * why it waits: it will still be there next month.
++ */
++export function creditIsLive(credit: SettlementCredit, closesAt: number) {
++  if (credit.remainingCents <= 0) return false
++  return credit.expiresAt === null || credit.expiresAt >= closesAt
++}
++
++function lapseRank(a: SettlementCredit, b: SettlementCredit) {
++  const left = a.expiresAt
++  const right = b.expiresAt
++  if (left === null && right !== null) return 1
++  if (right === null && left !== null) return -1
++  if (left !== null && right !== null && left !== right) return left - right
++  return 0
++}
++
++/**
++ * Spend what lapses soonest first, so a client never loses money it could
++ * have used. Two balances that lapse together are separated by size and then
++ * by id, which keeps a statement reproducible whatever order the caller
++ * happened to hand the balances over in.
++ */
++export function creditOrder(a: SettlementCredit, b: SettlementCredit) {
++  const byLapse = lapseRank(a, b)
++  if (byLapse !== 0) return byLapse
++  if (a.remainingCents !== b.remainingCents) {
++    return a.remainingCents - b.remainingCents
++  }
++  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
++}
++
++/** The spendable balances, in the order they should be drawn down. */
++export function orderCredits(credits: SettlementCredit[], closesAt: number) {
++  return credits.filter((credit) => creditIsLive(credit, closesAt)).sort(creditOrder)
++}
++
++/**
++ * A working copy of the balances, keyed by id. The caller's rows are never
++ * touched: a statement is a reading of the books, not a write to them, and a
++ * caller that settles the same cycle twice should get the same answer.
++ */
++export function openLedger(credits: SettlementCredit[]) {
++  const ledger = new Map<string, SettlementCredit>()
++  for (const credit of credits) {
++    ledger.set(credit.id, { ...credit })
++  }
++  return ledger
++}
++
++/**
++ * What a single balance can put toward the bill: never more than it holds,
++ * and never more than is left owing.
++ */
++function takeFrom(credit: SettlementCredit, owed: number) {
++  const spend = Math.min(credit.remainingCents, owed)
++  return spend > 0 ? spend : 0
++}
++
++/**
++ * Draw balances down against what is still owed. Nothing is spent once the
++ * bill reaches zero and no balance ever goes past its own remainder, so a
++ * cycle can close with money still on the books. Every balance the caller
++ * passed comes back, spent or not, in the order it arrived: a caller that
++ * stores these rows by position should not have to re-key them.
++ */
++export function applyCredits(
++  owedCents: number,
++  credits: SettlementCredit[],
++  closesAt: number
++): CreditOutcome {
++  const ledger = openLedger(credits)
++  const applications: CreditApplication[] = []
++  let owed = Math.max(0, owedCents)
++  let applied = 0
++
++  for (const candidate of orderCredits([...ledger.values()], closesAt)) {
++    if (owed <= 0) break
++    const held = ledger.get(candidate.id)
++    if (!held) continue
++    const spend = takeFrom(held, owed)
++    if (spend === 0) continue
++    held.remainingCents -= spend
++    owed -= spend
++    applied += spend
++    applications.push({ creditId: held.id, cents: spend })
++  }
++
++  return {
++    applications,
++    appliedCents: applied,
++    owedCents: owed,
++    credits: credits.map((credit) => ledger.get(credit.id) ?? { ...credit }),
++  }
++}
+diff --git a/lib/ops/billing/money.ts b/lib/ops/billing/money.ts
+index 6d97837..1b58e81 100644
+--- a/lib/ops/billing/money.ts
++++ b/lib/ops/billing/money.ts
+@@ -15,3 +15,56 @@ export function cents(value: number) {
+ export function fromCents(value: number) {
+   return value / 100
+ }
++
++/**
++ * Hours priced at a per-hour rate. Both sides are already the figures the
++ * statement shows, so the product is the charge a client can reproduce with
++ * a calculator rather than one that only comes out in floating point.
++ */
++export function centsFromHours(hours: number, centsPerHour: number) {
++  if (hours <= 0) return 0
++  return roundHalfEven(hours * centsPerHour, 0)
++}
++
++/** Add a run of cent figures without letting a stray undefined through. */
++export function sumCents(values: number[]) {
++  return values.reduce((running, value) => running + (value || 0), 0)
++}
++
++/**
++ * Which entry absorbs a rounding remainder: the heaviest one, and the
++ * earliest of those when two carry the same weight. Putting it on the largest
++ * figure keeps the correction proportionally smallest, and keeps it in one
++ * place rather than smeared across a page of lines.
++ */
++export function heaviestIndex(amounts: number[]) {
++  let best = -1
++  let weight = -1
++  for (let index = 0; index < amounts.length; index += 1) {
++    const size = Math.abs(amounts[index])
++    if (size > weight) {
++      weight = size
++      best = index
++    }
++  }
++  return best
++}
++
++/** How far a set of independently rounded figures sits from its own total. */
++export function residualCents(amounts: number[], totalCents: number) {
++  return totalCents - sumCents(amounts)
++}
++
++/**
++ * Nudge a set of independently rounded amounts so they add up to the total
++ * that was rounded once. Only one entry moves, and only by the remainder, so
++ * every other figure on the statement is the one its own arithmetic produced.
++ */
++export function settleRounding(amounts: number[], totalCents: number) {
++  const settled = [...amounts]
++  const residual = residualCents(settled, totalCents)
++  if (residual === 0 || settled.length === 0) return settled
++  const target = heaviestIndex(settled)
++  settled[target] += residual
++  return settled
++}
+diff --git a/lib/ops/billing/settlement.ts b/lib/ops/billing/settlement.ts
+new file mode 100644
+index 0000000..4f6d80d
+--- /dev/null
++++ b/lib/ops/billing/settlement.ts
+@@ -0,0 +1,164 @@
++import {
++  attributeUsage,
++  overageCents,
++  roundHours,
++  spreadAllowance,
++  unusedAllowanceHours,
++  type AllowanceRow,
++} from './allowance'
++import { applyCredits, type SettlementCredit } from './credits'
++import type { UsageEvent } from './ledger'
++import { prorateCycle, type PlanChange } from './proration'
++import { taxOnOwed } from './tax'
++import {
++  convertStatementLines,
++  TAX_REF,
++  type StatementLine,
++} from '@/lib/ops/invoices/statement'
++
++export type { SettlementCredit } from './credits'
++export type { StatementLine } from '@/lib/ops/invoices/statement'
++
++export type SettlementInput = {
++  clientId: string
++  cycleStart: number
++  cycleEnd: number
++  changes: PlanChange[]
++  usage: UsageEvent[]
++  credits: SettlementCredit[]
++  taxBps: number
++  planCurrency: string
++  currency: string
++  ratesCsv: string
++}
++
++/**
++ * What one plan period contributed, in the currency the plan is priced in.
++ * Hours are the figures a client would read off the page, so they are already
++ * rounded; the exact values stay behind in the allowance ledger.
++ */
++export type StatementSegment = {
++  planId: string
++  start: number
++  end: number
++  hours: number
++  allowanceHours: number
++  carriedInHours: number
++  overageHours: number
++  spentAllowanceHours: number
++  subscriptionCents: number
++  overageCents: number
++}
++
++/**
++ * A closed cycle: what each plan period drew, what it costs in the currency
++ * the client pays in, and what is left on the prepaid balances.
++ */
++export type CycleStatement = {
++  currency: string
++  segments: StatementSegment[]
++  lines: StatementLine[]
++  subtotalCents: number
++  creditsAppliedCents: number
++  taxableCents: number
++  taxCents: number
++  totalCents: number
++  credits: SettlementCredit[]
++  unusedAllowanceHours: number
++}
++
++/**
++ * A credit shows on the statement as money coming off, so the entry carries a
++ * negative figure rather than a flag a reader has to interpret.
++ */
++function creditLine(creditId: string, cents: number): StatementLine {
++  return { kind: 'credit', ref: creditId, cents: -cents }
++}
++
++/** The tax entry belongs to no plan and no balance, so it refs itself. */
++function taxLine(cents: number): StatementLine {
++  return { kind: 'tax', ref: TAX_REF, cents }
++}
++
++/**
++ * Turn one settled period into the row a client reads. The exact hours stay
++ * in the allowance ledger; what lands here is what the page will show.
++ */
++function reportSegment(row: AllowanceRow): StatementSegment {
++  return {
++    planId: row.segment.plan.id,
++    start: row.segment.start,
++    end: row.segment.end,
++    hours: roundHours(row.hours),
++    allowanceHours: roundHours(row.allowanceHours),
++    carriedInHours: roundHours(row.carriedInHours),
++    overageHours: roundHours(row.overageHours),
++    spentAllowanceHours: roundHours(row.spentAllowanceHours),
++    subscriptionCents: row.segment.cents,
++    overageCents: overageCents(row),
++  }
++}
++
++/**
++ * The seat comes first, then whatever the period ran over by, so a reader
++ * follows the cycle forwards rather than jumping between two blocks.
++ */
++function priceSegment(segment: StatementSegment): StatementLine[] {
++  const lines: StatementLine[] = [
++    { kind: 'subscription', ref: segment.planId, cents: segment.subscriptionCents },
++  ]
++  if (segment.overageCents > 0) {
++    lines.push({ kind: 'overage', ref: segment.planId, cents: segment.overageCents })
++  }
++  return lines
++}
++
++function settleUsage(input: SettlementInput) {
++  const cycle = prorateCycle(input.changes, input.cycleStart, input.cycleEnd)
++  const hours = attributeUsage(cycle.segments, input.usage, input.clientId)
++  return spreadAllowance(cycle.segments, hours)
++}
++
++/**
++ * Close a billing cycle out period by period.
++ *
++ * The seat and the included hours both follow the plan that was live at the
++ * time rather than the plan the client happens to be on when the invoice is
++ * cut, which is the whole point: an upgrade halfway through a month should
++ * not reprice the fortnight before it.
++ */
++export function settleCycle(input: SettlementInput): CycleStatement {
++  const rows = settleUsage(input)
++  const segments = rows.map(reportSegment)
++  const priced = segments.flatMap(priceSegment)
++
++  const converted = convertStatementLines(
++    priced,
++    input.planCurrency,
++    input.currency,
++    input.ratesCsv
++  )
++
++  const outcome = applyCredits(converted.subtotalCents, input.credits, input.cycleEnd)
++  const tail: StatementLine[] = outcome.applications.map((application) =>
++    creditLine(application.creditId, application.cents)
++  )
++
++  const tax = taxOnOwed(outcome.owedCents, input.taxBps)
++  if (tax.taxCents > 0) {
++    tail.push(taxLine(tax.taxCents))
++  }
++
++  return {
++    currency: input.currency,
++    segments,
++    lines: [...converted.lines, ...tail],
++    subtotalCents: converted.subtotalCents,
++    creditsAppliedCents: outcome.appliedCents,
++    taxableCents: tax.taxableCents,
++    taxCents: tax.taxCents,
++    totalCents: outcome.owedCents + tax.taxCents,
++    credits: outcome.credits,
++    unusedAllowanceHours: roundHours(unusedAllowanceHours(rows)),
++  }
++}
+diff --git a/lib/ops/billing/tax.ts b/lib/ops/billing/tax.ts
+new file mode 100644
+index 0000000..abb88df
+--- /dev/null
++++ b/lib/ops/billing/tax.ts
+@@ -0,0 +1,44 @@
++import { roundHalfEven } from './money'
++
++/**
++ * What the rate was charged on and what it came to. Both figures are reported
++ * because a client who paid part of a cycle with a prepaid balance will want
++ * to see which part the tax was worked out from.
++ */
++export type TaxOutcome = {
++  taxableCents: number
++  taxCents: number
++}
++
++/** Rates arrive in basis points, the way the existing invoice builder takes them. */
++export const BPS_DIVISOR = 10_000
++
++/**
++ * A rate has to be a real number and cannot be negative. A negative rate
++ * would turn tax into a discount, which is a data fault rather than a
++ * pricing decision anybody made.
++ */
++function assertRate(taxBps: number) {
++  if (!Number.isFinite(taxBps) || taxBps < 0) {
++    throw new Error('taxBps must be a non-negative number')
++  }
++}
++
++/**
++ * Tax lands on what a client actually pays. Prepaid balances are money the
++ * client already handed over, so they come off the bill first and the rate
++ * bites on whatever is still owed after that. A cycle a balance clears
++ * outright carries no tax at all, which is why the line is dropped rather
++ * than written as zero.
++ */
++export function taxOnOwed(owedCents: number, taxBps: number): TaxOutcome {
++  assertRate(taxBps)
++  const taxable = Math.max(0, owedCents)
++  if (taxable === 0 || taxBps === 0) {
++    return { taxableCents: taxable, taxCents: 0 }
++  }
++  return {
++    taxableCents: taxable,
++    taxCents: roundHalfEven((taxable * taxBps) / BPS_DIVISOR, 0),
++  }
++}
+diff --git a/lib/ops/billing/usage.ts b/lib/ops/billing/usage.ts
+new file mode 100644
+index 0000000..deab88e
+--- /dev/null
++++ b/lib/ops/billing/usage.ts
+@@ -0,0 +1,77 @@
++import type { UsageEvent } from './ledger'
++
++/**
++ * Which period a logged hour belongs to, and which logged hours count at all.
++ *
++ * A usage feed is not tidy. It replays, it carries other clients' work when a
++ * caller pulls a whole table, and it reaches back before the cycle opened.
++ * Everything that decides whether an event is this cycle's problem lives
++ * here, so the allowance arithmetic downstream can assume a clean total.
++ */
++export type UsageWindow = {
++  start: number
++  end: number
++}
++
++/**
++ * Start inclusive, end exclusive. An hour logged at the instant a plan
++ * changes is the new plan's problem, so a boundary never bills twice and
++ * never falls through the gap between two periods.
++ */
++export function windowHolds(window: UsageWindow, at: number) {
++  return at >= window.start && at < window.end
++}
++
++export function windowOf(windows: UsageWindow[], at: number) {
++  for (let index = 0; index < windows.length; index += 1) {
++    if (windowHolds(windows[index], at)) return index
++  }
++  return -1
++}
++
++/**
++ * The first copy of an event id is the one that bills. Later copies are
++ * dropped whatever they claim, since a replayed message is not a second hour
++ * of work, and a feed that redelivers is normal rather than exceptional.
++ */
++export function dedupeUsage(usage: UsageEvent[]) {
++  const seen = new Set<string>()
++  const unique: UsageEvent[] = []
++  for (const event of usage) {
++    if (seen.has(event.id)) continue
++    seen.add(event.id)
++    unique.push(event)
++  }
++  return unique
++}
++
++/**
++ * Negative hours are a data fault rather than a credit. Refusing them here
++ * keeps a bad row from quietly cancelling honest work somewhere else in the
++ * same period.
++ */
++export function assertLoggable(event: UsageEvent) {
++  if (!Number.isFinite(event.hours) || event.hours < 0) {
++    throw new Error(`Usage event ${event.id} has invalid hours`)
++  }
++}
++
++/**
++ * Total the hours each window has to answer for. Work booked to another
++ * client, or logged outside the cycle being closed, never reaches a window.
++ */
++export function totalUsageByWindow(
++  windows: UsageWindow[],
++  usage: UsageEvent[],
++  clientId: string
++) {
++  const hours = windows.map(() => 0)
++  for (const event of dedupeUsage(usage)) {
++    if (event.clientId !== clientId) continue
++    assertLoggable(event)
++    const index = windowOf(windows, event.at)
++    if (index === -1) continue
++    hours[index] += event.hours
++  }
++  return hours
++}
+diff --git a/lib/ops/invoices/statement.ts b/lib/ops/invoices/statement.ts
+new file mode 100644
+index 0000000..6a33513
+--- /dev/null
++++ b/lib/ops/invoices/statement.ts
+@@ -0,0 +1,59 @@
++import { settleRounding, sumCents } from '@/lib/ops/billing/money'
++import { convertAmount, lookupRate, parseRateTable } from './fx.js'
++
++export type StatementKind = 'subscription' | 'overage' | 'credit' | 'tax'
++
++/** The ref a tax entry carries, since no plan or balance produced it. */
++export const TAX_REF = 'tax'
++
++/**
++ * One line of a statement: what kind of charge it is, what produced it, and
++ * what it costs. A plan id or a balance id in `ref` is enough to trace a
++ * figure back without carrying prose that would have to be translated.
++ */
++export type StatementLine = {
++  kind: StatementKind
++  ref: string
++  cents: number
++}
++
++export type ConversionResult = {
++  rate: number
++  lines: StatementLine[]
++  subtotalCents: number
++}
++
++/** Statement money is whole cents, so conversion happens at cent scale. */
++export const CENT_SCALE = 0
++
++export function convertCents(cents: number, rate: number) {
++  return convertAmount(cents, rate, CENT_SCALE)
++}
++
++/**
++ * Convert priced lines into the currency a client is billed in.
++ *
++ * Every line converts on its own, because a client reading the statement will
++ * check a line against the rate and expect it to come out. Converting each
++ * line independently and converting the bill once do not have to agree to the
++ * cent, so the set is nudged back onto the single converted total: the lines
++ * and the total never disagree, and the difference sits where it is least
++ * visible rather than being spread across every row.
++ */
++export function convertStatementLines(
++  lines: StatementLine[],
++  from: string,
++  to: string,
++  ratesCsv: string
++): ConversionResult {
++  const rate = lookupRate(parseRateTable(ratesCsv), from, to)
++  const subtotalCents = convertCents(sumCents(lines.map((line) => line.cents)), rate)
++  const converted = lines.map((line) => convertCents(line.cents, rate))
++  const settled = settleRounding(converted, subtotalCents)
++
++  return {
++    rate,
++    subtotalCents,
++    lines: lines.map((line, index) => ({ ...line, cents: settled[index] })),
++  }
++}

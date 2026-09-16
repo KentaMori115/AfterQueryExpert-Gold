@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+    <style>
+        .form-container {
+            max-width: 600px; /* Limit the maximum width of the form */
+            width: 100%; /* Ensure it takes up full width on smaller devices */
+        }
+    </style>
+    <div>
+        <div class="px-3">
+            <a class="text-start" href="{% url 'order_table'%}">Return Order Table Page</a>
+        </div>
+        <h2 class="text-center">No Such Admin Page</h2>
+        <div>
+            <p class="text-center"> Such admin page does not exist</p>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block script %} 
+    {{ block.super }}
+    <script src="{% static 'js/config_3.13.js' %}"></script>
+    <script src="{% static 'js/admin_3.13.js' %}"></script>
+{% endblock %}

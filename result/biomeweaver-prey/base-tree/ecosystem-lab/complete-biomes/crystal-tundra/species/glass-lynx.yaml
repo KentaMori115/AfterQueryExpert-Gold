@@ -1,0 +1,27 @@
+kind: species
+id: glass-lynx
+name: Glass Lynx
+stages:
+  - juvenile
+  - adult
+initialStage: juvenile
+needs:
+  - resource: silver-grass-biomass
+    perIndividualPerTick: 0
+    priority: 5
+predation:
+  - prey: snow-hare
+    preyStage: adult
+    perPredatorPerTick: 0.08
+reproduction:
+  stage: adult
+  offspringStage: juvenile
+  baseRatePerTick: 0.01
+  requiresConditionAtLeast: 0.55
+mortality:
+  juvenile: 0.02
+  adult: 0.01
+transitions:
+  - from: juvenile
+    to: adult
+    afterTicks: 16

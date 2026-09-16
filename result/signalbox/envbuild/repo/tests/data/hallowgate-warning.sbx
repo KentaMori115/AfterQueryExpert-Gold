@@ -1,0 +1,24 @@
+# Hallowgate: a short platform where the starting signal is close enough to the
+# one ahead that a full overlap will not fit, so the signal in rear is given a
+# warning arrangement instead.
+
+scheme hallowgate {
+    area "Hallowgate"
+    prefix H
+}
+
+node W boundary
+node E boundary
+node J1 plain
+node J2 plain
+
+edge H1 from W to J1 length 800 speed 45 direction down
+edge H2 from J1 to J2 length 400 speed 30 direction down
+edge H3 from J2 to E length 800 speed 45 direction down
+
+section HA over H1
+section HB over H2
+section HC over H3
+
+signal H1S on H1 at 800 facing forward direction down aspects 3 warning yes
+signal H3S on H2 at 400 facing forward direction down aspects 3

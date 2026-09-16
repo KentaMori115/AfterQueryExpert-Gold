@@ -1,0 +1,26 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: types
+        run: npm run types
+      - name: tests
+        run: npm test
+      - name: build
+        run: npm run build
+      - name: the tool runs from what was built
+        run: node dist/cli/main.js rope --diameter 40mm

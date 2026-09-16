@@ -1,0 +1,674 @@
+diff --git a/tests/export/__init__.py b/tests/export/__init__.py
+new file mode 100644
+index 0000000..58d88bf
+--- /dev/null
++++ b/tests/export/__init__.py
+@@ -0,0 +1 @@
++"""Tests for configlayer.export."""
+diff --git a/tests/export/test_dotenv_export.py b/tests/export/test_dotenv_export.py
+new file mode 100644
+index 0000000..b4e5aa0
+--- /dev/null
++++ b/tests/export/test_dotenv_export.py
+@@ -0,0 +1,153 @@
++"""Tests for the dotenv exporter."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from configlayer.exceptions import ConfigError
++
++
++# ---------------------------------------------------------------------------
++# Key mapping
++# ---------------------------------------------------------------------------
++
++class TestDotenvKeys:
++    def test_dotted_paths_become_env_names(self):
++        from configlayer.export import export_dotenv
++
++        text = export_dotenv({"db": {"host": "localhost"}})
++        assert text == "DB__HOST=localhost\n"
++
++    def test_deep_nesting_joins_with_double_underscores(self):
++        from configlayer.export import export_dotenv
++
++        text = export_dotenv({"db": {"pool": {"size": 10}}})
++        assert text == "DB__POOL__SIZE=10\n"
++
++    def test_prefix_is_prepended_with_single_underscore(self):
++        from configlayer.export import export_dotenv
++
++        text = export_dotenv({"db": {"host": "h"}}, prefix="app")
++        assert text == "APP_DB__HOST=h\n"
++
++    def test_lines_are_sorted_by_key(self):
++        from configlayer.export import export_dotenv
++
++        text = export_dotenv({"zeta": 1, "alpha": {"beta": 2, "aaa": 3}})
++        assert text.splitlines() == [
++            "ALPHA__AAA=3",
++            "ALPHA__BETA=2",
++            "ZETA=1",
++        ]
++
++    def test_unmappable_segment_rejected(self):
++        from configlayer.export import export_dotenv
++
++        with pytest.raises(ConfigError, match="db.extra-host"):
++            export_dotenv({"db": {"extra-host": "x"}})
++        with pytest.raises(ConfigError):
++            export_dotenv({"9lives": 1})
++
++    def test_empty_config_renders_empty_string(self):
++        from configlayer.export import export_dotenv
++
++        assert export_dotenv({}) == ""
++
++
++# ---------------------------------------------------------------------------
++# Value rendering and quoting
++# ---------------------------------------------------------------------------
++
++class TestDotenvValues:
++    def test_scalar_rendering(self):
++        from configlayer.export import export_dotenv
++
++        text = export_dotenv({
++            "flag": True, "off": False, "nothing": None,
++            "count": 7, "ratio": 2.5,
++        })
++        assert text.splitlines() == [
++            "COUNT=7",
++            "FLAG=true",
++            "NOTHING=",
++            "OFF=false",
++            "RATIO=2.5",
++        ]
++
++    def test_plain_strings_stay_bare(self):
++        from configlayer.export import export_dotenv
++
++        assert export_dotenv({"host": "db.internal"}) == "HOST=db.internal\n"
++
++    def test_values_with_spaces_are_double_quoted(self):
++        from configlayer.export import export_dotenv
++
++        assert export_dotenv({"motto": "hello world"}) == 'MOTTO="hello world"\n'
++
++    def test_value_with_hash_is_quoted(self):
++        from configlayer.export import export_dotenv
++
++        assert export_dotenv({"channel": "#general"}) == 'CHANNEL="#general"\n'
++
++    def test_value_with_double_quote_uses_single_quotes(self):
++        from configlayer.export import export_dotenv
++
++        assert export_dotenv({"say": 'a "b"'}) == "SAY='a \"b\"'\n"
++
++    def test_value_with_both_quote_kinds_rejected(self):
++        from configlayer.export import export_dotenv
++
++        with pytest.raises(ConfigError, match="say"):
++            export_dotenv({"say": "it's \"both\""})
++
++    def test_value_with_newline_rejected(self):
++        from configlayer.export import export_dotenv
++
++        with pytest.raises(ConfigError, match="banner"):
++            export_dotenv({"banner": "two\nlines"})
++
++    def test_list_of_scalars_joins_with_comma_space(self):
++        from configlayer.export import export_dotenv
++
++        text = export_dotenv({"hosts": ["a", "b", "c"]})
++        assert text == 'HOSTS="a, b, c"\n'
++
++    def test_nested_collection_inside_list_rejected(self):
++        from configlayer.export import export_dotenv
++
++        with pytest.raises(ConfigError, match=r"hosts\[1\]"):
++            export_dotenv({"hosts": ["a", ["b"]]})
++
++
++# ---------------------------------------------------------------------------
++# Acceptance: the output reads back through the dotenv reader
++# ---------------------------------------------------------------------------
++
++class TestDotenvRoundTrip:
++    def test_reads_back_through_file_source(self, tmp_path: Path):
++        from configlayer.export import export_dotenv
++        from configlayer.source import FileSource
++
++        data = {
++            "db": {"host": "db internal", "port": 5432, "tls": True},
++            "app": {"name": "orders", "channel": "#ops"},
++        }
++        out = tmp_path / "app.env"
++        out.write_text(export_dotenv(data), encoding="utf-8")
++        parsed = FileSource(str(out)).load()
++        assert parsed == {
++            "APP__CHANNEL": "#ops",
++            "APP__NAME": "orders",
++            "DB__HOST": "db internal",
++            "DB__PORT": "5432",
++            "DB__TLS": "true",
++        }
++
++    def test_export_is_deterministic(self):
++        from configlayer.export import export_dotenv
++
++        a = export_dotenv({"b": 1, "a": {"y": 2, "x": 3}})
++        b = export_dotenv({"a": {"x": 3, "y": 2}, "b": 1})
++        assert a == b
+diff --git a/tests/export/test_export_config.py b/tests/export/test_export_config.py
+new file mode 100644
+index 0000000..a2afd70
+--- /dev/null
++++ b/tests/export/test_export_config.py
+@@ -0,0 +1,240 @@
++"""Tests for JSON export, the export_config dispatcher, and redaction."""
++
++from __future__ import annotations
++
++import json
++
++import pytest
++
++from configlayer.exceptions import ConfigError
++
++
++# ---------------------------------------------------------------------------
++# JSON exporter
++# ---------------------------------------------------------------------------
++
++class TestJsonExport:
++    def test_canonical_two_space_sorted_output(self):
++        from configlayer.export import export_json
++
++        text = export_json({"b": 1, "a": {"y": [1, 2], "x": None}})
++        assert text == (
++            '{\n'
++            '  "a": {\n'
++            '    "x": null,\n'
++            '    "y": [\n'
++            '      1,\n'
++            '      2\n'
++            '    ]\n'
++            '  },\n'
++            '  "b": 1\n'
++            '}\n'
++        )
++
++    def test_round_trips_through_json_loads(self):
++        from configlayer.export import export_json
++
++        data = {"db": {"host": "h", "port": 5432, "tls": False},
++                "weights": [1, 2.5, None]}
++        assert json.loads(export_json(data)) == data
++
++    def test_trailing_newline_and_determinism(self):
++        from configlayer.export import export_json
++
++        a = export_json({"k": "v"})
++        assert a.endswith("}\n")
++        assert a == export_json({"k": "v"})
++
++    def test_unrepresentable_value_rejected_with_path(self):
++        from configlayer.export import export_json
++
++        with pytest.raises(ConfigError, match="db.magic"):
++            export_json({"db": {"magic": {1, 2, 3}}})
++
++    def test_non_string_key_rejected(self):
++        from configlayer.export import export_json
++
++        with pytest.raises(ConfigError):
++            export_json({"db": {5432: "port"}})
++
++
++# ---------------------------------------------------------------------------
++# The dispatcher
++# ---------------------------------------------------------------------------
++
++class TestExportConfig:
++    def test_json_is_the_default_format(self):
++        from configlayer.export import export_config, export_json
++
++        data = {"a": 1}
++        assert export_config(data) == export_json(data)
++
++    def test_dispatch_by_name_case_insensitively(self):
++        from configlayer.export import (
++            export_config,
++            export_dotenv,
++            export_ini,
++        )
++
++        data = {"db": {"host": "h"}}
++        assert export_config(data, "dotenv") == export_dotenv(data)
++        assert export_config(data, "INI") == export_ini(data)
++
++    def test_prefix_reaches_the_dotenv_renderer(self):
++        from configlayer.export import export_config
++
++        text = export_config({"db": {"host": "h"}}, "dotenv", prefix="app")
++        assert text == "APP_DB__HOST=h\n"
++
++    def test_unknown_format_rejected_and_formats_listed(self):
++        from configlayer.export import export_config, export_formats
++
++        assert export_formats() == ["dotenv", "ini", "json"]
++        with pytest.raises(ConfigError, match="xml"):
++            export_config({}, "xml")
++
++    def test_non_mapping_rejected(self):
++        from configlayer.export import export_config
++
++        with pytest.raises(ConfigError):
++            export_config(["not", "a", "mapping"])
++
++    def test_export_error_is_a_config_error(self):
++        from configlayer.export import ExportError
++
++        assert issubclass(ExportError, ConfigError)
++
++
++# ---------------------------------------------------------------------------
++# Redaction on the way out
++# ---------------------------------------------------------------------------
++
++class TestRedactedExport:
++    def test_secret_keys_are_masked_in_dotenv(self):
++        from configlayer.export import export_config
++
++        text = export_config(
++            {"db": {"host": "h", "password": "hunter2"}},
++            "dotenv",
++            redact_secrets=True,
++        )
++        assert "DB__PASSWORD=***" in text
++        assert "hunter2" not in text
++        assert "DB__HOST=h" in text
++
++    def test_secret_keys_are_masked_in_json(self):
++        from configlayer.export import export_config
++
++        text = export_config(
++            {"auth": {"api_key": "abcd1234", "user": "ada"}},
++            "json",
++            redact_secrets=True,
++        )
++        parsed = json.loads(text)
++        assert parsed["auth"]["api_key"] == "***"
++        assert parsed["auth"]["user"] == "ada"
++
++    def test_input_mapping_is_not_mutated(self):
++        from configlayer.export import export_config
++
++        data = {"db": {"token": "sekrit"}}
++        export_config(data, "json", redact_secrets=True)
++        assert data["db"]["token"] == "sekrit"
++
++    def test_redaction_off_by_default(self):
++        from configlayer.export import export_config
++
++        text = export_config({"db": {"password": "pw"}}, "dotenv")
++        assert "DB__PASSWORD=pw" in text
++
++
++# ---------------------------------------------------------------------------
++# Public surface
++# ---------------------------------------------------------------------------
++
++class TestSurface:
++    def test_top_level_re_exports(self):
++        import configlayer
++        from configlayer import export
++
++        assert configlayer.export_config is export.export_config
++        assert configlayer.ExportError is export.ExportError
++
++    def test_exports_layered_config_view(self):
++        from configlayer import LayeredConfig, export_config
++        from configlayer.source import DictSource
++
++        cfg = LayeredConfig([
++            DictSource({"db": {"host": "localhost"}}, name="defaults"),
++            DictSource({"db": {"host": "prod"}}, name="prod", priority=9),
++        ])
++        text = export_config(cfg.as_dict(), "dotenv")
++        assert text == "DB__HOST=prod\n"
++
++
++# ---------------------------------------------------------------------------
++# Additional edges across the formats
++# ---------------------------------------------------------------------------
++
++class TestFormatEdges:
++    def test_json_unicode_round_trips(self):
++        from configlayer.export import export_json
++
++        data = {"app": {"motto": "café ☕", "name": "orders"}}
++        assert json.loads(export_json(data)) == data
++
++    def test_dotenv_value_containing_equals_survives_the_reader(self, tmp_path):
++        from configlayer.export import export_dotenv
++        from configlayer.source import FileSource
++
++        text = export_dotenv({"query": "a=b=c"})
++        out = tmp_path / "q.env"
++        out.write_text(text, encoding="utf-8")
++        assert FileSource(str(out)).load()["QUERY"] == "a=b=c"
++
++    def test_dotenv_numeric_list_renders_joined(self):
++        from configlayer.export import export_dotenv
++
++        assert export_dotenv({"ports": [80, 443]}) == 'PORTS="80, 443"\n'
++
++    def test_dotenv_keys_already_upper_are_kept(self):
++        from configlayer.export import export_dotenv
++
++        assert export_dotenv({"TIMEOUT": 30}) == "TIMEOUT=30\n"
++
++    def test_ini_single_section_has_no_blank_lines(self):
++        from configlayer.export import export_ini
++
++        text = export_ini({"only": {"k": "v"}})
++        assert text == "[only]\nk = v\n"
++        assert "\n\n" not in text
++
++    def test_ini_option_value_may_contain_equals(self):
++        from configlayer.export import export_ini
++        from configlayer.loader import INILoader
++
++        text = export_ini({"s": {"query": "a=b"}})
++        assert INILoader().load(text) == {"s": {"query": "a=b"}}
++
++    def test_redaction_composes_with_prefix(self):
++        from configlayer.export import export_config
++
++        text = export_config(
++            {"db": {"password": "pw", "host": "h"}},
++            "dotenv",
++            redact_secrets=True,
++            prefix="app",
++        )
++        assert "APP_DB__PASSWORD=***" in text
++        assert "APP_DB__HOST=h" in text
++
++    def test_export_config_leaves_layered_sources_untouched(self):
++        from configlayer import LayeredConfig
++        from configlayer.export import export_config
++        from configlayer.source import DictSource
++
++        cfg = LayeredConfig([
++            DictSource({"auth": {"token": "sekrit"}}, name="defaults"),
++        ])
++        export_config(cfg.as_dict(), "json", redact_secrets=True)
++        assert cfg["auth.token"] == "sekrit"
+diff --git a/tests/export/test_export_scenarios.py b/tests/export/test_export_scenarios.py
+new file mode 100644
+index 0000000..8888b9a
+--- /dev/null
++++ b/tests/export/test_export_scenarios.py
+@@ -0,0 +1,151 @@
++"""End-to-end scenarios: exported text flowing back into configlayer."""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++
++def parse_dotenv_lines(text: str) -> dict[str, str]:
++    """Read KEY=VALUE lines the way the dotenv reader does, for feeding
++    the pairs into other configlayer entry points."""
++    pairs: dict[str, str] = {}
++    for line in text.splitlines():
++        key, _, value = line.partition("=")
++        value = value.strip()
++        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
++            value = value[1:-1]
++        pairs[key.strip()] = value
++    return pairs
++
++
++class TestDotenvIsTheInverseOfEnvParsing:
++    def test_export_then_parse_env_recovers_the_tree(self):
++        from configlayer.env import parse_env
++        from configlayer.export import export_dotenv
++
++        data = {
++            "db": {"host": "db.internal", "port": 5432, "tls": True},
++            "app": {"name": "orders", "workers": 8},
++        }
++        text = export_dotenv(data, prefix="app")
++        pairs = parse_dotenv_lines(text)
++        recovered = parse_env(pairs, prefix="APP_")
++        assert recovered == {
++            "db": {"host": "db.internal", "port": 5432, "tls": True},
++            "app": {"name": "orders", "workers": 8},
++        }
++
++    def test_export_without_prefix_round_trips_too(self):
++        from configlayer.env import parse_env
++        from configlayer.export import export_dotenv
++
++        data = {"cache": {"ttl": 300, "backend": "memory"}}
++        pairs = parse_dotenv_lines(export_dotenv(data))
++        assert parse_env(pairs) == data
++
++
++class TestExportedFilesAsLayers:
++    def test_exported_json_becomes_a_file_source_layer(self, tmp_path: Path):
++        from configlayer import LayeredConfig
++        from configlayer.export import export_config
++        from configlayer.source import DictSource, FileSource
++
++        snapshot = {"db": {"host": "prod-db", "port": 5432}}
++        out = tmp_path / "snapshot.json"
++        out.write_text(export_config(snapshot, "json"), encoding="utf-8")
++
++        cfg = LayeredConfig([
++            DictSource({"db": {"host": "localhost", "pool": 4}},
++                       name="defaults"),
++            FileSource(str(out), priority=10),
++        ])
++        assert cfg["db.host"] == "prod-db"
++        assert cfg["db.pool"] == 4
++        assert cfg.origin("db.host") == "snapshot.json"
++
++    def test_exported_ini_reloads_through_load_file_like(self):
++        from configlayer.export import export_ini
++        from configlayer.loader import load_file_like
++
++        data = {"server": {"bind": "0.0.0.0", "port": 8080, "tls": False}}
++        parsed = load_file_like("server.ini", export_ini(data))
++        assert parsed == data
++
++    def test_redacted_snapshot_is_safe_to_write(self, tmp_path: Path):
++        from configlayer.export import export_config
++
++        secret = "swordfish"
++        text = export_config(
++            {"db": {"host": "h", "password": secret},
++             "auth": {"token": secret}},
++            "json",
++            redact_secrets=True,
++        )
++        assert secret not in text
++        parsed = json.loads(text)
++        assert parsed["db"]["password"] == "***"
++        assert parsed["auth"]["token"] == "***"
++        assert parsed["db"]["host"] == "h"
++
++
++class TestDeterministicSnapshots:
++    def test_all_three_formats_are_stable_across_key_order(self):
++        from configlayer.export import export_config
++
++        a = {"db": {"host": "h", "port": 1}, "app": {"x": 1}}
++        b = {"app": {"x": 1}, "db": {"port": 1, "host": "h"}}
++        for fmt in ("json", "dotenv", "ini"):
++            assert export_config(a, fmt) == export_config(b, fmt), fmt
++
++    def test_merged_layers_export_identically_to_their_resolution(self):
++        from configlayer import LayeredConfig
++        from configlayer.export import export_config
++        from configlayer.source import DictSource
++
++        cfg = LayeredConfig([
++            DictSource({"db": {"host": "localhost", "port": 5432}},
++                       name="defaults"),
++            DictSource({"db": {"host": "prod"}}, name="prod", priority=10),
++        ])
++        text = export_config(cfg.as_dict(), "dotenv")
++        assert text == "DB__HOST=prod\nDB__PORT=5432\n"
++
++
++class TestExportPath:
++    def test_format_picked_from_extension(self, tmp_path: Path):
++        from configlayer.export import export_config, export_path
++
++        data = {"db": {"host": "h", "port": 5432}}
++        for name, fmt in (("c.json", "json"), ("c.env", "dotenv"),
++                          ("c.ini", "ini")):
++            out = tmp_path / name
++            returned = export_path(data, str(out))
++            assert out.read_text(encoding="utf-8") == returned
++            assert returned == export_config(data, fmt)
++
++    def test_explicit_format_overrides_extension(self, tmp_path: Path):
++        from configlayer.export import export_config, export_path
++
++        out = tmp_path / "snapshot.txt"
++        returned = export_path({"a": {"b": 1}}, str(out), format="ini")
++        assert returned == export_config({"a": {"b": 1}}, "ini")
++
++    def test_unknown_extension_without_format_refused(self, tmp_path: Path):
++        import pytest
++
++        from configlayer.exceptions import ConfigError
++        from configlayer.export import export_path
++
++        with pytest.raises(ConfigError, match="format"):
++            export_path({"a": {"b": 1}}, str(tmp_path / "c.yaml"))
++
++    def test_redaction_and_prefix_are_forwarded(self, tmp_path: Path):
++        from configlayer.export import export_path
++
++        out = tmp_path / "app.env"
++        text = export_path(
++            {"db": {"password": "pw"}}, str(out),
++            redact_secrets=True, prefix="app",
++        )
++        assert text == "APP_DB__PASSWORD=***\n"
+diff --git a/tests/export/test_ini_export.py b/tests/export/test_ini_export.py
+new file mode 100644
+index 0000000..da47bd1
+--- /dev/null
++++ b/tests/export/test_ini_export.py
+@@ -0,0 +1,99 @@
++"""Tests for the INI exporter."""
++
++from __future__ import annotations
++
++import pytest
++
++from configlayer.exceptions import ConfigError
++
++
++class TestIniStructure:
++    def test_top_level_mappings_become_sections(self):
++        from configlayer.export import export_ini
++
++        text = export_ini({"db": {"host": "localhost", "port": 5432}})
++        assert text == "[db]\nhost = localhost\nport = 5432\n"
++
++    def test_sections_and_options_are_sorted(self):
++        from configlayer.export import export_ini
++
++        text = export_ini({
++            "zeta": {"b": 2, "a": 1},
++            "alpha": {"k": "v"},
++        })
++        assert text == "[alpha]\nk = v\n\n[zeta]\na = 1\nb = 2\n"
++
++    def test_deeper_nesting_flattens_to_dotted_options(self):
++        from configlayer.export import export_ini
++
++        text = export_ini({"db": {"pool": {"size": 10, "idle": 2}}})
++        assert text == "[db]\npool.idle = 2\npool.size = 10\n"
++
++    def test_blank_line_separates_sections(self):
++        from configlayer.export import export_ini
++
++        text = export_ini({"a": {"x": 1}, "b": {"y": 2}})
++        assert "\n\n[b]\n" in text
++
++    def test_root_scalar_rejected(self):
++        from configlayer.export import export_ini
++
++        with pytest.raises(ConfigError, match="loose"):
++            export_ini({"loose": 5, "db": {"host": "h"}})
++
++    def test_empty_config_renders_empty_string(self):
++        from configlayer.export import export_ini
++
++        assert export_ini({}) == ""
++
++
++class TestIniValues:
++    def test_scalars_and_lists(self):
++        from configlayer.export import export_ini
++
++        text = export_ini({"s": {
++            "flag": True, "none": None, "ratio": 0.5,
++            "hosts": ["a", "b"],
++        }})
++        assert text == (
++            "[s]\nflag = true\nhosts = a, b\nnone = \nratio = 0.5\n"
++        )
++
++    def test_percent_signs_pass_through_verbatim(self):
++        from configlayer.export import export_ini
++        from configlayer.loader import INILoader
++
++        # INILoader parses with interpolation disabled, so a literal
++        # percent sign must not be escaped or doubled on the way out.
++        text = export_ini({"app": {"rate": "50%"}})
++        assert "rate = 50%" in text and "%%" not in text
++        assert INILoader().load(text) == {"app": {"rate": "50%"}}
++
++    def test_newline_in_value_rejected(self):
++        from configlayer.export import export_ini
++
++        with pytest.raises(ConfigError, match="app.motd"):
++            export_ini({"app": {"motd": "a\nb"}})
++
++
++class TestIniRoundTrip:
++    def test_reads_back_through_ini_loader(self):
++        from configlayer.export import export_ini
++        from configlayer.loader import INILoader
++
++        data = {
++            "db": {"host": "localhost", "port": 5432, "tls": True},
++            "app": {"rate": "50%", "workers": 8},
++        }
++        parsed = INILoader().load(export_ini(data))
++        assert parsed == {
++            "app": {"rate": "50%", "workers": 8},
++            "db": {"host": "localhost", "port": 5432, "tls": True},
++        }
++
++    def test_dotted_options_survive_the_reader(self):
++        from configlayer.export import export_ini
++        from configlayer.loader import INILoader
++
++        parsed = INILoader().load(export_ini({"db": {"pool": {"size": 10}}}))
++        assert parsed == {"db": {"pool.size": 10}}

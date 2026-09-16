@@ -1,0 +1,62 @@
+version: 1
+production: glass_harbor
+time_unit: ms
+
+events:
+  line_17: 60000
+
+resources:
+  main_projector:
+    kind: video_output
+    capacity: 1
+  revolve:
+    kind: stage_automation
+    capacity: 1
+    states: [locked, moving, home, scene_two]
+    initial_state: home
+
+performers:
+  mira:
+    initial_mark: stage_left
+
+locations:
+  stage_left: {x: 0, y: 5}
+  center: {x: 8, y: 5}
+
+cues:
+  - id: lx_21
+    department: lighting
+    trigger: {on: line_17, offset: -800}
+    duration: 1500
+    action: {preset: moonrise}
+
+  - id: auto_07
+    department: automation
+    trigger: {after: lx_21, offset: 200}
+    duration: 6000
+    requires:
+      - resource: revolve
+        state: locked
+    action:
+      resource: revolve
+      transition_to: scene_two
+
+  - id: video_12
+    department: video
+    trigger: {after: auto_07, offset: -1000}
+    duration: 9000
+    uses: [main_projector]
+    action: {play: harbor_loop.mov}
+
+  - id: mira_cross
+    department: stage
+    trigger: {after: lx_21}
+    action:
+      move: mira
+      from: stage_left
+      to: center
+      maximum_speed: 1.4
+
+assertions:
+  - expression: "mira_cross.completed before video_12.visible"
+  - expression: "revolve.state == scene_two at video_12.visible"

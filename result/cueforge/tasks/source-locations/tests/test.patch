@@ -1,0 +1,1106 @@
+diff --git a/tests/locations/test_json_locations.py b/tests/locations/test_json_locations.py
+new file mode 100644
+index 0000000..f7e07f2
+--- /dev/null
++++ b/tests/locations/test_json_locations.py
+@@ -0,0 +1,201 @@
++"""Where findings point in JSON productions."""
++
++import json
++from pathlib import Path
++
++from cueforge import compile_production, load_production
++
++
++def at(text: str, line: int, token: str, nth: int = 1) -> tuple[int, int]:
++    row = text.split("\n")[line - 1]
++    index = -1
++    for _ in range(nth):
++        index = row.index(token, index + 1)
++    return line, index + 1
++
++
++def where(finding) -> tuple[int, int]:
++    return finding.source.line, finding.source.column
++
++
++def one(findings, code: str, **match):
++    picked = [
++        item
++        for item in findings
++        if item.code == code and all(getattr(item, key) == value for key, value in match.items())
++    ]
++    assert picked, [(item.code, item.message) for item in findings]
++    return picked[0]
++
++
++def compiled_findings(path: Path):
++    loaded = load_production(path)
++    assert loaded.value is not None, loaded.findings
++    return compile_production(loaded.value).findings
++
++
++def write(path: Path, text: str) -> Path:
++    path.write_text(text, encoding="utf-8")
++    return path
++
++
++SHOW = """{
++  "version": 1,
++  "production": "show",
++  "time_unit": "ms",
++  "resources": {"lamp": {"kind": "light", "capacity": -1}},
++  "cues": [
++    {"id": "a", "department": "lx",
++     "trigger": {"at": 0, "offset": 1.5},
++     "duration": 1e3},
++    {"id": "b", "department": "lx", "trigger": {"after": "zed"}, "uses": ["lamp", "moon"]}
++  ]
++}
++"""
++
++
++def test_fractional_offset_points_at_the_token(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "show.json", SHOW))
++    assert where(one(findings, "CF2007")) == at(SHOW, 8, "1.5")
++
++
++def test_scientific_duration_points_at_the_token(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "show.json", SHOW))
++    assert where(one(findings, "CF2002")) == at(SHOW, 9, "1e3")
++
++
++def test_bad_capacity_points_at_the_number(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "show.json", SHOW))
++    assert where(one(findings, "CF2001")) == at(SHOW, 5, "-1")
++
++
++def test_missing_after_points_at_the_string_quote(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "show.json", SHOW))
++    assert where(one(findings, "CF1002")) == at(SHOW, 10, '"zed"')
++
++
++def test_json_unknown_uses_item_location(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "show.json", SHOW))
++    assert where(one(findings, "CF4004")) == at(SHOW, 10, '"moon"')
++
++
++def test_json_path_is_the_path_given(tmp_path: Path) -> None:
++    path = write(tmp_path / "show.json", SHOW)
++    assert one(compiled_findings(path), "CF2002").source.path == path.as_posix()
++
++
++ESCAPED = '{"production": "caf\\u00e9 \\"q\\" \\\\", "version": 2, "time_unit": "ms", "cues": []}\n'
++
++
++def test_escapes_before_a_token_count_as_written(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "escaped.json", ESCAPED))
++    assert loaded.value is None
++    assert where(one(loaded.findings, "CF1004")) == at(ESCAPED, 1, "2")
++
++
++REPEATED = """{"version": 1, "production": "twice", "time_unit": "ms",
++ "cues": [{"id": "a", "department": "lx", "trigger": {"at": 0},
++           "duration": 5, "duration": 1e3}]}
++"""
++
++
++def test_repeated_key_keeps_the_last_value_and_its_position(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "twice.json", REPEATED))
++    assert where(one(findings, "CF2002")) == at(REPEATED, 3, "1e3")
++
++
++SCHEMA = """{
++  "version": 1,
++  "production": "schema",
++  "time_unit": "ms",
++  "cues": [
++    {"id": "a", "department": "lx", "trigger": {"at": 0},
++     "colour": "red"},
++    {"id": "b",
++     "trigger": {"at": 0}},
++    {"id": "c", "department": "lx", "trigger": {"at": 0, "manual": true}}
++  ]
++}
++"""
++
++
++def test_json_unknown_field_key_location(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "schema.json", SCHEMA))
++    assert loaded.value is None
++    assert where(one(loaded.findings, "CF1009")) == at(SCHEMA, 7, '"colour"')
++
++
++def test_json_missing_field_brace_location(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "schema.json", SCHEMA))
++    assert where(one(loaded.findings, "CF1010")) == at(SCHEMA, 8, "{")
++
++
++def test_json_two_kind_trigger_location(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "schema.json", SCHEMA))
++    assert where(one(loaded.findings, "CF1005")) == at(SCHEMA, 10, "{", nth=2)
++
++
++SPEED = """{
++  "version": 1, "production": "speed", "time_unit": "ms",
++  "performers": {"mira": {"initial_mark": "sl"}},
++  "locations": {"sl": {"x": 0, "y": 0}, "c": {"x": 8, "y": "0.5"}},
++  "cues": [
++    {"id": "cross", "department": "stage", "trigger": {"at": 0},
++     "action": {"move": "mira", "from": "sl", "to": "c", "maximum_speed": "1e1"}}
++  ]
++}
++"""
++
++
++def test_quoted_numbers_point_at_their_quote(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "speed.json", SPEED))
++    assert where(one(findings, "CF2007")) == at(SPEED, 4, '"0.5"')
++    assert where(one(findings, "CF2002")) == at(SPEED, 7, '"1e1"')
++
++
++BROKEN = """{"version": 1,
++ "cues": tru}
++"""
++
++
++def test_json_parse_error_column(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "broken.json", BROKEN))
++    assert where(one(loaded.findings, "CF1005")) == at(BROKEN, 2, "tru")
++
++
++TEXTUAL = """{"version": 1, "production": "textual", "time_unit": "ms",
++ "events": {"go": 2500, "late": 2.5},
++ "cues": [{"id": "a", "department": "lx", "trigger": {"on": "go", "offset": -800}, "duration": 1500}]}
++"""
++
++
++def test_number_tokens_still_arrive_as_text_and_carry_positions(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "textual.json", TEXTUAL))
++    assert loaded.value is not None
++    assert loaded.value.events["go"] == "2500"
++    assert loaded.value.events["late"] == "2.5"
++    assert loaded.value.cues[0].trigger.offset == "-800"
++    compiled = compile_production(loaded.value)
++    assert compiled.value is None
++    assert where(one(compiled.findings, "CF2007")) == at(TEXTUAL, 2, "2.5")
++    clean = TEXTUAL.replace(', "late": 2.5', "")
++    show = compile_production(load_production(write(tmp_path / "clean.json", clean)).value)
++    assert show.is_ok
++    assert show.value.cue_map()["a"].start_ms == 1700
++
++
++def test_json_and_yaml_findings_agree_on_the_node(tmp_path: Path) -> None:
++    yaml_text = "version: 1\nproduction: pair\ntime_unit: ms\ncues:\n  - id: a\n    department: lx\n    trigger: {at: 0}\n    duration: 1e3\n"
++    json_text = json.dumps(
++        {
++            "version": 1,
++            "production": "pair",
++            "time_unit": "ms",
++            "cues": [{"id": "a", "department": "lx", "trigger": {"at": 0}, "duration": 1000}],
++        },
++        indent=2,
++    ).replace("1000", "1e3")
++    yaml_finding = one(compiled_findings(write(tmp_path / "pair.yaml", yaml_text)), "CF2002")
++    json_finding = one(compiled_findings(write(tmp_path / "pair.json", json_text)), "CF2002")
++    assert where(yaml_finding) == at(yaml_text, 8, "1e3")
++    assert where(json_finding) == at(json_text, 12, "1e3")
+diff --git a/tests/locations/test_workspace_and_cli.py b/tests/locations/test_workspace_and_cli.py
+new file mode 100644
+index 0000000..3281783
+--- /dev/null
++++ b/tests/locations/test_workspace_and_cli.py
+@@ -0,0 +1,305 @@
++"""Workspaces, the compile command, assertions at compile time, and what stays put."""
++
++import json
++from pathlib import Path
++
++from typer.testing import CliRunner
++
++from cueforge import compile_production, load_production, rehearse
++from cueforge.cli.main import app
++
++runner = CliRunner()
++
++
++def at(text: str, line: int, token: str, nth: int = 1) -> tuple[int, int]:
++    row = text.split("\n")[line - 1]
++    index = -1
++    for _ in range(nth):
++        index = row.index(token, index + 1)
++    return line, index + 1
++
++
++def where(finding) -> tuple[int, int]:
++    return finding.source.line, finding.source.column
++
++
++def one(findings, code: str, **match):
++    picked = [
++        item
++        for item in findings
++        if item.code == code and all(getattr(item, key) == value for key, value in match.items())
++    ]
++    assert picked, [(item.code, item.message) for item in findings]
++    return picked[0]
++
++
++def write(path: Path, text: str) -> Path:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(text, encoding="utf-8")
++    return path
++
++
++MANIFEST = """version: 1
++production: split
++time_unit: ms
++sources:
++  - cues_a.yaml
++  - parts/cues_b.yaml
++cues:
++  - id: root_cue
++    department: lx
++    trigger: {at: 0}
++    duration: 1e3
++"""
++
++CUES_A = """resources:
++  lamp: {kind: light}
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0}
++"""
++
++CUES_B = """cues:
++  - id: b
++    department: lx
++    trigger: {after: nope}
++"""
++
++
++def workspace(root: Path) -> Path:
++    write(root / "cueforge.yaml", MANIFEST)
++    write(root / "cues_a.yaml", CUES_A)
++    write(root / "parts" / "cues_b.yaml", CUES_B)
++    return root
++
++
++def test_workspace_member_file_locations(tmp_path: Path) -> None:
++    loaded = load_production(workspace(tmp_path))
++    assert loaded.value is not None, loaded.findings
++    findings = compile_production(loaded.value).findings
++    finding = one(findings, "CF1002")
++    assert finding.source.path == "parts/cues_b.yaml"
++    assert where(finding) == at(CUES_B, 4, "nope")
++
++
++def test_manifest_cues_come_first_and_keep_their_own_file(tmp_path: Path) -> None:
++    loaded = load_production(workspace(tmp_path))
++    assert [cue.id for cue in loaded.value.cues] == ["root_cue", "a", "b"]
++    finding = one(compile_production(loaded.value).findings, "CF2002")
++    assert finding.source.path == "cueforge.yaml"
++    assert where(finding) == at(MANIFEST, 11, "1e3")
++
++
++DUPLICATE_B = """resources:
++  lamp: {kind: light}
++production: other
++cues: []
++"""
++
++
++def test_cross_file_duplicate_location(tmp_path: Path) -> None:
++    workspace(tmp_path)
++    write(tmp_path / "parts" / "cues_b.yaml", DUPLICATE_B)
++    loaded = load_production(tmp_path)
++    assert loaded.value is None
++    duplicate = one(loaded.findings, "CF1001", subject_id="lamp")
++    assert duplicate.source.path == "parts/cues_b.yaml"
++    assert where(duplicate) == at(DUPLICATE_B, 2, "lamp")
++    conflict = one(loaded.findings, "CF1001", subject_id="production")
++    assert conflict.source.path == "parts/cues_b.yaml"
++    assert where(conflict) == at(DUPLICATE_B, 3, "production")
++
++
++BAD_SOURCES = """version: 1
++production: bad
++time_unit: ms
++sources:
++  - ../outside.yaml
++  - missing.yaml
++cues: []
++"""
++
++
++def test_bad_sources_entry_location(tmp_path: Path) -> None:
++    write(tmp_path / "cueforge.yaml", BAD_SOURCES)
++    loaded = load_production(tmp_path)
++    assert loaded.value is None
++    escape = one(loaded.findings, "CF1003")
++    assert escape.source.path == "cueforge.yaml"
++    assert where(escape) == at(BAD_SOURCES, 5, "../outside.yaml")
++    missing = one(loaded.findings, "CF1005")
++    assert where(missing) == at(BAD_SOURCES, 6, "missing.yaml")
++
++
++JSON_WORKSPACE = """{"version": 1, "production": "jws", "time_unit": "ms",
++ "sources": ["cues.json"]}
++"""
++
++JSON_CUES = """{"cues": [
++  {"id": "a", "department": "lx", "trigger": {"at": 0}, "uses": ["ghost"]}
++]}
++"""
++
++
++def test_json_workspace_member_locations(tmp_path: Path) -> None:
++    write(tmp_path / "cueforge.json", JSON_WORKSPACE)
++    write(tmp_path / "cues.json", JSON_CUES)
++    loaded = load_production(tmp_path)
++    assert loaded.value is not None, loaded.findings
++    finding = one(compile_production(loaded.value).findings, "CF4004")
++    assert finding.source.path == "cues.json"
++    assert where(finding) == at(JSON_CUES, 2, '"ghost"')
++
++
++ASSERTED = """version: 1
++production: asserted
++time_unit: ms
++resources:
++  lamp:
++    kind: light
++    states: [off, on]
++    initial_state: off
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0}
++    duration: 100
++assertions:
++  - expression: "ghost.started before a.completed"
++  - expression: "a.visibl before a.completed"
++  - expression: "nores.state == on at a.started"
++  - expression: "lamp.state == flying at a.started"
++  - expression: "a.started before a.completed"
++"""
++
++
++def test_unknown_assertion_subjects_fail_the_compile_at_the_expression(tmp_path: Path) -> None:
++    write(tmp_path / "asserted.yaml", ASSERTED)
++    loaded = load_production(tmp_path / "asserted.yaml")
++    assert loaded.is_ok
++    compiled = compile_production(loaded.value)
++    assert not compiled.is_ok
++    assert compiled.value is None
++    subjects = [item for item in compiled.findings if item.code == "CF6003"]
++    assert sorted(where(item) for item in subjects) == [
++        at(ASSERTED, 15, '"'),
++        at(ASSERTED, 16, '"'),
++        at(ASSERTED, 17, '"'),
++        at(ASSERTED, 18, '"'),
++    ]
++
++
++SYNTAX = """version: 1
++production: syntax
++time_unit: ms
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0}
++assertions:
++  - expression: a.started before a.completed
++  - expression: this is not an assertion
++"""
++
++
++def test_assertion_syntax_error_fails_the_compile_at_the_expression(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "syntax.yaml", SYNTAX))
++    compiled = compile_production(loaded.value)
++    assert not compiled.is_ok
++    assert where(one(compiled.findings, "CF6002")) == at(SYNTAX, 10, "this")
++
++
++def test_only_the_bad_assertion_stops_the_compile(tmp_path: Path) -> None:
++    text = ASSERTED.replace("ghost.started", "a.started").replace("a.visibl", "a.started")
++    text = text.replace("nores.state == on", "lamp.state == off").replace("flying", "off")
++    loaded = load_production(write(tmp_path / "fine.yaml", text))
++    compiled = compile_production(loaded.value)
++    assert compiled.is_ok, compiled.findings
++    result = rehearse(compiled.value)
++    assert not any(item.code.startswith("CF6") for item in result.findings)
++    spoiled = text.replace("lamp.state == off at a.started", "lamp.state == dim at a.started", 1)
++    broken = compile_production(load_production(write(tmp_path / "spoiled.yaml", spoiled)).value)
++    assert not broken.is_ok
++    assert [item.code for item in broken.findings] == ["CF6003"]
++    assert where(broken.findings[0]) == at(spoiled, 17, '"')
++
++
++FAILING = """version: 1
++production: failing
++time_unit: ms
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0}
++    duration: 100
++  - id: b
++    department: lx
++    trigger: {after: a, offset: 50}
++    duration: 100
++assertions:
++  - expression: "a.completed before b.started"
++"""
++
++
++def test_rehearsal_output_and_digests_ignore_where_text_sits(tmp_path: Path) -> None:
++    plain = write(tmp_path / "plain.yaml", FAILING)
++    shifted = write(tmp_path / "shifted.yaml", "# a comment\n# another\n" + FAILING)
++    shows = [compile_production(load_production(path).value).value for path in (plain, shifted)]
++    assert shows[0].digest == shows[1].digest
++    results = [rehearse(show) for show in shows]
++    assert any(item.code == "CF6001" for item in results[0].findings)
++    assert results[0].digest == results[1].digest
++    assert results[0].semantic_dict() == results[1].semantic_dict()
++    outputs = [
++        runner.invoke(app, ["rehearse", str(path), "--format", "json"]).stdout for path in (plain, shifted)
++    ]
++    assert outputs[0] == outputs[1]
++    broken = FAILING.replace("after: a", "after: zz")
++    lines = [
++        one(compile_production(load_production(write(tmp_path / name, text)).value).findings, "CF1002").source.line
++        for name, text in (("b1.yaml", broken), ("b2.yaml", "# a comment\n# another\n" + broken))
++    ]
++    assert lines == [11, 13]
++
++
++def test_compile_json_carries_source_objects(tmp_path: Path) -> None:
++    path = write(tmp_path / "broken.yaml", FAILING.replace("after: a", "after: zz"))
++    result = runner.invoke(app, ["compile", str(path), "--format", "json"])
++    assert result.exit_code == 1
++    payload = json.loads(result.stdout)
++    finding = next(item for item in payload["findings"] if item["code"] == "CF1002")
++    assert finding["source"] == {"path": path.as_posix(), "line": 11, "column": 22}
++
++
++NO_CUES = """version: 1
++production: nocues
++time_unit: ms
++"""
++
++
++def test_compile_json_leaves_source_out_without_a_node(tmp_path: Path) -> None:
++    path = write(tmp_path / "nocues.yaml", NO_CUES)
++    result = runner.invoke(app, ["compile", str(path), "--format", "json"])
++    assert result.exit_code == 1
++    payload = json.loads(result.stdout)
++    finding = next(item for item in payload["findings"] if item["code"] == "CF3006")
++    assert "source" not in finding
++    empty = write(tmp_path / "empty.yaml", NO_CUES + "cues: []\n")
++    result = runner.invoke(app, ["compile", str(empty), "--format", "json"])
++    assert result.exit_code == 1
++    finding = next(item for item in json.loads(result.stdout)["findings"] if item["code"] == "CF3006")
++    assert finding["source"] == {"column": 7, "line": 4, "path": str(empty)}
++
++
++def test_load_failures_print_source_in_compile_json(tmp_path: Path) -> None:
++    text = "version: 1\nproduction: x\ntime_unit: ms\ncues:\n  - id: a\n    trigger: {at: 0}\n"
++    path = write(tmp_path / "missing.yaml", text)
++    result = runner.invoke(app, ["compile", str(path), "--format", "json"])
++    assert result.exit_code == 1
++    payload = json.loads(result.stdout)
++    finding = next(item for item in payload["findings"] if item["code"] == "CF1010")
++    assert finding["source"]["line"] == 5
++    assert finding["source"]["column"] == 5
++
++
+diff --git a/tests/locations/test_yaml_aliases.py b/tests/locations/test_yaml_aliases.py
+new file mode 100644
+index 0000000..28aeeb6
+--- /dev/null
++++ b/tests/locations/test_yaml_aliases.py
+@@ -0,0 +1,132 @@
++"""Where findings point when YAML anchors and aliases are in play."""
++
++from pathlib import Path
++
++from cueforge import compile_production, load_production
++
++
++def at(text: str, line: int, token: str, nth: int = 1) -> tuple[int, int]:
++    """(line, column) of the nth occurrence of ``token`` on ``line`` of ``text``."""
++    row = text.split("\n")[line - 1]
++    index = -1
++    for _ in range(nth):
++        index = row.index(token, index + 1)
++    return line, index + 1
++
++
++def where(finding) -> tuple[int, int]:
++    return finding.source.line, finding.source.column
++
++
++def pick(findings, code: str, subject_id: str):
++    picked = [item for item in findings if item.code == code and item.subject_id == subject_id]
++    assert picked, [(item.code, item.subject_id, item.message) for item in findings]
++    return picked[0]
++
++
++def write(path: Path, text: str) -> Path:
++    path.write_text(text, encoding="utf-8")
++    return path
++
++
++def load_findings(path: Path):
++    return load_production(path).findings
++
++
++def compile_findings(path: Path):
++    loaded = load_production(path)
++    assert loaded.value is not None, loaded.findings
++    return compile_production(loaded.value).findings
++
++
++ANCHORED = """version: 1
++production: anchored
++time_unit: ms
++cues:
++  - &lead
++    id: lead
++    trigger: {at: 0}
++  - id: follow
++    department: lx
++    trigger: &go {after: &ref "ghost"}
++  - id: late
++    department: lx
++    trigger: &t {at: 1.5}
++"""
++
++REUSED = """version: 1
++production: reused
++time_unit: ms
++cues:
++  - id: a
++    department: lx
++    trigger: {at: &x 1.5}
++  - id: b
++    department: lx
++    trigger: &tr {at: *x}
++  - id: c
++    department: lx
++    trigger: *tr
++"""
++
++WHOLE = """version: 1
++production: whole
++time_unit: ms
++cues:
++  - &a
++    id: a
++    department: lx
++    trigger: &t {at: 0, bogus: 1}
++  - &b {id: b, department: lx, trigger: *t}
++  - *a
++  - *b
++"""
++
++
++def test_anchor_before_block_mapping(tmp_path: Path) -> None:
++    findings = load_findings(write(tmp_path / "anchored.yaml", ANCHORED))
++    assert where(pick(findings, "CF1010", "cues.0.department")) == at(ANCHORED, 6, "id")
++
++
++def test_anchor_before_flow_mapping(tmp_path: Path) -> None:
++    findings = compile_findings(write(tmp_path / "anchored.yaml", ANCHORED.replace("  - &lead\n    id: lead\n", "  - id: lead\n    department: lx\n")))
++    text = ANCHORED.replace("  - &lead\n    id: lead\n", "  - id: lead\n    department: lx\n")
++    assert where(pick(findings, "CF2007", "late.at")) == at(text, 13, "1.5")
++
++
++def test_anchor_before_quoted_scalar(tmp_path: Path) -> None:
++    text = ANCHORED.replace("  - &lead\n    id: lead\n", "  - id: lead\n    department: lx\n")
++    findings = compile_findings(write(tmp_path / "anchored.yaml", text))
++    assert where(pick(findings, "CF1002", "follow")) == at(text, 10, '"')
++
++
++def test_alias_of_a_scalar(tmp_path: Path) -> None:
++    findings = compile_findings(write(tmp_path / "reused.yaml", REUSED))
++    assert where(pick(findings, "CF2007", "a.at")) == at(REUSED, 7, "1.5")
++    assert where(pick(findings, "CF2007", "b.at")) == at(REUSED, 10, "*x")
++
++
++def test_alias_inside_an_alias(tmp_path: Path) -> None:
++    findings = compile_findings(write(tmp_path / "reused.yaml", REUSED))
++    assert where(pick(findings, "CF2007", "c.at")) == at(REUSED, 13, "*tr")
++
++
++def test_one_finding_per_reuse(tmp_path: Path) -> None:
++    findings = compile_findings(write(tmp_path / "reused.yaml", REUSED))
++    spots = sorted(where(item) for item in findings if item.code == "CF2007")
++    assert spots == [at(REUSED, 7, "1.5"), at(REUSED, 10, "*x"), at(REUSED, 13, "*tr")]
++
++
++def test_alias_of_a_mapping_with_a_bad_key(tmp_path: Path) -> None:
++    findings = load_findings(write(tmp_path / "whole.yaml", WHOLE))
++    assert where(pick(findings, "CF1009", "cues.0.trigger.bogus")) == at(WHOLE, 8, "bogus")
++    assert where(pick(findings, "CF1009", "cues.1.trigger.bogus")) == at(WHOLE, 9, "*t")
++    assert where(pick(findings, "CF1009", "cues.2.trigger.bogus")) == at(WHOLE, 10, "*a")
++    assert where(pick(findings, "CF1009", "cues.3.trigger.bogus")) == at(WHOLE, 11, "*b")
++
++
++def test_alias_of_a_whole_cue(tmp_path: Path) -> None:
++    text = WHOLE.replace(", bogus: 1", "")
++    findings = compile_findings(write(tmp_path / "whole.yaml", text))
++    assert where(pick(findings, "CF1001", "a")) == at(text, 10, "*a")
++    assert where(pick(findings, "CF1001", "b")) == at(text, 11, "*b")
+diff --git a/tests/locations/test_yaml_locations.py b/tests/locations/test_yaml_locations.py
+new file mode 100644
+index 0000000..400dac0
+--- /dev/null
++++ b/tests/locations/test_yaml_locations.py
+@@ -0,0 +1,444 @@
++"""Where findings point in YAML productions."""
++
++from pathlib import Path
++
++from cueforge import compile_production, load_production, rehearse
++from cueforge.simulation import DelayCue
++
++
++def at(text: str, line: int, token: str, nth: int = 1) -> tuple[int, int]:
++    """(line, column) of the nth occurrence of ``token`` on ``line`` of ``text``."""
++    row = text.split("\n")[line - 1]
++    index = -1
++    for _ in range(nth):
++        index = row.index(token, index + 1)
++    return line, index + 1
++
++
++def where(finding) -> tuple[int, int]:
++    return finding.source.line, finding.source.column
++
++
++def one(findings, code: str, **match):
++    picked = [
++        item
++        for item in findings
++        if item.code == code and all(getattr(item, key) == value for key, value in match.items())
++    ]
++    assert picked, [(item.code, item.message) for item in findings]
++    return picked[0]
++
++
++def compiled_findings(path: Path):
++    loaded = load_production(path)
++    assert loaded.value is not None, loaded.findings
++    return compile_production(loaded.value).findings
++
++
++def write(path: Path, text: str) -> Path:
++    path.write_text(text, encoding="utf-8")
++    return path
++
++
++VALUES = """version: 1
++production: values
++time_unit: ms
++events:
++  line_9: 1e3
++locations:
++  mark: {x: 1.5, y: 0}
++resources:
++  lamp:
++    kind: light
++    capacity: 0
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0, offset: 2.5}
++    duration: -5
++"""
++
++
++def test_scientific_event_time_points_at_the_event_value(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "values.yaml", VALUES))
++    assert where(one(findings, "CF2002")) == at(VALUES, 5, "1e3")
++
++
++def test_fractional_coordinate_points_at_the_coordinate(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "values.yaml", VALUES))
++    assert where(one(findings, "CF2007", subject_id="locations.mark.x")) == at(VALUES, 7, "1.5")
++
++
++def test_bad_capacity_points_at_the_capacity(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "values.yaml", VALUES))
++    assert where(one(findings, "CF2001")) == at(VALUES, 11, "0")
++
++
++def test_fractional_offset_points_at_the_offset(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "values.yaml", VALUES))
++    assert where(one(findings, "CF2007", subject_id="a.offset")) == at(VALUES, 15, "2.5")
++
++
++def test_negative_duration_points_at_the_duration(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "values.yaml", VALUES))
++    assert where(one(findings, "CF2003")) == at(VALUES, 16, "-5")
++
++
++def test_single_file_path_is_the_path_given(tmp_path: Path) -> None:
++    path = write(tmp_path / "values.yaml", VALUES)
++    findings = compiled_findings(path)
++    assert one(findings, "CF2003").source.path == path.as_posix()
++
++
++def test_relative_path_is_kept_as_given(tmp_path: Path, monkeypatch) -> None:
++    write(tmp_path / "shows" / "values.yaml", VALUES) if (tmp_path / "shows").mkdir() is None else None
++    monkeypatch.chdir(tmp_path)
++    findings = compiled_findings(Path("shows") / "values.yaml")
++    assert one(findings, "CF2003").source.path == "shows/values.yaml"
++
++
++ABSOLUTE = """version: 1
++production: absolute
++time_unit: ms
++cues:
++  - id: a
++    department: lx
++    trigger:
++      at: "12.5"
++"""
++
++
++def test_quoted_scalar_points_at_its_quote(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "absolute.yaml", ABSOLUTE))
++    assert where(one(findings, "CF2007")) == at(ABSOLUTE, 8, '"12.5"')
++
++
++SPEED = """version: 1
++production: speed
++time_unit: ms
++performers:
++  mira: {initial_mark: sl}
++locations:
++  sl: {x: 0, y: 0}
++  c: {x: 8, y: 0}
++cues:
++  - id: cross
++    department: stage
++    trigger: {at: 0}
++    action:
++      move: mira
++      from: sl
++      to: c
++      maximum_speed: 1.4001
++"""
++
++MOVEMENT = """version: 1
++production: movement
++time_unit: ms
++performers:
++  mira: {initial_mark: sl}
++locations:
++  sl: {x: 0, y: 0}
++  c: {x: 8, y: 0}
++cues:
++  - id: slow
++    department: stage
++    trigger: {at: 0}
++    duration: 10
++    action: {move: mira, from: sl, to: c, maximum_speed: 1.4}
++  - id: lost
++    department: stage
++    trigger: {at: 0}
++    action:
++      move: mira
++      maximum_speed: 1
++"""
++
++
++def test_bad_speed_points_at_maximum_speed(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "speed.yaml", SPEED))
++    assert where(one(findings, "CF2006")) == at(SPEED, 17, "1.4001")
++
++
++def test_short_duration_points_at_the_duration(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "movement.yaml", MOVEMENT))
++    assert where(one(findings, "CF5001")) == at(MOVEMENT, 13, "10")
++
++
++def test_incomplete_move_points_at_the_action_mapping(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "movement.yaml", MOVEMENT))
++    assert where(one(findings, "CF5004")) == at(MOVEMENT, 19, "move")
++
++
++VERSION = """version: 2
++production: future
++time_unit: ms
++cues: []
++"""
++
++
++def test_unsupported_version_points_at_the_version(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "version.yaml", VERSION))
++    assert loaded.value is None
++    assert where(one(loaded.findings, "CF1004")) == at(VERSION, 1, "2")
++
++
++REFS = """version: 1
++production: refs
++time_unit: ms
++resources:
++  lamp: {kind: light}
++cues:
++  - id: a
++    department: lx
++    trigger: {after: ghost}
++  - id: b
++    department: lx
++    trigger: {on: line_9}
++    uses: [lamp, ghost_res]
++    requires:
++      - resource: nothing
++  - id: a
++    department: lx
++    trigger: {at: 0}
++    action: {resource: phantom}
++"""
++
++
++def test_missing_after_points_at_the_after_value(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "refs.yaml", REFS))
++    assert where(one(findings, "CF1002", subject_id="a")) == at(REFS, 9, "ghost")
++
++
++def test_missing_event_points_at_the_on_value(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "refs.yaml", REFS))
++    assert where(one(findings, "CF1002", subject_id="b")) == at(REFS, 12, "line_9")
++
++
++def test_unknown_uses_item_location(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "refs.yaml", REFS))
++    picked = [item for item in findings if item.code == "CF4004" and item.subject_id == "b"]
++    assert sorted(where(item) for item in picked) == [at(REFS, 13, "ghost_res"), at(REFS, 15, "nothing")]
++
++
++def test_unknown_action_resource_location(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "refs.yaml", REFS))
++    assert where(one(findings, "CF4004", subject_id="a")) == at(REFS, 19, "phantom")
++
++
++def test_duplicate_cue_id_points_at_the_second_id(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "refs.yaml", REFS))
++    assert where(one(findings, "CF1001")) == at(REFS, 16, "a")
++
++
++MOVES = """version: 1
++production: moves
++time_unit: ms
++performers:
++  mira: {initial_mark: sl}
++locations:
++  sl: {x: 0, y: 0}
++cues:
++  - id: walk
++    department: stage
++    trigger: {at: 0}
++    action:
++      move: nobody
++      from: sl
++      to: nowhere
++      maximum_speed: 1
++  - id: walk2
++    department: stage
++    trigger: {at: 0}
++    action: {move: mira, from: void, to: sl, maximum_speed: 1}
++"""
++
++
++def test_unknown_performer_points_at_move(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "moves.yaml", MOVES))
++    assert where(one(findings, "CF5003")) == at(MOVES, 13, "nobody")
++
++
++def test_unknown_locations_point_at_to_and_from(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "moves.yaml", MOVES))
++    assert where(one(findings, "CF5002", subject_id="walk")) == at(MOVES, 15, "nowhere")
++    assert where(one(findings, "CF5002", subject_id="walk2")) == at(MOVES, 20, "void")
++
++
++SCHEMA = """version: 1
++production: schema
++time_unit: ms
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0}
++    colour: red
++  - id: b
++    trigger: {at: 0}
++  - id: c
++    department: lx
++    trigger: {at: 0, after: b}
++"""
++
++
++def test_unknown_field_key_location(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "schema.yaml", SCHEMA))
++    assert loaded.value is None
++    assert where(one(loaded.findings, "CF1009")) == at(SCHEMA, 8, "colour")
++
++
++def test_missing_field_mapping_location(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "schema.yaml", SCHEMA))
++    assert where(one(loaded.findings, "CF1010")) == at(SCHEMA, 9, "id")
++
++
++def test_two_kind_trigger_location(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "schema.yaml", SCHEMA))
++    assert where(one(loaded.findings, "CF1005")) == at(SCHEMA, 13, "{")
++
++
++IDENTS = """version: 1
++production: idents
++time_unit: ms
++resources:
++  bad key: {kind: light}
++cues:
++  - id: 1bad
++    department: lx
++    trigger: {at: 0}
++"""
++
++
++def test_bad_identifiers_point_at_key_and_id(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "idents.yaml", IDENTS))
++    assert where(one(findings, "CF1007", subject_kind="resource")) == at(IDENTS, 5, "bad key")
++    assert where(one(findings, "CF1007", subject_kind="cue")) == at(IDENTS, 7, "1bad")
++
++
++CYCLE = """version: 1
++production: cyc
++time_unit: ms
++cues:
++  - id: b
++    department: lx
++    trigger: {after: a}
++  - id: a
++    department: lx
++    trigger:
++      after: b
++"""
++
++
++def test_cycle_location_is_smallest_id_after(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "cycle.yaml", CYCLE))
++    assert where(one(findings, "CF3002")) == at(CYCLE, 11, "b")
++
++
++SELF = """version: 1
++production: self
++time_unit: ms
++cues:
++  - id: loop
++    department: lx
++    trigger: {after: loop}
++"""
++
++
++def test_self_dependency_points_at_its_after(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "self.yaml", SELF))
++    assert where(one(findings, "CF3003")) == at(SELF, 7, "loop")
++
++
++FIGHT = """version: 1
++production: fight
++time_unit: ms
++resources:
++  proj:
++    kind: video
++cues:
++  - id: v1
++    department: video
++    trigger: {at: 0}
++    duration: 5000
++    uses: [proj]
++  - id: v2
++    department: video
++    trigger: {at: 2000}
++    duration: 5000
++    uses: [proj]
++"""
++
++
++def test_reservation_conflict_location(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "fight.yaml", FIGHT))
++    assert where(one(findings, "CF4001")) == at(FIGHT, 5, "proj")
++
++
++EMPTY = """version: 1
++production: empty
++time_unit: ms
++cues: []
++"""
++
++
++def test_no_cues_points_at_cues(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "empty.yaml", EMPTY))
++    assert where(one(findings, "CF3006")) == at(EMPTY, 4, "[]")
++
++
++STATE = """version: 1
++production: state
++time_unit: ms
++resources:
++  revolve:
++    kind: automation
++    states: [home, away]
++    initial_state: orbit
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0}
++"""
++
++
++def test_undeclared_initial_state_points_at_initial_state(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "state.yaml", STATE))
++    assert where(one(findings, "CF4005")) == at(STATE, 8, "orbit")
++
++
++BROKEN = "a: [1, 2\nb: 3\n"
++
++
++def test_yaml_parse_error_column(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "broken.yaml", BROKEN))
++    finding = one(loaded.findings, "CF1005")
++    assert finding.source.path == (tmp_path / "broken.yaml").as_posix()
++    assert where(finding) == (2, 2)
++
++
++ORDER = """version: 1
++production: order
++time_unit: ms
++cues:
++  - id: a
++    department: lx
++    trigger: {at: 0, offset: 2.5}
++  - id: b
++    department: lx
++    trigger: {after: ghost}
++"""
++
++
++def test_findings_come_out_in_text_order(tmp_path: Path) -> None:
++    findings = compiled_findings(write(tmp_path / "order.yaml", ORDER))
++    assert [item.code for item in findings] == ["CF2007", "CF1002"]
++    assert [where(item) for item in findings] == [at(ORDER, 7, "2.5"), at(ORDER, 10, "ghost")]
++
++
++def test_unauthored_finding_has_null_source(tmp_path: Path) -> None:
++    loaded = load_production(write(tmp_path / "fight.yaml", FIGHT))
++    compiled = compile_production(loaded.value)
++    assert compiled.value is not None
++    assert one(compiled.findings, "CF4001").source is not None
++    result = rehearse(compiled.value, [DelayCue("missing", 10)])
++    assert one(result.findings, "CF7003").source is None

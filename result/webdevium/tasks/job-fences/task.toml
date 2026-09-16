@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/job-fences"
+
+[metadata]
+task_id = "job-fences"
+display_title = "Hold a queued job behind the work it depends on"
+display_description = "Give the background job queue dependency fences: a job waits until the jobs it names have completed, a released job rejoins by the ranking already in use, a dead letter takes everything behind it down with a reason naming the cause, and a plan reports what is ready, what is waiting and on what, and what will never run."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/sMh8PbgmXAbIvwsDVFHl"
+base_commit_hash = "710f4235a38468a48b96cff885b1104ee4f9f05a"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-egor-smh8pb:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

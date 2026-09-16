@@ -1,0 +1,869 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1903963..8c896b5 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,13 @@
+ The first of it: the rope, the machine that drives it, and the colliery
+ that pays for both.
+ 
++- `safety` — the post brake as well as the gear: what the shoes are
++  worth at the rope, what a friction winder's ropes will pass before
++  the wheel gives it up, the two retardations a brake gives going up
++  and coming down, and the shoe pressure that decides whether the
++  lining lasts a summer. A `brake` line on a winder file carries it,
++  and the audit says nothing at all about a machine nobody has
++  measured.
+ - `errors` — one error class, and every refusal carrying the name of the
+   quantity that was wrong.
+ - `units` — rounding half away from zero without ever giving back a
+diff --git a/README.md b/README.md
+index 2c88bf4..0d46d1f 100644
+--- a/README.md
++++ b/README.md
+@@ -104,6 +104,18 @@ rope.factorFor(942);             // 5.93, because the rule falls with depth
+ rope.mostHanging(line, 942);     // 222 kN, once the rope's own weight is off
+ ```
+ 
++and the brake, which is a machine and not an assumption:
++
++```ts
++import { safety, winder } from "sheave";
++
++const machine = winder.parseWinder(sheet);
++safety.torque(safety.brakeOf(machine));  // 756 kNm off the shoes
++safety.heldPull(machine);                // 360 kN at the rope
++safety.retardationWinding(machine);      // 4.11 m/s² stopping a wind
++safety.retardationLowering(machine);     // 2.09 m/s², the smaller figure
++```
++
+ The namespaces follow the order the load travels: `units`, `rope`,
+ `shaft`, `drum`, `cage`, `cycle`, `power`, `safety`, `winder`, `design`,
+ `costing`, `works`, `report`, `cli`.
+diff --git a/docs/where-the-numbers-come-from.md b/docs/where-the-numbers-come-from.md
+index f75f9d5..f61c1fd 100644
+--- a/docs/where-the-numbers-come-from.md
++++ b/docs/where-the-numbers-come-from.md
+@@ -80,6 +80,7 @@ override.
+ | friction of a stove-lined wheel     | 0.25                     |
+ | slip margin on a friction winder    | 1.25                     |
+ | lining pressure, at most            | 2 N/mm²                  |
++| brake shoe pressure, at most        | 0.7 N/mm²                |
+ | rope-share error on a multi-rope    | 10 %                     |
+ | between two passing conveyances     | 0.15 m                   |
+ | conveyance to lining                | 0.30 m                   |
+@@ -89,6 +90,7 @@ override.
+ | emergency brake                     | 2.5 m/s²                 |
+ | working brake                       | 1.1 m/s²                 |
+ | brake delay                         | 0.5 s                    |
++| brake holds, of the out-of-balance  | 3 times                  |
+ | overspeed margin                    | 10 %                     |
+ | detaching hook, of the breaking load| 40 %                     |
+ | a tub of coal                       | 750 kg                   |
+diff --git a/docs/winder-file.md b/docs/winder-file.md
+index c469541..ca5f7c2 100644
+--- a/docs/winder-file.md
++++ b/docs/winder-file.md
+@@ -48,6 +48,21 @@ is not on the machine.
+ | `balance`  | `rate`, in kilograms a metre                                             | none or one |
+ | `cycle`    | `full`, `accelerate`, `decelerate`, `creep`, `creepfor`, `rest`          | one      |
+ | `working`  | `hours`                                                                   | none or one |
++| `brake`    | `diameter`, `width`, `arc`, `shoes`, `friction`, `force`                 | none or one |
++
++A `brake` line is the post brake off the maker's plate, and it wants all
++six of its keys rather than defaulting any of them, because there is no
++such thing as an ordinary brake:
++
++```
++brake diameter=3.6m width=0.25m arc=60 shoes=4 friction=0.35 force=300kn
++```
++
++The diameter is that of the ring the shoes bear on, the arc is how much
++of that ring one shoe covers, and the force is what each shoe is pressed
++on with. A file that says nothing about a brake is a file whose
++winder has not been measured rather than one without a brake, and the
++audit leaves it alone.
+ 
+ The constructions are `6x19`, `6x36`, `6x7`, `locked` and `triangular`;
+ the kinds of conveyance are `cage`, `skip` and `counterweight`. Ask for
+diff --git a/src/power/duty.ts b/src/power/duty.ts
+index 6afd0f1..17abc26 100644
+--- a/src/power/duty.ts
++++ b/src/power/duty.ts
+@@ -98,6 +98,48 @@ export function atEnd(one: Duty): number {
+   return outOfBalance(one, 0);
+ }
+ 
++/**
++ * The least the out-of-balance ever is across a wind, in kilonewtons.
++ *
++ * Signed, because on a cage winder it goes through nought and comes out
++ * the other side: at the end of the wind the rope on the falling side
++ * is heavier than everything the rising side is carrying, and the load
++ * that was being lifted is now driving.
++ *
++ * Walked rather than taken off the two ends. The line through them is
++ * straight while the ropes are the only thing moving, and every winder
++ * in this library is that winder, but nothing here promises it and the
++ * walk costs nothing.
++ */
++export function leastOutOfBalance(one: Duty): number {
++  let least = atStart(one);
++  for (let at = 0; at <= 100; at += 1) {
++    const found = outOfBalance(one, (one.depth * at) / 100);
++    if (found < least) least = found;
++  }
++  return round(least, 4);
++}
++
++/** And the most it ever is, which on an ordinary wind is at the start. */
++export function mostOutOfBalance(one: Duty): number {
++  let most = atEnd(one);
++  for (let at = 0; at <= 100; at += 1) {
++    const found = outOfBalance(one, (one.depth * at) / 100);
++    if (found > most) most = found;
++  }
++  return round(most, 4);
++}
++
++/**
++ * The worst of the two, in kilonewtons, whichever way it points.
++ *
++ * What a brake has to hold, because a brake does not know which way the
++ * load is trying to go and is not allowed to care.
++ */
++export function worstOutOfBalance(one: Duty): number {
++  return round(Math.max(Math.abs(leastOutOfBalance(one)), Math.abs(mostOutOfBalance(one))), 4);
++}
++
+ /**
+  * How far the out-of-balance swings across a wind, in kilonewtons.
+  *
+diff --git a/src/safety/brake.ts b/src/safety/brake.ts
+new file mode 100644
+index 0000000..7dce3d9
+--- /dev/null
++++ b/src/safety/brake.ts
+@@ -0,0 +1,507 @@
++/**
++ * The post brake: the one thing on a winding installation that has to
++ * work when nothing else is working.
++ *
++ * Every other retardation in this library is a figure somebody chose. A
++ * brake is a machine, and what it gives comes out of six things that
++ * can be measured with a rule and a spring balance: how big the path
++ * round the drum is, how wide a shoe is, how much of the path a shoe
++ * covers, how many shoes bear, what the lining grips at, and how hard
++ * each shoe is pressed on.
++ *
++ * Two rules govern it and they pull opposite ways. It has to be strong
++ * enough to hold the wind standing, which is a multiple of the worst
++ * out-of-balance and not the ordinary one; and on a friction winder it
++ * has to be weak enough that the ropes still grip, because a brake
++ * harder than the capstan equation allows does not stop a wind, it
++ * polishes a wheel.
++ *
++ * The other thing worth being clear about is that the retardation a
++ * brake gives is two numbers. Winding, the load is on the rising side
++ * and helps to stop it. Lowering, the same load drives the wind and the
++ * brake has to take it off before it retards anything at all. The
++ * second figure is the smaller one and it is the one an inspector asks
++ * for.
++ */
++
++import { WindingError, insist, nonNegative, positive, within } from "../errors.ts";
++import { round } from "../units/round.ts";
++import { weightOf } from "../units/measure.ts";
++import { gross } from "../cage/index.ts";
++import { massPerMetre } from "../rope/index.ts";
++import { SLIP_MARGIN, tensions, workingRatio } from "../drum/koepe.ts";
++import { leastOutOfBalance, mostOutOfBalance, movingMass, outOfBalance, worstOutOfBalance } from "../power/index.ts";
++import { overwindRoom } from "../shaft/index.ts";
++import { type Winder, dutyOf, wheelOf, windLength } from "../winder/model.ts";
++import { curveSpeed, retardationFor, stoppingDistance } from "./gear.ts";
++
++/** A post brake, as it stands on the engine house floor. */
++export interface Brake {
++  /** The diameter of the path the shoes bear on, in metres. */
++  readonly diameter: number;
++  /** How wide a shoe is, in metres. */
++  readonly width: number;
++  /** How much of the path one shoe covers, in degrees. */
++  readonly arc: number;
++  /** How many shoes bear on the path. */
++  readonly shoes: number;
++  /** What the lining grips at. */
++  readonly friction: number;
++  /** The force each shoe is applied with, in kilonewtons. */
++  readonly force: number;
++}
++
++/** A brake, checked. */
++export function brake(over: Partial<Brake> = {}): Brake {
++  const found: Brake = {
++    diameter: over.diameter ?? 3.6,
++    width: over.width ?? 0.25,
++    arc: over.arc ?? 60,
++    shoes: over.shoes ?? 2,
++    friction: over.friction ?? 0.35,
++    force: over.force ?? 200,
++  };
++  within(found.diameter, 0.5, 12, "diameter");
++  within(found.width, 0.02, 1.5, "width");
++  within(found.arc, 5, 180, "arc");
++  within(found.shoes, 1, 8, "shoes");
++  within(found.friction, 0.05, 0.6, "friction");
++  positive(found.force, "force");
++  return found;
++}
++
++/**
++ * The brake on a machine, where the sheet says what one is on it.
++ *
++ * A certificate need not name a brake and plenty of them do not, so the
++ * asking is separated from the having: a winder with nothing said about
++ * its brake is not a winder without one, it is a winder nobody has
++ * measured. Everything below wants a brake, and this is where one comes
++ * from when the answer is a file rather than a figure.
++ */
++export function brakeOf(of: Winder): Brake {
++  const found = of.brake;
++  if (found === undefined) {
++    throw new WindingError("nothing has been said about that winder's brake", "brake");
++  }
++  return found;
++}
++
++/**
++ * How much more than the standing load a brake is asked to hold.
++ *
++ * Three times, and the reason for three rather than two is the shape of
++ * the failure. A brake that is holding is a brake nobody is watching:
++ * the engineman has gone for his tea and the load is on the shoes for
++ * an hour. Linings glaze, springs settle and oil finds its way to the
++ * one place it must not be, and every one of those takes something off
++ * the figure that was measured on the day of the test.
++ */
++export const HOLDING_MARGIN = 3;
++
++/**
++ * The most a shoe is pressed on, in newtons a square millimetre.
++ *
++ * Not a strength: a lining will take several times this and not break.
++ * It is a heat figure. The energy of one emergency stop goes into the
++ * path as heat and comes out through the area of the shoe, and a shoe
++ * pressed harder than this on a small path burns its lining off in a
++ * summer.
++ */
++export const MOST_SHOE_PRESSURE = 0.7;
++
++/**
++ * The torque the shoes put on the drum shaft, in kilonewton metres.
++ *
++ * Friction times the applied force is what one shoe drags with, and
++ * every shoe drags at the same radius, so the shoes multiply and
++ * nothing else does.
++ */
++export function torque(one: Brake): number {
++  return round(one.friction * one.force * one.shoes * (one.diameter / 2), 4);
++}
++
++/**
++ * That torque referred to the rope, in kilonewtons.
++ *
++ * The path is on the drum and the rope leaves the drum, so the pull the
++ * shoes are worth at the rope is the torque over the radius the rope
++ * comes off at. A large drum is therefore worse braked than a small one
++ * with the same shoes on it, which is not obvious and is the reason
++ * brake paths are built out to the cheek of the drum rather than round
++ * the shaft.
++ */
++export function holdingPull(of: Winder): number {
++  return round(torque(brakeOf(of)) / dutyOf(of).radius, 4);
++}
++
++/**
++ * The most a friction wheel will pass, in kilonewtons.
++ *
++ * The capstan equation again, read the other way about. The wheel
++ * carries the two sides at a ratio the lining sets, so the difference
++ * it can hold between them is the slack side times one less than that
++ * ratio — and the slack side is smallest at one end of the wind or the
++ * other, so the walk decides it rather than the arithmetic.
++ *
++ * Nothing above this figure is worth applying. A friction winder with
++ * more brake than the ropes grip is a friction winder that slips on the
++ * day it is wanted, and it takes the lining with it.
++ */
++export function gripPull(of: Winder, margin = SLIP_MARGIN): number {
++  insist(of.drive.kind === "koepe", "a drum winder holds by the shoes and not by the ropes", "drive");
++  const allowed = workingRatio(wheelOf(of), margin);
++  const depth = windLength(of);
++  const rising = weightOf(gross(of.rising));
++  const falling = weightOf(gross(of.falling));
++  let least = Number.POSITIVE_INFINITY;
++  for (let at = 0; at <= 100; at += 1) {
++    const found = tensions(of.rope, depth, rising, falling, (depth * at) / 100, of.ropes, of.balance);
++    const passes = found.slack * (allowed - 1);
++    if (passes < least) least = passes;
++  }
++  return round(least, 4);
++}
++
++/**
++ * What the brake actually holds at the rope, in kilonewtons.
++ *
++ * The shoes on a drum winder. On a friction winder, the shoes or what
++ * the ropes will pass, whichever gives way first — and on a deep skip
++ * winder without a balance rope it is the ropes, every time.
++ */
++export function heldPull(of: Winder): number {
++  const shoes = holdingPull(of);
++  if (of.drive.kind === "drum") return shoes;
++  return round(Math.min(shoes, gripPull(of)), 4);
++}
++
++/** Whether the brake holds the wind standing, with the margin the rules want. */
++export function holds(of: Winder, margin = HOLDING_MARGIN): boolean {
++  positive(margin, "margin");
++  return heldPull(of) >= margin * worstOutOfBalance(dutyOf(of));
++}
++
++/**
++ * The force each shoe wants to hold it, in kilonewtons.
++ *
++ * The question a colliery actually asks, which is not whether the brake
++ * holds but what has to be done to the springs so that it does. It is
++ * the shoes' figure and not the ropes': no spring on a friction winder
++ * buys anything past what the wheel passes.
++ */
++export function forceFor(of: Winder, margin = HOLDING_MARGIN): number {
++  positive(margin, "margin");
++  const one = brakeOf(of);
++  const wanted = margin * worstOutOfBalance(dutyOf(of)) * dutyOf(of).radius;
++  return round(wanted / (one.friction * one.shoes * (one.diameter / 2)), 4);
++}
++
++/**
++ * The retardation the brake gives on a wind, in metres a second squared.
++ *
++ * Winding, the load is where it helps: the out-of-balance is already
++ * pulling backwards on the drum and the shoes are only asked for the
++ * rest. The figure to take is the least the out-of-balance ever is,
++ * because a stop can be called for at any point of the wind and the
++ * engineman does not get to choose the point.
++ */
++export function retardationWinding(of: Winder): number {
++  const force = heldPull(of) + leastOutOfBalance(dutyOf(of));
++  return round(Math.max(0, (force * 1000) / movingMass(dutyOf(of))), 4);
++}
++
++/**
++ * And on a lowering wind, where the same load is in the way.
++ *
++ * The load is now driving and the brake has to take all of it off
++ * before a single metre a second squared of retardation appears. Take
++ * the most the out-of-balance ever is, and where the brake is weaker
++ * than that there is no retardation to report: the wind runs away and
++ * the figure is nought.
++ */
++export function retardationLowering(of: Winder): number {
++  const force = heldPull(of) - mostOutOfBalance(dutyOf(of));
++  return round(Math.max(0, (force * 1000) / movingMass(dutyOf(of))), 4);
++}
++
++/**
++ * Whether the brake stops an overwind in the room the headgear leaves.
++ *
++ * An overwind is the rising conveyance going past the bank, so it is
++ * the winding figure that answers it, against what the room and the
++ * speed between them demand.
++ */
++export function stopsAnOverwind(of: Winder): boolean {
++  return retardationWinding(of) >= retardationFor(of.profile.full, overwindRoom(of.shaft));
++}
++
++/**
++ * What one shoe presses at, in newtons a square millimetre.
++ *
++ * The force over the strip of path the shoe covers, which is an arc and
++ * not a rectangle: a shoe on a small path with a wide arc is a shoe
++ * with a great deal of area, and the same spring behind it presses far
++ * more gently.
++ */
++export function pressure(one: Brake): number {
++  const swept = Math.PI * one.diameter * (one.arc / 360) * one.width;
++  insist(swept > 0, "that shoe covers nothing at all", "arc");
++  return round(one.force / (swept * 1000), 4);
++}
++
++/**
++ * Where in the wind the out-of-balance is at its worst, in metres still
++ * to go.
++ *
++ * Nought is the end of the wind and the whole depth is the start, which
++ * is how `power` measures a position and how an engineman thinks about
++ * one. On a winder with a matched balance rope the answer is arbitrary,
++ * because every point of the wind is the same point.
++ */
++export function worstPoint(of: Winder): number {
++  const what = dutyOf(of);
++  const depth = windLength(of);
++  let worst = 0;
++  let found = 0;
++  for (let at = 0; at <= 100; at += 1) {
++    const where = (depth * at) / 100;
++    const size = Math.abs(outOfBalance(what, where));
++    if (size > worst) {
++      worst = size;
++      found = where;
++    }
++  }
++  return round(found, 2);
++}
++
++/**
++ * The path diameter that would hold it, with the shoes as they are, in
++ * metres.
++ *
++ * The other lever, and on an old winder the only one left: springs can
++ * be wound up until the pins bend and the lining will not take more
++ * pressure, but a path can be built out to the rim of the drum and
++ * often has been, which is why so many drums are wider at the cheek
++ * than the coiling needs.
++ */
++export function pathFor(of: Winder, margin = HOLDING_MARGIN): number {
++  positive(margin, "margin");
++  const one = brakeOf(of);
++  const wanted = margin * worstOutOfBalance(dutyOf(of)) * dutyOf(of).radius;
++  return round((2 * wanted) / (one.friction * one.force * one.shoes), 3);
++}
++
++/** How many shoes it wants, with the path and the springs as they are. */
++export function shoesFor(of: Winder, margin = HOLDING_MARGIN): number {
++  positive(margin, "margin");
++  const one = brakeOf(of);
++  const wanted = margin * worstOutOfBalance(dutyOf(of)) * dutyOf(of).radius;
++  return Math.ceil(wanted / (one.friction * one.force * (one.diameter / 2)));
++}
++
++/**
++ * Whether the ropes give way before the shoes do.
++ *
++ * The question that decides which end of a friction winder to spend
++ * money on. Where the ropes go first, a heavier spring buys nothing at
++ * all and the answer is wrap, or lining, or a balance rope; where the
++ * shoes go first the brake is simply small.
++ */
++export function slipsFirst(of: Winder): boolean {
++  if (of.drive.kind === "drum") return false;
++  return gripPull(of) < holdingPull(of);
++}
++
++/**
++ * How far a lowering wind runs on before it stops, in metres.
++ *
++ * From full speed, with the brake's own lowering retardation and the
++ * half second the shoes take to come on. It is the figure to set beside
++ * the sump, because a lowering wind that will not stop in the room
++ * below the lowest inset stops in the water.
++ */
++export function stoppingRoom(of: Winder): number {
++  const found = retardationLowering(of);
++  insist(found > 0, "that brake does not stop a lowering wind at all", "brake");
++  return stoppingDistance(of.profile.full, found);
++}
++
++/** Whether the shoe is pressed no harder than practice allows. */
++export function pressureStands(one: Brake, most = MOST_SHOE_PRESSURE): boolean {
++  positive(most, "most");
++  return pressure(one) <= most;
++}
++
++/**
++ * The power the shoes take at full speed, in kilowatts.
++ *
++ * What the path has to get rid of while a stop is going on, as against
++ * the energy of the whole stop. A winder braked from sixteen metres a
++ * second turns several thousand kilowatts into heat for a second or
++ * two, which is more than the motor puts in and is the reason a brake
++ * path is a casting and not a plate.
++ */
++export function dragPower(of: Winder): number {
++  return round(heldPull(of) * of.profile.full, 2);
++}
++
++/**
++ * Whether the brake holds at one stated point of the wind rather than
++ * at the worst of it.
++ *
++ * The position is metres still to go, as everywhere else. Worth asking
++ * where a winder is being worked to a shallow inset on a machine built
++ * for the sump, since the out-of-balance it sees there is not the one
++ * the brake was set for.
++ */
++export function holdsAt(of: Winder, at: number, margin = HOLDING_MARGIN): boolean {
++  positive(margin, "margin");
++  const load = Math.abs(outOfBalance(dutyOf(of), at));
++  return heldPull(of) >= margin * load;
++}
++
++/**
++ * The band a friction winder's shoe force has to sit inside, in
++ * kilonewtons.
++ *
++ * Below the low end the brake will not hold the wind standing; above
++ * the high end the shoes are dragging harder than the ropes grip, so
++ * every extra newton of spring goes into the lining and none of it into
++ * stopping anything. A band that comes out the wrong way round is a
++ * winder that cannot be braked as it stands, and the cure is wrap or a
++ * balance rope rather than springs.
++ */
++export function brakeBand(of: Winder): { readonly low: number; readonly high: number } {
++  insist(of.drive.kind === "koepe", "a drum winder has no upper end to its brake force", "drive");
++  const one = brakeOf(of);
++  const low = forceFor(of);
++  const high = (gripPull(of) * dutyOf(of).radius) / (one.friction * one.shoes * (one.diameter / 2));
++  return { low: round(low, 4), high: round(high, 4) };
++}
++
++/**
++ * The speed the overspeed gear should watch for at a stated distance
++ * from the landing, in metres a second.
++ *
++ * `gear` draws that curve from a retardation somebody assumed. This
++ * draws it from the brake actually bolted to the machine, and on a
++ * winder whose brake is worse than the assumption the two curves are
++ * far enough apart to matter: the gear passes a wind it cannot stop and
++ * says nothing, which is the failure the curve was invented to prevent.
++ */
++export function curveFrom(of: Winder, toGo: number): number {
++  nonNegative(toGo, "toGo");
++  const found = retardationLowering(of);
++  insist(found > 0, "that brake does not stop a lowering wind at all", "brake");
++  return curveSpeed(toGo, found);
++}
++
++/**
++ * The same brake with a glazed lining, as a brake.
++ *
++ * A lining does not wear out so much as polish, and a polished lining
++ * grips at a fraction of what it did on the day of the test. The share
++ * is how much of the friction has gone: a fifth is an ordinary winter,
++ * and a half is a lining that has had oil on it.
++ */
++export function glazed(one: Brake, lost: number): Brake {
++  within(lost, 0, 1, "lost");
++  return brake({ ...one, friction: one.friction * (1 - lost) });
++}
++
++/**
++ * How much friction a brake can lose and still hold the wind, as a
++ * share.
++ *
++ * The figure worth writing on the certificate, because it says what the
++ * margin is actually for. A brake holding at exactly three times has
++ * nothing to lose and will fail the first time somebody spills oil on
++ * the path; one holding at four times can lose a quarter of its lining
++ * and nobody ever finds out.
++ */
++export function canLose(of: Winder, margin = HOLDING_MARGIN): number {
++  positive(margin, "margin");
++  const worst = worstOutOfBalance(dutyOf(of));
++  insist(worst > 0, "that winder is in perfect balance and needs no brake to hold it", "brake");
++  const spare = 1 - (margin * worst) / heldPull(of);
++  return round(Math.max(0, spare), 4);
++}
++
++/**
++ * The speed a lowering wind can be running at and still be stopped in
++ * the sump, in metres a second.
++ *
++ * The other end of the shaft from the overwind and the one nobody
++ * builds a headgear for. An underwind has whatever the sump gives it
++ * and no more, and the brake it is stopped by is the weaker of the two
++ * figures rather than the stronger.
++ */
++export function stoppableLowering(of: Winder): number {
++  const found = retardationLowering(of);
++  insist(found > 0, "that brake does not stop a lowering wind at all", "brake");
++  const room = of.shaft.sump;
++  positive(room, "sump");
++  // Solving the stopping distance for the speed, the half second the
++  // shoes take to come on included.
++  const delay = 0.5;
++  const factor = 1 / (2 * found);
++  const speed = (-delay + Math.sqrt(delay * delay + 4 * factor * room)) / (2 * factor);
++  return round(Math.max(0, speed), 3);
++}
++
++/**
++ * The deepest wind this brake still holds, in metres.
++ *
++ * Walked in tens, because the answer is wanted to the nearest ten
++ * metres and the out-of-balance it is walking against is not a straight
++ * line in anything a colliery can measure. A winder that comes out
++ * shallower than its own shaft is a winder whose brake was specified
++ * for the seam above the one it is working.
++ */
++export function deepestBraked(of: Winder, margin = HOLDING_MARGIN): number {
++  positive(margin, "margin");
++  const pull = heldPull(of);
++  const metre = weightOf(massPerMetre(of.rope) * of.ropes - of.balance);
++  const conveyances = weightOf(gross(of.rising) - of.falling.tare - of.falling.payload);
++  insist(pull > margin * conveyances, "that brake will not hold the conveyances at any depth", "brake");
++  let best = 0;
++  for (let at = 0; at <= 4000; at += 10) {
++    const worst = Math.abs(conveyances + metre * at);
++    if (pull >= margin * worst) best = at;
++  }
++  return best;
++}
++
++/** The brake in a line, for a report. */
++export function describeBrake(of: Winder): string {
++  const one = brakeOf(of);
++  return (
++    `${one.shoes} shoes on a ${one.diameter} m path: ${torque(one)} kNm, ${heldPull(of)} kN at the rope ` +
++    `against ${worstOutOfBalance(dutyOf(of))} kN out of balance, ${retardationLowering(of)} m/s² lowering`
++  );
++}
++
++/** How much of the holding margin the brake actually has, as a ratio. */
++export function holdingMargin(of: Winder): number {
++  const worst = worstOutOfBalance(dutyOf(of));
++  insist(worst > 0, "that winder is in perfect balance and needs no brake to hold it", "brake");
++  return round(heldPull(of) / worst, 3);
++}
++
++/**
++ * What one stop from full speed puts into the path, in megajoules a
++ * square metre of lining.
++ *
++ * The figure a lining is chosen on rather than the pressure, and the
++ * reason a winder that stops twice a shift and one that stops twice an
++ * hour do not take the same shoes.
++ */
++export function stopHeat(of: Winder): number {
++  const one = brakeOf(of);
++  nonNegative(of.profile.full, "full");
++  const kinetic = (movingMass(dutyOf(of)) * of.profile.full * of.profile.full) / 2;
++  const swept = Math.PI * one.diameter * (one.arc / 360) * one.width * one.shoes;
++  insist(swept > 0, "that brake covers no path at all", "arc");
++  return round(kinetic / swept / 1_000_000, 4);
++}
+diff --git a/src/safety/index.ts b/src/safety/index.ts
+index 3751fc6..25de3e0 100644
+--- a/src/safety/index.ts
++++ b/src/safety/index.ts
+@@ -1,3 +1,4 @@
+ /** What stops a wind going wrong, and the one part meant to break. */
+ 
+ export * from "./gear.ts";
++export * from "./brake.ts";
+diff --git a/src/winder/audit.ts b/src/winder/audit.ts
+index 8fe482f..eb73f1f 100644
+--- a/src/winder/audit.ts
++++ b/src/winder/audit.ts
+@@ -46,6 +46,16 @@ import { gross, matched, menIn, menLimitedBy, usefulFraction } from "../cage/ind
+ import { BRISK_AIR, ropeLength, sumpEnough, sumpFor, overwindRoom, stoppableFrom, widestConveyance, willFit } from "../shaft/index.ts";
+ import { MEN_SPEED, atFullShare, movingShare, reachesFull, worthOfASecond, worthOfSpeed } from "../cycle/index.ts";
+ import { hookBand, retardationFor, EMERGENCY_BRAKE } from "../safety/index.ts";
++import {
++  HOLDING_MARGIN,
++  MOST_SHOE_PRESSURE,
++  heldPull,
++  holds,
++  pressure,
++  retardationLowering,
++  retardationWinding,
++  stopsAnOverwind,
++} from "../safety/brake.ts";
+ import {
+   type Winder,
+   balanceSwing,
+@@ -66,7 +76,7 @@ import {
+   wheelOf,
+   windLength,
+ } from "./model.ts";
+-import { balanceWanted, overloadRatio } from "../power/index.ts";
++import { balanceWanted, overloadRatio, worstOutOfBalance } from "../power/index.ts";
+ 
+ /** How much a finding matters. */
+ export type Severity = "note" | "warning" | "error";
+@@ -401,6 +411,59 @@ export function safetyFindings(one: Winder): Finding[] {
+   return out;
+ }
+ 
++/**
++ * What the brake shows.
++ *
++ * Nothing at all where the sheet says nothing about a brake, because a
++ * certificate that does not name one is not evidence that there is none
++ * — and an audit that invents a fault out of a blank line is an audit
++ * nobody reads twice.
++ */
++export function brakeFindings(one: Winder): Finding[] {
++  const out: Finding[] = [];
++  const post = one.brake;
++  if (post === undefined) return out;
++  if (!holds(one)) {
++    out.push(
++      finding(
++        "error",
++        "brake",
++        `the brake holds ${heldPull(one)} kN at the rope where ${HOLDING_MARGIN} times an out-of-balance of ` +
++          `${worstOutOfBalance(dutyOf(one))} kN wants ${round(HOLDING_MARGIN * worstOutOfBalance(dutyOf(one)), 1)}: it will not hold the wind standing`,
++      ),
++    );
++  }
++  if (!stopsAnOverwind(one)) {
++    out.push(
++      finding(
++        "error",
++        "brake",
++        `${retardationWinding(one)} m/s² will not stop an overwind in the ` +
++          `${overwindRoom(one.shaft)} m the headgear leaves, which wants ${retardationFor(one.profile.full, overwindRoom(one.shaft))}`,
++      ),
++    );
++  }
++  if (pressure(post) > MOST_SHOE_PRESSURE) {
++    out.push(
++      finding(
++        "warning",
++        "brake",
++        `${pressure(post)} N/mm² on the shoe is past the ${MOST_SHOE_PRESSURE} practice allows: ` +
++          `the lining glazes and the figure measured on the day of the test is not the figure a year later`,
++      ),
++    );
++  }
++  out.push(
++    finding(
++      "note",
++      "brake",
++      `${post.shoes} shoes on a ${post.diameter} m path hold ${heldPull(one)} kN at the rope: ` +
++        `${retardationWinding(one)} m/s² winding and ${retardationLowering(one)} lowering`,
++    ),
++  );
++  return out;
++}
++
+ /** Everything, in the order the load travels. */
+ export function auditWinder(one: Winder): Finding[] {
+   return [
+@@ -411,6 +474,7 @@ export function auditWinder(one: Winder): Finding[] {
+     ...cycleFindings(one),
+     ...engineFindings(one),
+     ...safetyFindings(one),
++    ...brakeFindings(one),
+   ];
+ }
+ 
+diff --git a/src/winder/model.ts b/src/winder/model.ts
+index 87d39cf..02bb5fc 100644
+--- a/src/winder/model.ts
++++ b/src/winder/model.ts
+@@ -23,6 +23,7 @@ import { type Drum, type Koepe } from "../drum/index.ts";
+ import { type Conveyance, gross } from "../cage/index.ts";
+ import { type Profile, cycleTime, tonnesADay, tonnesAnHour, windTime, windsAnHour } from "../cycle/index.ts";
+ import { type Duty, duty, energyPerTonne, energyPerWind, motorFor, peakPower, rmsPower, swing } from "../power/index.ts";
++import type { Brake } from "../safety/brake.ts";
+ 
+ /** How the rope is driven. */
+ export type Drive =
+@@ -51,6 +52,8 @@ export interface Winder {
+   readonly profile: Profile;
+   /** How many hours a day it winds coal. */
+   readonly hours: number;
++  /** The brake that stops it, where anybody has said what one is on it. */
++  readonly brake: Brake | undefined;
+ }
+ 
+ /** A winder, checked. */
+@@ -66,6 +69,7 @@ export function winder(over: Partial<Winder> & Pick<Winder, "name" | "shaft" | "
+     balance: over.balance ?? 0,
+     profile: over.profile,
+     hours: over.hours ?? 16,
++    brake: over.brake,
+   };
+   insist(found.name.trim().length > 0, "a winder has to be called something", "name");
+   within(found.ropes, 1, 6, "ropes");
+diff --git a/src/winder/parse.ts b/src/winder/parse.ts
+index bf3e922..a81203b 100644
+--- a/src/winder/parse.ts
++++ b/src/winder/parse.ts
+@@ -17,13 +17,14 @@
+ 
+ import { WindingError, insist } from "../errors.ts";
+ import { round as roundTo } from "../units/round.ts";
+-import { parseLength, parseMass, parseShare, parseSpeed, parseTime } from "../units/measure.ts";
++import { parseForce, parseLength, parseMass, parseShare, parseSpeed, parseTime } from "../units/measure.ts";
+ import { type Rope, constructionNamed, rope } from "../rope/index.ts";
+ import { type Shaft, shaft } from "../shaft/index.ts";
+ import { type Drive, type Winder, winder } from "./model.ts";
+ import { drum, koepe } from "../drum/index.ts";
+ import { type Conveyance, conveyance, kindNamed } from "../cage/index.ts";
+ import { type Profile, profile } from "../cycle/index.ts";
++import { type Brake, brake } from "../safety/brake.ts";
+ 
+ interface Fields {
+   readonly words: string[];
+@@ -87,6 +88,7 @@ export const KEYWORDS: readonly string[] = [
+   "balance",
+   "cycle",
+   "working",
++  "brake",
+ ];
+ 
+ interface Building {
+@@ -100,6 +102,7 @@ interface Building {
+   balance: number;
+   profile: Profile | undefined;
+   hours: number;
++  brake: Brake | undefined;
+ }
+ 
+ /**
+@@ -123,6 +126,7 @@ export function parseWinder(text: string): Winder {
+     balance: 0,
+     profile: undefined,
+     hours: 16,
++    brake: undefined,
+   };
+   const lines = text.split("\n");
+   for (let at = 0; at < lines.length; at += 1) {
+@@ -152,6 +156,7 @@ function read(building: Building, raw: string): void {
+   else if (keyword === "rising" || keyword === "falling") readConveyance(building, fields, rest, keyword);
+   else if (keyword === "balance") readBalance(building, fields);
+   else if (keyword === "cycle") readCycle(building, fields);
++  else if (keyword === "brake") readBrake(building, fields);
+   else readWorking(building, fields);
+ }
+ 
+@@ -262,6 +267,19 @@ function readCycle(building: Building, fields: Fields): void {
+   });
+ }
+ 
++function readBrake(building: Building, fields: Fields): void {
++  onlyKnown(fields, ["diameter", "width", "arc", "shoes", "friction", "force"], "brake");
++  insist(building.brake === undefined, "that file puts two brakes on one winder", "brake");
++  building.brake = brake({
++    diameter: parseLength(must(fields, "diameter", "brake"), "diameter"),
++    width: parseLength(must(fields, "width", "brake"), "width"),
++    arc: plain(must(fields, "arc", "brake"), "arc"),
++    shoes: plain(must(fields, "shoes", "brake"), "shoes"),
++    friction: plain(must(fields, "friction", "brake"), "friction"),
++    force: parseForce(must(fields, "force", "brake"), "force"),
++  });
++}
++
+ function readWorking(building: Building, fields: Fields): void {
+   onlyKnown(fields, ["hours"], "working");
+   building.hours = orElse(fields, "hours", 16, (text, quantity) => parseTime(text, quantity) / 3600);
+@@ -285,6 +303,7 @@ function assemble(building: Building): Winder {
+     balance: building.balance,
+     profile: wanted(building.profile, "that file says nothing about how it is worked", "cycle"),
+     hours: building.hours,
++    brake: building.brake,
+   });
+ }
+ 

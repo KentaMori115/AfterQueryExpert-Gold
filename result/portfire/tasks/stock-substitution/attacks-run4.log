@@ -1,0 +1,207 @@
+built chai-tamper: 1 file(s)
+built fake-heldout: 2 file(s)
+built config-and-setup: 3 file(s)
+built node-modules: 1 file(s)
+built report-rewrite: 1 file(s)
+built solution-edits-base-test: 19 file(s)
+built chai-esm-tamper: 1 file(s)
+built guard-rewrite: 19 file(s)
+built junit-watcher: 1 file(s)
+built junit-late-writer: 1 file(s)
+
+=== staging the base tree
+local base commit: a4845386a3446078a29d45f9f7915b4472c9611d
+
+=== building the environment image
+
+=== building the verifier image
+
+=== oracle run (reference solution applied)
+oracle     reward.json = {"reward": 1, "f2p_total": 48, "f2p_passed": 48, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== nop run (base state, nothing applied)
+nop        reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== guard-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/guard-rewrite.patch)
+guard-rewrite reward.json = {"reward": 1, "f2p_total": 48, "f2p_passed": 48, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== chai-tamper run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/chai-tamper.patch)
+chai-tamper reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== chai-esm-tamper run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/chai-esm-tamper.patch)
+chai-esm-tamper reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== fake-heldout run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/fake-heldout.patch)
+fake-heldout reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== config-and-setup run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/config-and-setup.patch)
+config-and-setup reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== node-modules run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/node-modules.patch)
+node-modules reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0, "apply_failed": 1}
+
+=== report-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/report-rewrite.patch)
+report-rewrite reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== junit-watcher run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/junit-watcher.patch)
+junit-watcher reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== junit-late-writer run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/junit-late-writer.patch)
+junit-late-writer reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== solution-edits-base-test run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/solution-edits-base-test.patch)
+solution-edits-base-test reward.json = {"reward": 1, "f2p_total": 48, "f2p_passed": 48, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== summary
+--- oracle
+P2P 2116/2116 pass 0 fail; F2P 48/48 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- nop
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- guard-rewrite
+P2P 2116/2116 pass 0 fail; F2P 48/48 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- chai-tamper
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- chai-esm-tamper
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- fake-heldout
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- config-and-setup
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- node-modules
+[verifier] ERROR: submitted model.patch failed to apply
+--- report-rewrite
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- junit-watcher
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > carries on past an unresolved name
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > still runs the load check on what did resolve
+[verifier] ✗ [p2p] tests/compile.test.ts.pre roll > reports the pre roll a big opener needs
+--- junit-late-writer
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+--- solution-edits-base-test
+P2P 2116/2116 pass 0 fail; F2P 48/48 pass 0 fail; PARTIAL 1.0; BINARY 1
+
+logs kept under /root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/runs/
+
+=== why each attack scored what it did
+--- guard-rewrite
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 48 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 48/48 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- chai-tamper
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 48 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0
+--- fake-heldout
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 48 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0
+--- config-and-setup
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 48 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0
+--- node-modules
+--- report-rewrite
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 48 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0
+--- junit-watcher
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 48 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2116 cases (2116 declared ids added as failed)
+      1 P2P 0/2116 pass 2116 fail; F2P 0/48 pass 48 fail; PARTIAL 0.0; BINARY 0
+--- junit-late-writer
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 48 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/48 pass 48 fail; PARTIAL 0.977818853974122; BINARY 0

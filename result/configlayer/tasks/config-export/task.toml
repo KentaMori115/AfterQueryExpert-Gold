@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/config-export"
+
+[metadata]
+task_id = "config-export"
+display_title = "Config export to JSON, dotenv and INI"
+display_description = "Deterministic renderers for resolved configuration — canonical JSON, env-style dotenv, INI sections — with secret redaction on the way out."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/vFYM9eXovPIRZPvmdXnN"
+base_commit_hash = "dd49c9a17543604fb728e10cbb7e3b3201355d10"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-configlayer-vfym9e:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

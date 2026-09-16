@@ -1,0 +1,1214 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 43213e6..eded8e5 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,18 @@ versioning; the engine is pre-1.0, so minor versions may change behaviour.
+ 
+ ## Unreleased
+ 
++* `INTERVAL` is now a usable type rather than a declared one. Literals take
++  ISO 8601 duration text (`INTERVAL 'P1Y2M3DT4H5M6S'`) or a whole number with
++  a unit (`INTERVAL '3' DAY`), and `CAST` converts between `INTERVAL` and
++  `STRING` using the same text. Dates and timestamps add and subtract
++  intervals, applying months before days before seconds and clamping to the
++  end of the month; a timestamp minus a timestamp is an interval; intervals
++  add, subtract, negate, and scale by numbers with fractions carried down
++  from months to days to seconds. Comparison, sorting and grouping value a
++  month at thirty days and a day at twenty-four hours. `SUM`, `AVG`, `MIN`
++  and `MAX` accept intervals and `extract` reads their stored fields.
++  Python `timedelta` values in registered rows are converted on the way in.
++
+ * Continuous integration on GitHub Actions: the suite runs on Python 3.10
+   through 3.12, ruff lints the tree, and the example scripts and the command
+   line interface are smoke-tested on every push.
+diff --git a/Makefile b/Makefile
+index 66f1caf..1798d92 100644
+--- a/Makefile
++++ b/Makefile
+@@ -18,6 +18,7 @@ demo:
+ 	$(PYTHON) examples/quickstart.py
+ 	$(PYTHON) examples/sales_report.py
+ 	$(PYTHON) examples/custom_functions.py
++	$(PYTHON) examples/intervals.py
+ 
+ clean:
+ 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+diff --git a/README.md b/README.md
+index dbcdbdc..d14657b 100644
+--- a/README.md
++++ b/README.md
+@@ -73,6 +73,7 @@ scalar and aggregate functions.
+ | Ordering | `ORDER BY` with `ASC`/`DESC` and `NULLS FIRST`/`NULLS LAST` |
+ | Paging | `LIMIT`, `OFFSET` |
+ | Set ops | `UNION`, `UNION ALL` |
++| Intervals | `INTERVAL` literals, date and timestamp arithmetic, interval aggregates |
+ | Expressions | arithmetic, `\|\|`, `CASE`, `CAST`, 60+ scalar and 13 aggregate functions |
+ | Metadata | `EXPLAIN`, `EXPLAIN VERBOSE`, `SHOW TABLES`, `SHOW COLUMNS`, `DESCRIBE` |
+ 
+diff --git a/docs/sql-reference.md b/docs/sql-reference.md
+index 983bb10..356124b 100644
+--- a/docs/sql-reference.md
++++ b/docs/sql-reference.md
+@@ -45,6 +45,7 @@ such as `first`, `last`, `values` and `using` may be used bare.
+ | String | `'text'`, `'it''s'` |
+ | Boolean | `TRUE`, `FALSE` |
+ | Null | `NULL` |
++| Interval | `INTERVAL 'P1Y2M3DT4H5M6S'`, `INTERVAL '3' DAY` |
+ 
+ ## Types
+ 
+@@ -59,6 +60,100 @@ Implicit widening is narrow by design: `INTEGER` widens to `DOUBLE`, `DATE`
+ widens to `TIMESTAMP`, and `NULL` unifies with anything. Everything else needs
+ an explicit `CAST`.
+ 
++## Intervals
++
++An `INTERVAL` is a span of time held as three separate fields: months, days
++and seconds. The fields never fold into each other, because a month has no
++fixed length and a day is not always twenty-four hours once a calendar is
++involved. Years are stored as months, weeks as days, and hours and minutes as
++seconds. Every field carries its own sign, so `P1M-1D` is a valid value.
++
++### Literals and text
++
++```sql
++INTERVAL 'P1Y2M3DT4H5M6S'      -- ISO 8601 duration
++INTERVAL 'PT36H'               -- stays 36 hours, never becomes a day and a half
++INTERVAL '3' DAY               -- a whole number and one unit
++INTERVAL '-2' MONTH
++CAST('P14D' AS INTERVAL)       -- same text rules as the literal
++CAST(INTERVAL 'P2W' AS STRING) -- 'P14D'
++```
++
++The bare form takes an ISO 8601 duration: `P`, then any of `nY`, `nM`, `nW`,
++`nD`, then optionally `T` followed by any of `nH`, `nM`, `nS`. Components may
++be left out but at least one must be present, and a `T` must be followed by
++a time component. Only seconds may carry a fraction, kept to the microsecond.
++A leading `-` negates the whole duration and each component may also carry
++its own sign. The unit form takes a whole number and one of `YEAR`, `MONTH`,
++`WEEK`, `DAY`, `HOUR`, `MINUTE`, `SECOND`, singular or plural.
++
++Rendering, whether by `CAST(... AS STRING)`, by the command line or by
++`EXPLAIN`, produces the same ISO 8601 text: months as years and months, the
++time part as hours, minutes and seconds, zero components omitted, and `PT0S`
++for a zero interval. Nothing crosses a field, so `PT36H` renders as `PT36H`
++and `P14M` as `P1Y2M`.
++
++Text that does not follow these rules is a parse error in a literal and, in a
++`CAST`, `NULL` unless the session sets `strict_casts`.
++
++### Arithmetic
++
++| Expression | Result |
++| --- | --- |
++| `interval + interval`, `interval - interval`, `-interval` | `INTERVAL`, field by field |
++| `date + interval`, `timestamp + interval`, `interval + date` | `TIMESTAMP` |
++| `date - interval`, `timestamp - interval` | `TIMESTAMP` |
++| `timestamp - timestamp`, `timestamp - date`, `date - timestamp` | `INTERVAL` with days and seconds, no months |
++| `date - date` | `INTEGER` days, as `date_diff` |
++| `interval * number`, `number * interval`, `interval / number` | `INTERVAL` |
++
++Adding an interval to a date or timestamp applies the months first, clamping
++the day to the last day of the target month, then the days, then the seconds:
++
++```sql
++CAST('2024-01-31' AS DATE) + INTERVAL 'P1M'                 -- 2024-02-29 00:00:00
++CAST('2024-01-31' AS DATE) + INTERVAL 'P1M' + INTERVAL 'P1M' -- 2024-03-29 00:00:00
++CAST('2024-01-31' AS DATE) + INTERVAL 'P2M'                 -- 2024-03-31 00:00:00
++CAST('2024-01-29' AS DATE) + INTERVAL 'P1M2D'               -- 2024-03-02 00:00:00
++CAST('2024-01-29' AS DATE) + INTERVAL 'P2D' + INTERVAL 'P1M' -- 2024-02-29 00:00:00
++```
++
++A timestamp minus a timestamp has a whole number of days, truncated toward
++zero, and the remaining seconds: `2024-03-01 00:00` minus `2024-01-31 10:00`
++is `P29DT14H`.
++
++Scaling keeps whole months and whole days and carries the fractions down:
++a fractional month becomes days at thirty per month and a fractional day
++becomes seconds at 86400 per day, rounded to the microsecond. So
++`INTERVAL 'P1M' / 2` is `P15D`, `INTERVAL 'P1M' / 3` is `P10D`,
++`INTERVAL 'P1M' * 1.5` is `P1M15D` and `INTERVAL 'P1D' / 4` is `PT6H`.
++Division by zero is an error, as for numbers.
++
++Any other combination, such as `interval + integer` or `interval * interval`,
++is a type error.
++
++### Comparison, ordering and grouping
++
++Comparing two intervals, sorting by one, and treating two as the same key in
++`GROUP BY`, `DISTINCT`, `UNION` or an equi-join all use one rule: a month
++counts as thirty days and a day as twenty-four hours. So `INTERVAL 'P1M' =
++INTERVAL 'P30D'` and `INTERVAL 'P1D' = INTERVAL 'PT24H'` are both `TRUE`, and
++`P29D < P1M < P30DT1H < P31D`. This is a rule about comparison only; adding
++`P1M` and `P30D` to the same date can give different days.
++
++### Functions
++
++`SUM` adds intervals field by field, `AVG` divides that total by the count
++with the scaling rule above, and `MIN` and `MAX` follow the comparison rule.
++`extract` reads one stored field of an interval: `year` and `month` split the
++month count, `hour`, `minute` and `second` split the time part, `day` is the
++day count, and nothing crosses a field. `extract('month', INTERVAL 'P14M')`
++is `2`, `extract('hour', INTERVAL 'PT36H')` is `36` and `extract('day',
++INTERVAL 'PT36H')` is `0`. Each part keeps the sign of its field.
++
++Rows registered from Python may hold `datetime.timedelta` values; they arrive
++as intervals with no month part.
++
+ ## Operators
+ 
+ | Precedence | Operators |
+@@ -72,8 +167,10 @@ an explicit `CAST`.
+ | | `*`, `/`, `%` |
+ | highest | unary `-`, unary `+` |
+ 
+-`/` always produces `DOUBLE`. `/` and `%` by zero raise an error rather than
+-returning `NULL`. `%` takes the sign of its left operand.
++`/` always produces `DOUBLE` for numbers. `/` and `%` by zero raise an error
++rather than returning `NULL`. `%` takes the sign of its left operand. Dates,
++timestamps and intervals take part in `+`, `-`, `*` and `/` as described
++under Intervals.
+ 
+ ### Null semantics
+ 
+@@ -167,9 +264,9 @@ order.
+ | Function | Notes |
+ | --- | --- |
+ | `COUNT(*)`, `COUNT(x)` | `COUNT(*)` counts rows, `COUNT(x)` skips nulls |
+-| `SUM(x)` | `NULL` for an all-null group; stays integral for integers |
+-| `AVG(x)`, `MEAN(x)` | Always `DOUBLE` |
+-| `MIN(x)`, `MAX(x)` | Nulls ignored |
++| `SUM(x)` | `NULL` for an all-null group; stays integral for integers, intervals add field by field |
++| `AVG(x)`, `MEAN(x)` | `DOUBLE` for numbers, `INTERVAL` for intervals |
++| `MIN(x)`, `MAX(x)` | Nulls ignored; intervals compare at thirty-day months |
+ | `ANY_VALUE(x)` | First non-null value in input order |
+ | `BOOL_AND(x)`, `EVERY(x)`, `BOOL_OR(x)` | Nulls ignored |
+ | `STRING_AGG(x [, sep])` | Separator defaults to `,` |
+@@ -195,7 +292,9 @@ String positions are 1-based. A negative `substr` start counts from the end.
+ `day`, `to_date`, `format_date`, `now`, `current_date`.
+ 
+ `extract` fields: `year`, `quarter`, `month`, `week`, `day`, `dayofweek`
+-(1 = Monday), `dayofyear`, `hour`, `minute`, `second`. `date_trunc` units:
++(1 = Monday), `dayofyear`, `hour`, `minute`, `second`. On an interval only
++`year`, `month`, `day`, `hour`, `minute` and `second` are defined, each reading
++a stored field. `date_trunc` units:
+ `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, `second`.
+ 
+ **Conditionals** `coalesce`, `nullif`, `ifnull`/`nvl`, `is_null`, `if`.
+diff --git a/examples/README.md b/examples/README.md
+index f1e7400..0d0d6b1 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -7,11 +7,13 @@ Each script is standalone and runs from the repository root.
+ | `quickstart.py` | Registering in-memory rows, filtering, grouping, `CASE`, and `EXPLAIN`. |
+ | `sales_report.py` | Joining the sample CSV and JSONL files, outer joins, date functions, and statistics. |
+ | `custom_functions.py` | Adding a scalar and an aggregate function to a private registry. |
++| `intervals.py` | `INTERVAL` literals, calendar arithmetic on dates, and interval aggregates. |
+ 
+ ```console
+ $ python examples/quickstart.py
+ $ python examples/sales_report.py
+ $ python examples/custom_functions.py
++$ python examples/intervals.py
+ ```
+ 
+-`make demo` runs all three.
++`make demo` runs all four.
+diff --git a/examples/intervals.py b/examples/intervals.py
+new file mode 100644
+index 0000000..5d670b2
+--- /dev/null
++++ b/examples/intervals.py
+@@ -0,0 +1,72 @@
++"""Calendar arithmetic with INTERVAL values.
++
++Run with ``python examples/intervals.py`` from the repository root.  The
++script registers a handful of subscriptions and asks the questions a billing
++job asks: when does each one renew, how long has it been running, and what is
++the mean term.
++"""
++
++from __future__ import annotations
++
++import datetime as dt
++
++from slateql import Session
++from slateql.types.datatypes import DATE, INTEGER, INTERVAL, STRING
++from slateql.types.interval import Interval
++from slateql.types.schema import Schema
++
++SUBSCRIPTIONS_SCHEMA = Schema.of(
++    ("id", INTEGER),
++    ("plan", STRING),
++    ("started", DATE),
++    ("term", INTERVAL),
++)
++
++SUBSCRIPTIONS = [
++    [1, "monthly", dt.date(2024, 1, 31), Interval.parse("P1M")],
++    [2, "monthly", dt.date(2024, 1, 29), Interval.parse("P1M")],
++    [3, "quarterly", dt.date(2023, 11, 30), Interval.parse("P3M")],
++    [4, "trial", dt.date(2024, 2, 20), Interval.parse("P14D")],
++    [5, "annual", dt.date(2024, 2, 29), Interval.parse("P1Y")],
++]
++
++
++def main() -> None:
++    session = Session()
++    session.register_rows("subscriptions", SUBSCRIPTIONS_SCHEMA, SUBSCRIPTIONS)
++
++    print("Renewal dates walk the calendar and clamp to the month end:")
++    print(
++        session.sql(
++            "SELECT id, plan, started, term, started + term AS renews "
++            "FROM subscriptions ORDER BY renews"
++        ).pretty()
++    )
++
++    print("A month compares as thirty days, so terms sort and group by length:")
++    print(
++        session.sql(
++            "SELECT term, COUNT(*) AS n FROM subscriptions "
++            "GROUP BY term ORDER BY term"
++        ).pretty()
++    )
++
++    print("Half a term, and the mean term:")
++    print(
++        session.sql(
++            "SELECT MIN(term / 2) AS shortest_half, AVG(term) AS mean_term "
++            "FROM subscriptions"
++        ).pretty()
++    )
++
++    print("Elapsed time is a timestamp difference:")
++    print(
++        session.sql(
++            "SELECT id, CAST('2024-03-15T12:00:00' AS TIMESTAMP) - started AS running "
++            "FROM subscriptions ORDER BY id"
++        ).pretty()
++    )
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/slateql/analyze/typecheck.py b/slateql/analyze/typecheck.py
+index daa19c9..03ee0cc 100644
+--- a/slateql/analyze/typecheck.py
++++ b/slateql/analyze/typecheck.py
+@@ -28,6 +28,7 @@ from ..types.datatypes import (
+     INTEGER,
+     NULL,
+     DataType,
++    TypeKind,
+     parse_type_name,
+     type_from_python,
+ )
+@@ -99,7 +100,8 @@ class ExpressionBinder:
+             return X.UnaryExpr(
+                 op="NOT", operand=operand, dtype=boolean_result([operand.dtype])
+             )
+-        require_numeric(operand.dtype, context=f"unary {node.op}")
++        if operand.dtype.kind is not TypeKind.INTERVAL:
++            require_numeric(operand.dtype, context=f"unary {node.op}")
+         if node.op == "+":
+             return operand
+         return X.UnaryExpr(op="-", operand=operand, dtype=operand.dtype)
+diff --git a/slateql/execution/evaluator.py b/slateql/execution/evaluator.py
+index 2d4451d..ecfb272 100644
+--- a/slateql/execution/evaluator.py
++++ b/slateql/execution/evaluator.py
+@@ -9,12 +9,14 @@ truthiness.
+ 
+ from __future__ import annotations
+ 
++import datetime as dt
+ from typing import Any, Callable, Optional, Sequence
+ 
+ from ..errors import ExecutionError
+ from ..functions.registry import FunctionRegistry
+ from ..functions.scalar_string import matches_like
+ from ..plan import expressions as X
++from ..types.interval import subtract_temporal
+ from ..types.schema import Schema
+ from ..types.values import cast_value
+ from ..util.ordering import compare_values
+@@ -183,7 +185,7 @@ class ExpressionEvaluator:
+         if op == "+":
+             operation = lambda a, b: a + b  # noqa: E731
+         elif op == "-":
+-            operation = lambda a, b: a - b  # noqa: E731
++            operation = _subtract
+         elif op == "*":
+             operation = lambda a, b: a * b  # noqa: E731
+         elif op == "/":
+@@ -301,6 +303,12 @@ class ExpressionEvaluator:
+         return _like
+ 
+ 
++def _subtract(left: Any, right: Any) -> Any:
++    if isinstance(left, dt.date) and isinstance(right, dt.date):
++        return subtract_temporal(left, right)
++    return left - right
++
++
+ def _divide(left: Any, right: Any) -> Any:
+     if right == 0:
+         raise ExecutionError("division by zero")
+diff --git a/slateql/functions/aggregate_defs.py b/slateql/functions/aggregate_defs.py
+index b1f43e9..5684929 100644
+--- a/slateql/functions/aggregate_defs.py
++++ b/slateql/functions/aggregate_defs.py
+@@ -19,11 +19,13 @@ from ..types.datatypes import (
+     BOOLEAN,
+     DOUBLE,
+     INTEGER,
++    INTERVAL,
+     NULL,
+     STRING,
+     DataType,
+     TypeKind,
+ )
++from ..types.interval import Interval
+ from ..util.ordering import compare_values
+ from .signature import AggregateFunctionDef, Arity, fixed_type
+ 
+@@ -67,7 +69,7 @@ class SumAccumulator:
+     __slots__ = ("_total", "_seen", "_integral")
+ 
+     def __init__(self, integral: bool = False) -> None:
+-        self._total: float = 0
++        self._total: Any = None
+         self._seen = False
+         self._integral = integral
+ 
+@@ -76,7 +78,7 @@ class SumAccumulator:
+         if value is None:
+             return
+         self._seen = True
+-        self._total += value
++        self._total = value if self._total is None else self._total + value
+ 
+     def result(self) -> Optional[Any]:
+         if not self._seen:
+@@ -87,22 +89,29 @@ class SumAccumulator:
+ 
+ 
+ class AvgAccumulator:
+-    """Arithmetic mean of non-null values."""
++    """Arithmetic mean of non-null values.
++
++    Numbers average to a DOUBLE; intervals add field by field and the total is
++    divided by the count with the interval scaling rule, so ``P1M`` and
++    ``PT0S`` average to ``P15D``.
++    """
+ 
+     __slots__ = ("_total", "_count")
+ 
+     def __init__(self) -> None:
+-        self._total = 0.0
++        self._total: Any = None
+         self._count = 0
+ 
+     def update(self, values: Sequence[Any]) -> None:
+         value = values[0] if values else None
+         if value is None:
+             return
+-        self._total += float(value)
++        if not isinstance(value, Interval):
++            value = float(value)
++        self._total = value if self._total is None else self._total + value
+         self._count += 1
+ 
+-    def result(self) -> Optional[float]:
++    def result(self) -> Optional[Any]:
+         if self._count == 0:
+             return None
+         return self._total / self._count
+@@ -264,6 +273,8 @@ def _count_type(args: Sequence[DataType]) -> DataType:
+ def _sum_type(args: Sequence[DataType]) -> DataType:
+     if not args or args[0].is_null:
+         return NULL
++    if args[0].kind is TypeKind.INTERVAL:
++        return INTERVAL.as_nullable(True)
+     require_numeric(args[0], context="sum()")
+     if args[0].kind is TypeKind.INTEGER:
+         return INTEGER.as_nullable(True)
+@@ -271,6 +282,8 @@ def _sum_type(args: Sequence[DataType]) -> DataType:
+ 
+ 
+ def _avg_type(args: Sequence[DataType]) -> DataType:
++    if args and args[0].kind is TypeKind.INTERVAL:
++        return INTERVAL.as_nullable(True)
+     if args:
+         require_numeric(args[0], context="avg()")
+     return DOUBLE.as_nullable(True)
+diff --git a/slateql/functions/scalar_datetime.py b/slateql/functions/scalar_datetime.py
+index f662028..ca3ddea 100644
+--- a/slateql/functions/scalar_datetime.py
++++ b/slateql/functions/scalar_datetime.py
+@@ -11,6 +11,7 @@ from typing import Any, Sequence
+ 
+ from ..errors import ExecutionError
+ from ..types.datatypes import DATE, INTEGER, STRING, TIMESTAMP, DataType, TypeKind
++from ..types.interval import Interval, interval_field
+ from .signature import Arity, ScalarFunctionDef, fixed_type
+ 
+ __all__ = ["register", "extract_field", "truncate_to"]
+@@ -40,12 +41,20 @@ def _as_datetime(value: Any) -> dt.datetime:
+ 
+ 
+ def extract_field(field: str, value: Any) -> int:
+-    """Return one component of a date or timestamp.
++    """Return one component of a date, timestamp or interval.
+ 
+     ``dayofweek`` is 1 for Monday through 7 for Sunday, matching ISO 8601.
++    An interval hands back one of its stored fields: ``year`` and ``month``
++    split its month count, ``hour``, ``minute`` and ``second`` split its time
++    part, ``day`` is its day count, and nothing crosses a field.
+     """
+ 
+     unit = field.strip().lower()
++    if isinstance(value, Interval):
++        try:
++            return interval_field(unit, value)
++        except ValueError as exc:
++            raise ExecutionError(str(exc), hint="interval fields: year, month, day, hour, minute, second") from exc
+     stamp = _as_datetime(value)
+     if unit == "year":
+         return stamp.year
+diff --git a/slateql/plan/expressions.py b/slateql/plan/expressions.py
+index 2f4cb37..511859c 100644
+--- a/slateql/plan/expressions.py
++++ b/slateql/plan/expressions.py
+@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
+ from typing import Any, Callable, Iterator, Optional, Sequence
+ 
+ from ..types.datatypes import BOOLEAN, DataType
++from ..types.interval import Interval
+ from ..util.text import quote_identifier
+ 
+ __all__ = [
+@@ -118,6 +119,8 @@ class Literal(Expr):
+             return "TRUE" if self.value else "FALSE"
+         if isinstance(self.value, (int, float)):
+             return repr(self.value)
++        if isinstance(self.value, Interval):
++            return f"INTERVAL '{self.value}'"
+         return "'" + str(self.value).replace("'", "''") + "'"
+ 
+ 
+diff --git a/slateql/sql/parser.py b/slateql/sql/parser.py
+index 732666b..80f5fd3 100644
+--- a/slateql/sql/parser.py
++++ b/slateql/sql/parser.py
+@@ -16,10 +16,12 @@ Errors carry the position of the offending token so the CLI can print a caret.
+ 
+ from __future__ import annotations
+ 
++import re
+ from dataclasses import replace
+ from typing import Optional, Sequence
+ 
+ from ..errors import ParseError
++from ..types.interval import INTERVAL_UNITS, Interval, parse_interval
+ from .ast_nodes import (
+     Between,
+     BinaryOp,
+@@ -582,6 +584,8 @@ class Parser:
+             return self._parse_case()
+         if token.is_keyword("CAST"):
+             return self._parse_cast()
++        if token.is_keyword("INTERVAL") and self._peek(1).type is TokenType.STRING:
++            return self._parse_interval_literal()
+         if token.type in (TokenType.IDENTIFIER, TokenType.QUOTED_IDENTIFIER):
+             return self._parse_identifier_expression()
+         if token.type is TokenType.KEYWORD and not is_reserved(str(token.value)):
+@@ -615,6 +619,46 @@ class Parser:
+             raise self._error("DISTINCT requires at least one argument")
+         return FunctionCall(name=name, args=tuple(args), distinct=distinct)
+ 
++    def _parse_interval_literal(self) -> Expression:
++        """``INTERVAL '<iso 8601 duration>'`` or ``INTERVAL '<integer>' <unit>``.
++
++        The unit form takes a whole number and one of YEAR, MONTH, WEEK, DAY,
++        HOUR, MINUTE or SECOND (a trailing S is accepted); without a unit the
++        text is an ISO 8601 duration such as ``P1Y2M3DT4H5M6S``.
++        """
++
++        self._expect_keyword("INTERVAL")
++        token = self._advance()
++        text = str(token.value)
++        raw = f"INTERVAL {token.text}"
++        unit_token = self.current
++        unit = None
++        if unit_token.type in (TokenType.IDENTIFIER, TokenType.KEYWORD):
++            word = str(unit_token.value).upper()
++            if word.endswith("S") and word[:-1] in INTERVAL_UNITS:
++                word = word[:-1]
++            if word in INTERVAL_UNITS:
++                unit = word
++                self._advance()
++                raw = f"{raw} {unit}"
++        try:
++            if unit is None:
++                value = parse_interval(text)
++            else:
++                stripped = text.strip()
++                if not re.fullmatch(r"[+-]?\d+", stripped):
++                    raise ValueError(f"INTERVAL {token.text} {unit} needs a whole number")
++                value = Interval.of_unit(int(stripped), unit)
++        except ValueError as exc:
++            raise ParseError(
++                str(exc),
++                line=token.line,
++                column=token.column,
++                hint="write an ISO 8601 duration such as 'P1Y2M3DT4H5M6S', "
++                "or a whole number followed by a unit: INTERVAL '3' DAY",
++            ) from exc
++        return Literal(value=value, raw=raw)
++
+     def _parse_cast(self) -> Expression:
+         self._expect_keyword("CAST")
+         self._expect_punctuation("(")
+diff --git a/slateql/sql/unparser.py b/slateql/sql/unparser.py
+index 111f10c..73fdab3 100644
+--- a/slateql/sql/unparser.py
++++ b/slateql/sql/unparser.py
+@@ -10,6 +10,7 @@ from __future__ import annotations
+ 
+ from typing import Optional
+ 
++from ..types.interval import Interval
+ from ..util.text import quote_identifier
+ from .ast_nodes import (
+     Between,
+@@ -50,6 +51,8 @@ def literal_sql(value: object) -> str:
+         return "TRUE" if value else "FALSE"
+     if isinstance(value, (int, float)):
+         return repr(value)
++    if isinstance(value, Interval):
++        return f"INTERVAL '{value}'"
+     text = str(value).replace("'", "''")
+     return f"'{text}'"
+ 
+diff --git a/slateql/types/__init__.py b/slateql/types/__init__.py
+index 734ba4f..8cc7c03 100644
+--- a/slateql/types/__init__.py
++++ b/slateql/types/__init__.py
+@@ -26,6 +26,7 @@ from .datatypes import (
+     parse_type_name,
+     type_from_python,
+ )
++from .interval import Interval, parse_interval
+ from .schema import EMPTY_SCHEMA, Field, Schema
+ from .values import cast_value, infer_column_type, is_truthy, normalise
+ 
+@@ -41,6 +42,8 @@ __all__ = [
+     "TIMESTAMP",
+     "DataType",
+     "TypeKind",
++    "Interval",
++    "parse_interval",
+     "parse_type_name",
+     "type_from_python",
+     "EMPTY_SCHEMA",
+diff --git a/slateql/types/coercion.py b/slateql/types/coercion.py
+index ad8300b..7425ec1 100644
+--- a/slateql/types/coercion.py
++++ b/slateql/types/coercion.py
+@@ -15,6 +15,7 @@ from .datatypes import (
+     BOOLEAN,
+     DOUBLE,
+     INTEGER,
++    INTERVAL,
+     NULL,
+     STRING,
+     TIMESTAMP,
+@@ -62,6 +63,7 @@ _EXPLICIT_CAST: dict[TypeKind, frozenset[TypeKind]] = {
+             TypeKind.BOOLEAN,
+             TypeKind.DATE,
+             TypeKind.TIMESTAMP,
++            TypeKind.INTERVAL,
+         }
+     ),
+     TypeKind.DATE: frozenset({TypeKind.DATE, TypeKind.TIMESTAMP, TypeKind.STRING}),
+@@ -164,9 +166,12 @@ def result_of_arithmetic(op: str, left: DataType, right: DataType) -> DataType:
+         if left.kind is TypeKind.STRING and right.kind is TypeKind.STRING:
+             return STRING.as_nullable(left.nullable or right.nullable)
+         raise TypeMismatchError(f"|| requires string operands, got {left} and {right}")
++    nullable = left.nullable or right.nullable
++    temporal = _temporal_arithmetic(op, left, right, nullable)
++    if temporal is not None:
++        return temporal
+     require_numeric(left, context=f"operator {op}")
+     require_numeric(right, context=f"operator {op}")
+-    nullable = left.nullable or right.nullable
+     if op == "/":
+         return DOUBLE.as_nullable(True)
+     if TypeKind.DOUBLE in (left.kind, right.kind):
+@@ -174,6 +179,50 @@ def result_of_arithmetic(op: str, left: DataType, right: DataType) -> DataType:
+     return INTEGER.as_nullable(nullable)
+ 
+ 
++def _temporal_arithmetic(
++    op: str, left: DataType, right: DataType, nullable: bool
++) -> Optional[DataType]:
++    """Result type when an interval, a date or a timestamp takes part in ``op``.
++
++    ``+`` and ``-`` between two intervals stay INTERVAL; a date or timestamp
++    plus or minus an interval is a TIMESTAMP; a timestamp minus a timestamp
++    (or a date, which widens) is an INTERVAL, while a date minus a date is a
++    whole number of days.  ``*`` by a number in either order and ``/`` by a
++    number scale an interval.  Returns ``None`` when neither operand is
++    temporal, so the numeric rules apply.
++    """
++
++    lk, rk = left.kind, right.kind
++    interval = TypeKind.INTERVAL
++    if op in ("+", "-"):
++        if lk is interval and rk is interval:
++            return INTERVAL.as_nullable(nullable)
++        if lk in _TEMPORAL_KINDS and rk is interval:
++            return TIMESTAMP.as_nullable(nullable)
++        if op == "+" and lk is interval and rk in _TEMPORAL_KINDS:
++            return TIMESTAMP.as_nullable(nullable)
++        if op == "-" and lk in _TEMPORAL_KINDS and rk in _TEMPORAL_KINDS:
++            if lk is TypeKind.DATE and rk is TypeKind.DATE:
++                return INTEGER.as_nullable(nullable)
++            return INTERVAL.as_nullable(nullable)
++    if op == "*":
++        if lk is interval and right.is_numeric:
++            return INTERVAL.as_nullable(nullable)
++        if left.is_numeric and rk is interval:
++            return INTERVAL.as_nullable(nullable)
++    if op == "/" and lk is interval and right.is_numeric:
++        return INTERVAL.as_nullable(True)
++    if interval in (lk, rk) or (lk in _TEMPORAL_KINDS and rk in _TEMPORAL_KINDS):
++        raise TypeMismatchError(
++            f"operator {op} is not defined for {left} and {right}",
++            hint="intervals add to dates and timestamps, and scale by numbers",
++        )
++    return None
++
++
++_TEMPORAL_KINDS = frozenset({TypeKind.DATE, TypeKind.TIMESTAMP})
++
++
+ def boolean_result(operands: Sequence[DataType]) -> DataType:
+     """Type of a predicate whose operands are ``operands``."""
+ 
+diff --git a/slateql/types/datatypes.py b/slateql/types/datatypes.py
+index 0487fd8..7c389fa 100644
+--- a/slateql/types/datatypes.py
++++ b/slateql/types/datatypes.py
+@@ -14,6 +14,7 @@ from enum import Enum
+ from typing import Optional
+ 
+ from ..errors import SchemaError
++from .interval import Interval
+ 
+ __all__ = [
+     "TypeKind",
+@@ -50,7 +51,7 @@ class TypeKind(Enum):
+ 
+ _NUMERIC = frozenset({TypeKind.INTEGER, TypeKind.DOUBLE})
+ _TEMPORAL = frozenset({TypeKind.DATE, TypeKind.TIMESTAMP})
+-_ORDERED = _NUMERIC | _TEMPORAL | {TypeKind.STRING, TypeKind.BOOLEAN}
++_ORDERED = _NUMERIC | _TEMPORAL | {TypeKind.STRING, TypeKind.BOOLEAN, TypeKind.INTERVAL}
+ 
+ 
+ @dataclass(frozen=True)
+@@ -174,7 +175,7 @@ def type_from_python(value: object) -> DataType:
+         return TIMESTAMP
+     if isinstance(value, _dt.date):
+         return DATE
+-    if isinstance(value, _dt.timedelta):
++    if isinstance(value, (Interval, _dt.timedelta)):
+         return INTERVAL
+     raise SchemaError(f"unsupported Python value of type {type(value).__name__}")
+ 
+diff --git a/slateql/types/interval.py b/slateql/types/interval.py
+new file mode 100644
+index 0000000..ab1de30
+--- /dev/null
++++ b/slateql/types/interval.py
+@@ -0,0 +1,423 @@
++"""The INTERVAL value type.
++
++An interval is a span of time held as three independent fields: a count of
++months, a count of days, and a count of microseconds.  The fields never fold
++into each other, because a month has no fixed length and a day is not always
++24 hours once a calendar is involved.  Adding an interval to a date walks the
++calendar one field at a time, so ``2024-01-31 + P1M`` lands on the last day of
++February rather than overflowing into March.
++
++Comparison is a different question from arithmetic.  Sorting, grouping and
++``=`` need a total order, so for those purposes a month counts as 30 days and
++a day as 24 hours: ``P1M`` and ``P30D`` compare equal and land in the same
++group even though adding them to a date can give different answers.
++
++Text form is the ISO 8601 duration syntax, ``P1Y2M3DT4H5M6S``.  Years fold
++into months and weeks into days on the way in; hours and minutes fold into
++seconds.  Every component carries its own sign, and a component that is zero
++is left out, so a zero interval renders as ``PT0S``.
++"""
++
++from __future__ import annotations
++
++import calendar
++import datetime as dt
++import re
++from fractions import Fraction
++from typing import Any, Union
++
++__all__ = [
++    "Interval",
++    "DAYS_PER_MONTH",
++    "SECONDS_PER_DAY",
++    "MICROS_PER_SECOND",
++    "parse_interval",
++    "format_interval",
++    "add_to_temporal",
++    "subtract_temporal",
++    "interval_field",
++    "INTERVAL_UNITS",
++]
++
++DAYS_PER_MONTH = 30
++SECONDS_PER_DAY = 86_400
++MICROS_PER_SECOND = 1_000_000
++_MICROS_PER_MINUTE = 60 * MICROS_PER_SECOND
++_MICROS_PER_HOUR = 60 * _MICROS_PER_MINUTE
++_MICROS_PER_DAY = SECONDS_PER_DAY * MICROS_PER_SECOND
++
++# Units accepted after a quoted integer in ``INTERVAL '3' DAY``, each mapped to
++# the field it fills and the multiplier that gets it there.
++INTERVAL_UNITS: dict[str, tuple[str, int]] = {
++    "YEAR": ("months", 12),
++    "MONTH": ("months", 1),
++    "WEEK": ("days", 7),
++    "DAY": ("days", 1),
++    "HOUR": ("micros", _MICROS_PER_HOUR),
++    "MINUTE": ("micros", _MICROS_PER_MINUTE),
++    "SECOND": ("micros", MICROS_PER_SECOND),
++}
++
++_ISO_DURATION = re.compile(
++    r"""
++    ^(?P<sign>[+-])?P
++    (?:(?P<years>[+-]?\d+)Y)?
++    (?:(?P<months>[+-]?\d+)M)?
++    (?:(?P<weeks>[+-]?\d+)W)?
++    (?:(?P<days>[+-]?\d+)D)?
++    (?:(?P<time>T)
++        (?:(?P<hours>[+-]?\d+)H)?
++        (?:(?P<minutes>[+-]?\d+)M)?
++        (?:(?P<seconds>[+-]?\d+(?:\.\d+)?)S)?
++    )?$
++    """,
++    re.VERBOSE | re.IGNORECASE,
++)
++
++Number = Union[int, float, Fraction]
++
++
++def _truncate(value: Fraction) -> int:
++    """Integer part of ``value``, rounding toward zero like a C cast."""
++
++    return int(value) if value >= 0 else -int(-value)
++
++
++def _split(total: int, unit: int) -> tuple[int, int]:
++    """Split ``total`` into whole units and a remainder, both keeping its sign."""
++
++    whole = abs(total) // unit
++    rest = abs(total) - whole * unit
++    if total < 0:
++        return -whole, -rest
++    return whole, rest
++
++
++class Interval:
++    """A calendar-aware span of time: months, days and microseconds."""
++
++    __slots__ = ("months", "days", "micros")
++
++    def __init__(self, months: int = 0, days: int = 0, micros: int = 0) -> None:
++        for name, value in (("months", months), ("days", days), ("micros", micros)):
++            if isinstance(value, bool) or not isinstance(value, int):
++                raise TypeError(f"Interval {name} must be an int, got {type(value).__name__}")
++        self.months = months
++        self.days = days
++        self.micros = micros
++
++    # -- construction ------------------------------------------------------
++
++    @classmethod
++    def from_timedelta(cls, delta: dt.timedelta) -> "Interval":
++        """Convert a :class:`datetime.timedelta`; it never carries months.
++
++        Python normalises ``timedelta(hours=-2)`` to a day of ``-1`` and
++        ``79200`` seconds; here the total is split again into whole days
++        truncated toward zero and the remaining microseconds, so it becomes
++        ``PT-2H``, the same shape a timestamp difference produces.
++        """
++
++        total = (delta.days * SECONDS_PER_DAY + delta.seconds) * MICROS_PER_SECOND
++        total += delta.microseconds
++        days, micros = _split(total, _MICROS_PER_DAY)
++        return cls(0, days, micros)
++
++    @classmethod
++    def parse(cls, text: str) -> "Interval":
++        """Parse ISO 8601 duration text; :class:`ValueError` on anything else."""
++
++        return parse_interval(text)
++
++    @classmethod
++    def of_unit(cls, quantity: int, unit: str) -> "Interval":
++        """Build from a whole ``quantity`` of one ``unit`` (``YEAR`` .. ``SECOND``)."""
++
++        try:
++            field, factor = INTERVAL_UNITS[unit.strip().upper()]
++        except KeyError:
++            raise ValueError(f"unknown interval unit {unit!r}") from None
++        return cls(**{field: quantity * factor})
++
++    # -- ordering and identity ---------------------------------------------
++
++    def normalised(self) -> int:
++        """The comparison value: total microseconds at 30-day months and 24-hour days."""
++
++        return (self.months * DAYS_PER_MONTH + self.days) * _MICROS_PER_DAY + self.micros
++
++    def __eq__(self, other: object) -> bool:
++        if not isinstance(other, Interval):
++            return NotImplemented
++        return self.normalised() == other.normalised()
++
++    def __ne__(self, other: object) -> bool:
++        if not isinstance(other, Interval):
++            return NotImplemented
++        return self.normalised() != other.normalised()
++
++    def __hash__(self) -> int:
++        return hash(("interval", self.normalised()))
++
++    def __lt__(self, other: "Interval") -> bool:
++        if not isinstance(other, Interval):
++            return NotImplemented
++        return self.normalised() < other.normalised()
++
++    def __le__(self, other: "Interval") -> bool:
++        if not isinstance(other, Interval):
++            return NotImplemented
++        return self.normalised() <= other.normalised()
++
++    def __gt__(self, other: "Interval") -> bool:
++        if not isinstance(other, Interval):
++            return NotImplemented
++        return self.normalised() > other.normalised()
++
++    def __ge__(self, other: "Interval") -> bool:
++        if not isinstance(other, Interval):
++            return NotImplemented
++        return self.normalised() >= other.normalised()
++
++    def __bool__(self) -> bool:
++        return bool(self.months or self.days or self.micros)
++
++    # -- arithmetic --------------------------------------------------------
++
++    def __neg__(self) -> "Interval":
++        return Interval(-self.months, -self.days, -self.micros)
++
++    def __pos__(self) -> "Interval":
++        return self
++
++    def __abs__(self) -> "Interval":
++        return -self if self.normalised() < 0 else self
++
++    def __add__(self, other: Any) -> Any:
++        if isinstance(other, Interval):
++            return Interval(
++                self.months + other.months,
++                self.days + other.days,
++                self.micros + other.micros,
++            )
++        if isinstance(other, dt.date):
++            return add_to_temporal(other, self)
++        return NotImplemented
++
++    def __radd__(self, other: Any) -> Any:
++        if isinstance(other, dt.date):
++            return add_to_temporal(other, self)
++        return NotImplemented
++
++    def __sub__(self, other: Any) -> Any:
++        if isinstance(other, Interval):
++            return self + (-other)
++        return NotImplemented
++
++    def __rsub__(self, other: Any) -> Any:
++        if isinstance(other, dt.date):
++            return add_to_temporal(other, -self)
++        return NotImplemented
++
++    def __mul__(self, factor: Any) -> Any:
++        if isinstance(factor, bool) or not isinstance(factor, (int, float, Fraction)):
++            return NotImplemented
++        return self.scale(_as_fraction(factor))
++
++    __rmul__ = __mul__
++
++    def __truediv__(self, divisor: Any) -> Any:
++        if isinstance(divisor, bool) or not isinstance(divisor, (int, float, Fraction)):
++            return NotImplemented
++        if divisor == 0:
++            raise ZeroDivisionError("interval division by zero")
++        return self.scale(1 / _as_fraction(divisor))
++
++    def scale(self, factor: Fraction) -> "Interval":
++        """Multiply every field by ``factor``, carrying fractions downward.
++
++        Whole months and whole days are kept; a fractional month becomes days
++        at 30 per month and a fractional day becomes microseconds at 86400
++        seconds per day.  The microsecond total is rounded to the nearest
++        whole microsecond.
++        """
++
++        months_exact = self.months * factor
++        months = _truncate(months_exact)
++        days_exact = self.days * factor + (months_exact - months) * DAYS_PER_MONTH
++        days = _truncate(days_exact)
++        micros_exact = self.micros * factor + (days_exact - days) * _MICROS_PER_DAY
++        return Interval(months, days, round(micros_exact))
++
++    # -- rendering ---------------------------------------------------------
++
++    def __str__(self) -> str:
++        return format_interval(self)
++
++    def __repr__(self) -> str:
++        return f"Interval({format_interval(self)!r})"
++
++    def to_timedelta(self) -> dt.timedelta:
++        """The day and time fields as a timedelta; months count as 30 days."""
++
++        return dt.timedelta(
++            days=self.months * DAYS_PER_MONTH + self.days, microseconds=self.micros
++        )
++
++
++def _as_fraction(number: Number) -> Fraction:
++    if isinstance(number, Fraction):
++        return number
++    if isinstance(number, float):
++        if number != number or number in (float("inf"), float("-inf")):
++            raise ValueError("non-finite interval factor")
++        return Fraction(number)
++    return Fraction(int(number))
++
++
++def parse_interval(text: str) -> Interval:
++    """Parse an ISO 8601 duration such as ``P1Y2M3DT4H5M6S`` or ``PT36H``.
++
++    Years fold into months, weeks into days, hours and minutes into seconds.
++    Only the seconds component may carry a fraction, kept to the microsecond.
++    A leading sign negates the whole duration; each component may also carry
++    its own sign.  ``P`` on its own, a ``T`` with nothing after it, and any
++    other text raise :class:`ValueError`.
++    """
++
++    if not isinstance(text, str):
++        raise ValueError(f"interval text must be a string, got {type(text).__name__}")
++    candidate = text.strip()
++    match = _ISO_DURATION.match(candidate)
++    if match is None:
++        raise ValueError(f"not an ISO 8601 duration: {text!r}")
++    groups = match.groupdict()
++    date_parts = [groups[key] for key in ("years", "months", "weeks", "days")]
++    time_parts = [groups[key] for key in ("hours", "minutes", "seconds")]
++    if all(part is None for part in date_parts + time_parts):
++        raise ValueError(f"interval has no components: {text!r}")
++    if groups["time"] and all(part is None for part in time_parts):
++        raise ValueError(f"interval time part is empty: {text!r}")
++
++    months = int(groups["years"] or 0) * 12 + int(groups["months"] or 0)
++    days = int(groups["weeks"] or 0) * 7 + int(groups["days"] or 0)
++    micros = int(groups["hours"] or 0) * _MICROS_PER_HOUR
++    micros += int(groups["minutes"] or 0) * _MICROS_PER_MINUTE
++    if groups["seconds"] is not None:
++        micros += round(Fraction(groups["seconds"]) * MICROS_PER_SECOND)
++    result = Interval(months, days, micros)
++    if groups["sign"] == "-":
++        result = -result
++    return result
++
++
++def _format_seconds(micros: int) -> str:
++    whole, rest = _split(micros, MICROS_PER_SECOND)
++    if rest == 0:
++        return str(whole)
++    fraction = f"{abs(rest):06d}".rstrip("0")
++    sign = "-" if micros < 0 else ""
++    return f"{sign}{abs(whole)}.{fraction}"
++
++
++def format_interval(interval: Interval) -> str:
++    """Render as an ISO 8601 duration, leaving out components that are zero.
++
++    Months are shown as years plus months, microseconds as hours, minutes and
++    seconds; days stay days.  Nothing crosses a field, so ``PT36H`` stays
++    ``PT36H``.  A zero interval is ``PT0S``.
++    """
++
++    years, months = _split(interval.months, 12)
++    hours, rest = _split(interval.micros, _MICROS_PER_HOUR)
++    minutes, rest = _split(rest, _MICROS_PER_MINUTE)
++    parts = ["P"]
++    if years:
++        parts.append(f"{years}Y")
++    if months:
++        parts.append(f"{months}M")
++    if interval.days:
++        parts.append(f"{interval.days}D")
++    time = []
++    if hours:
++        time.append(f"{hours}H")
++    if minutes:
++        time.append(f"{minutes}M")
++    if rest:
++        time.append(f"{_format_seconds(rest)}S")
++    if time:
++        parts.append("T")
++        parts.extend(time)
++    if len(parts) == 1:
++        return "PT0S"
++    return "".join(parts)
++
++
++def add_to_temporal(stamp: dt.date, interval: Interval) -> dt.datetime:
++    """Add ``interval`` to a date or timestamp; the result is always a timestamp.
++
++    Months are applied first, clamping the day to the last day of the target
++    month, then days, then the time part.
++    """
++
++    if isinstance(stamp, dt.datetime):
++        base = stamp
++    else:
++        base = dt.datetime(stamp.year, stamp.month, stamp.day)
++    if interval.months:
++        total = base.year * 12 + (base.month - 1) + interval.months
++        year, month0 = divmod(total, 12)
++        month = month0 + 1
++        if not 1 <= year <= 9999:
++            raise OverflowError("timestamp out of range")
++        last = calendar.monthrange(year, month)[1]
++        base = base.replace(year=year, month=month, day=min(base.day, last))
++    return base + dt.timedelta(days=interval.days, microseconds=interval.micros)
++
++
++def subtract_temporal(left: dt.date, right: dt.date) -> Any:
++    """``left - right`` for dates and timestamps.
++
++    Two plain dates give a whole number of days.  Anything involving a
++    timestamp gives an interval of days and microseconds with no month part,
++    the day count truncated toward zero.
++    """
++
++    if not isinstance(left, dt.datetime) and not isinstance(right, dt.datetime):
++        return (left - right).days
++    return Interval.from_timedelta(_as_datetime(left) - _as_datetime(right))
++
++
++def _as_datetime(value: dt.date) -> dt.datetime:
++    if isinstance(value, dt.datetime):
++        return value
++    return dt.datetime(value.year, value.month, value.day)
++
++
++def interval_field(field: str, interval: Interval) -> int:
++    """One stored component of an interval, for ``extract``.
++
++    ``year`` and ``month`` split the month count, ``hour``, ``minute`` and
++    ``second`` split the time part; ``day`` is the day count.  Nothing crosses
++    a field, so ``PT36H`` has 36 hours and 0 days.  Every part keeps the sign
++    of its field and ``second`` is truncated to a whole number.
++    """
++
++    unit = field.strip().lower()
++    years, months = _split(interval.months, 12)
++    hours, rest = _split(interval.micros, _MICROS_PER_HOUR)
++    minutes, rest = _split(rest, _MICROS_PER_MINUTE)
++    seconds, _ = _split(rest, MICROS_PER_SECOND)
++    if unit == "year":
++        return years
++    if unit == "month":
++        return months
++    if unit == "day":
++        return interval.days
++    if unit == "hour":
++        return hours
++    if unit == "minute":
++        return minutes
++    if unit == "second":
++        return seconds
++    raise ValueError(f"cannot extract {field!r} from an interval")
+diff --git a/slateql/types/values.py b/slateql/types/values.py
+index b424fdb..0d7f01d 100644
+--- a/slateql/types/values.py
++++ b/slateql/types/values.py
+@@ -14,6 +14,7 @@ from .datatypes import (
+     TypeKind,
+     type_from_python,
+ )
++from .interval import Interval, parse_interval
+ 
+ __all__ = [
+     "cast_value",
+@@ -77,11 +78,15 @@ def normalise(value: Any) -> Any:
+ 
+     Integers stay integers, floats stay floats, everything else is passed
+     through unchanged.  ``bytes`` are decoded as UTF-8 because CSV readers may
+-    hand us raw bytes.
++    hand us raw bytes, and a :class:`datetime.timedelta` becomes an
++    :class:`~slateql.types.interval.Interval` so that every INTERVAL column
++    holds one kind of value.
+     """
+ 
+     if isinstance(value, bytes):
+         return value.decode("utf-8")
++    if isinstance(value, dt.timedelta):
++        return Interval.from_timedelta(value)
+     return value
+ 
+ 
+@@ -111,6 +116,8 @@ def cast_value(value: Any, target: DataType, *, strict: bool = False) -> Any:
+             return _to_date(value)
+         if kind is TypeKind.TIMESTAMP:
+             return _to_timestamp(value)
++        if kind is TypeKind.INTERVAL:
++            return _to_interval(value)
+     except (ValueError, TypeError, OverflowError) as exc:
+         if strict:
+             raise ExecutionError(
+@@ -201,6 +208,16 @@ def _to_timestamp(value: Any) -> dt.datetime:
+     raise TypeError(type(value).__name__)
+ 
+ 
++def _to_interval(value: Any) -> Interval:
++    if isinstance(value, Interval):
++        return value
++    if isinstance(value, dt.timedelta):
++        return Interval.from_timedelta(value)
++    if isinstance(value, str):
++        return parse_interval(value)
++    raise TypeError(type(value).__name__)
++
++
+ def infer_column_type(values: Iterable[Any]) -> DataType:
+     """Infer a column type from sample values.
+ 

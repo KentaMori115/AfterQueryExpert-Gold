@@ -1,0 +1,1168 @@
+diff --git a/tests/bloom_membership.rs b/tests/bloom_membership.rs
+index 0ac4612..54af3eb 100644
+--- a/tests/bloom_membership.rs
++++ b/tests/bloom_membership.rs
+@@ -1,4 +1,6 @@
+ //! Membership guarantees and geometry handling of the Bloom filter.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::ds::bloom::{Bloom, MAX_PROBES};
+ 
+diff --git a/tests/bytecode_loader.rs b/tests/bytecode_loader.rs
+index 1c11e27..47908b6 100644
+--- a/tests/bytecode_loader.rs
++++ b/tests/bytecode_loader.rs
+@@ -2,6 +2,8 @@
+ //!
+ //! Every image here is built by the same helper, so a test names exactly the
+ //! one field it is changing.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::bytecode::*;
+ 
+diff --git a/tests/diag_report.rs b/tests/diag_report.rs
+index 3454f53..1174954 100644
+--- a/tests/diag_report.rs
++++ b/tests/diag_report.rs
+@@ -1,5 +1,7 @@
+ //! Collector health reporting: what each check says, and that taking a report
+ //! never disturbs the collector it read.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::diag::report::{audit, audit_stats, record_stats, Health};
+ use skald::gc::{gc_collect, gc_create, gc_destroy, gc_set_threshold, gc_stats, gc_track, GcPtr, GcStats};
+diff --git a/tests/gc_lifetime.rs b/tests/gc_lifetime.rs
+index 0543b54..a085930 100644
+--- a/tests/gc_lifetime.rs
++++ b/tests/gc_lifetime.rs
+@@ -3,6 +3,8 @@
+ //! These drive the raw-pointer API the engine itself uses. Every test builds
+ //! its own collectors, sets the active context explicitly, and tears both down
+ //! before it returns, so no scenario inherits another's global state.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::gc::*;
+ use skald::heap::*;
+diff --git a/tests/image_faults.rs b/tests/image_faults.rs
+new file mode 100644
+index 0000000..4d24bc4
+--- /dev/null
++++ b/tests/image_faults.rs
+@@ -0,0 +1,487 @@
++//! What a static read of a loaded chunk finds in the code the loader skipped:
++//! bytes that are not opcodes, operands that run past the end, indices that
++//! reach past the pool or the function table, calls the callee cannot take,
++//! and jumps landing where no instruction begins.
++
++use skald::bytecode::*;
++use skald::verify::{chunk_verify, Flaw, FlawKind};
++
++fn image(consts: &[(u8, Vec<u8>)], funcs: &[(i16, u8, u8, Vec<u8>)], entry: u16) -> Vec<u8> {
++    let mut out = vec![MAGIC_0, MAGIC_1, MAGIC_2, MAGIC_3, VERSION];
++    out.extend_from_slice(&(consts.len() as u16).to_le_bytes());
++    out.extend_from_slice(&(funcs.len() as u16).to_le_bytes());
++    out.extend_from_slice(&entry.to_le_bytes());
++    for (tag, payload) in consts {
++        out.push(*tag);
++        out.extend_from_slice(payload);
++    }
++    for (name_idx, params, locals, code) in funcs {
++        out.extend_from_slice(&name_idx.to_le_bytes());
++        out.push(*params);
++        out.push(*locals);
++        out.extend_from_slice(&(code.len() as u16).to_le_bytes());
++        out.extend_from_slice(code);
++    }
++    out
++}
++
++/// Pool: constant 0 is an integer, constant 1 a string, constant 2 null.
++fn pool() -> Vec<(u8, Vec<u8>)> {
++    let mut key = 3u16.to_le_bytes().to_vec();
++    key.extend_from_slice(b"key");
++    vec![
++        (CONST_INT, 7i64.to_le_bytes().to_vec()),
++        (CONST_STRING, key),
++        (CONST_NULL, Vec::new()),
++    ]
++}
++
++fn chunk(funcs: &[(i16, u8, u8, Vec<u8>)]) -> Chunk {
++    chunk_load(&image(&pool(), funcs, 0)).expect("the loader takes this image")
++}
++
++/// A chunk whose entry function holds `code` over four local slots, beside a
++/// second function that takes one argument and declares two locals.
++fn entry(code: Vec<u8>) -> Chunk {
++    chunk(&[
++        (-1, 0, 4, code),
++        (-1, 1, 2, vec![OP_PUSH_NULL, OP_RETURN]),
++    ])
++}
++
++fn flaws(chunk: &Chunk) -> Vec<Flaw> {
++    chunk_verify(chunk)
++}
++
++/// The single flaw a body is expected to raise.
++fn only(chunk: &Chunk) -> Vec<Flaw> {
++    let found = flaws(chunk);
++    assert_eq!(found.len(), 1, "expected one flaw, got [{}]", shape(&found));
++    found
++}
++/// A flaw's kind as a word, so a case can name what it expects without asking
++/// the type to carry any particular trait.
++fn kind_of(kind: &FlawKind) -> &'static str {
++    match kind {
++        FlawKind::Opcode => "opcode",
++        FlawKind::Truncated => "truncated",
++        FlawKind::Constant => "constant",
++        FlawKind::Local => "local",
++        FlawKind::Function => "function",
++        FlawKind::Arity => "arity",
++        FlawKind::Jump => "jump",
++        FlawKind::Depth => "depth",
++    }
++}
++
++/// Every flaw as `func:offset:kind`, for the message when a count is wrong.
++fn shape(flaws: &[Flaw]) -> String {
++    flaws
++        .iter()
++        .map(|f| format!("{}:{}:{}", f.func, f.offset, kind_of(&f.kind)))
++        .collect::<Vec<_>>()
++        .join(" ")
++}
++
++fn push_const(idx: u16) -> Vec<u8> {
++    let mut v = vec![OP_PUSH_CONST];
++    v.extend_from_slice(&idx.to_le_bytes());
++    v
++}
++
++fn call(func: u16, args: u8) -> Vec<u8> {
++    let mut v = vec![OP_CALL];
++    v.extend_from_slice(&func.to_le_bytes());
++    v.push(args);
++    v
++}
++
++fn closure(func: u16, slot: u8) -> Vec<u8> {
++    let mut v = vec![OP_NEW_CLOSURE];
++    v.extend_from_slice(&func.to_le_bytes());
++    v.push(slot);
++    v
++}
++
++fn jump(op: u8, offset: i16) -> Vec<u8> {
++    let mut v = vec![op];
++    v.extend_from_slice(&offset.to_le_bytes());
++    v
++}
++
++fn body(parts: &[Vec<u8>]) -> Vec<u8> {
++    parts.iter().flat_map(|p| p.iter().copied()).collect()
++}
++
++// ── bodies with nothing wrong ───────────────────────────────────────────
++
++#[test]
++fn a_function_with_no_code_reports_nothing() {
++    assert!(flaws(&entry(Vec::new())).is_empty());
++}
++
++#[test]
++fn a_body_that_pushes_a_constant_and_halts_reports_nothing() {
++    let code = body(&[push_const(0), vec![OP_POP, OP_HALT]]);
++    assert!(flaws(&entry(code)).is_empty());
++}
++
++// ── bytes that are not instructions ─────────────────────────────────────
++
++#[test]
++fn a_byte_that_is_not_an_opcode_is_reported() {
++    let code = vec![OP_NOP, 0x27, OP_HALT];
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Opcode));
++    assert_eq!(flaw.offset, 1);
++    assert_eq!(flaw.func, 0);
++}
++
++#[test]
++fn the_walk_ends_at_a_byte_that_is_not_an_opcode() {
++    // The constant index after the unknown byte is past the pool, and is never
++    // reached: nothing beyond an undecodable byte is known to be code.
++    let code = body(&[vec![0xFF], push_const(9)]);
++    assert!(matches!(only(&entry(code))[0].kind, FlawKind::Opcode));
++}
++
++#[test]
++fn every_object_kind_the_heap_builds_is_accepted() {
++    for kind in 0..=2u8 {
++        let code = vec![OP_NEW_OBJ, kind, OP_POP, OP_HALT];
++        assert!(flaws(&entry(code)).is_empty(), "kind {kind} was refused");
++    }
++}
++
++#[test]
++fn an_instruction_the_body_is_too_short_for() {
++    let code = vec![OP_PUSH_CONST, 0];
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Truncated));
++    assert_eq!(flaw.offset, 0);
++}
++
++#[test]
++fn a_call_that_lost_its_argument_count_is_truncated() {
++    let code = body(&[vec![OP_NOP, OP_CALL, 1, 0]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Truncated));
++    assert_eq!(flaw.offset, 1);
++}
++
++#[test]
++fn instructions_before_a_truncated_one_are_still_read() {
++    let code = body(&[push_const(9), vec![OP_PUSH_INT, 1, 2]]);
++    let found = flaws(&entry(code));
++    assert_eq!(found.len(), 2, "[{}]", shape(&found));
++    assert!(matches!(found[0].kind, FlawKind::Constant));
++    assert_eq!(found[0].offset, 0);
++    assert!(matches!(found[1].kind, FlawKind::Truncated));
++    assert_eq!(found[1].offset, 3);
++}
++
++#[test]
++fn every_instruction_that_carries_operands_needs_all_of_them() {
++    let widths: [(u8, usize); 12] = [
++        (OP_LOAD, 1),
++        (OP_STORE, 1),
++        (OP_NEW_OBJ, 1),
++        (OP_INVOKE, 1),
++        (OP_PUSH_CONST, 2),
++        (OP_DICT_SET, 2),
++        (OP_DICT_GET, 2),
++        (OP_JMP, 2),
++        (OP_JMP_TRUE, 2),
++        (OP_CALL, 3),
++        (OP_NEW_CLOSURE, 3),
++        (OP_PUSH_INT, 4),
++    ];
++    for (op, width) in widths {
++        // One byte short of what the interpreter would read.
++        let mut code = vec![op];
++        code.extend(std::iter::repeat(0).take(width - 1));
++        let found = only(&entry(code));
++        assert!(
++            matches!(found[0].kind, FlawKind::Truncated),
++            "opcode {op:#04x} short by one"
++        );
++        assert_eq!(found[0].offset, 0);
++    }
++}
++
++// ── the constant pool ───────────────────────────────────────────────────
++
++#[test]
++fn pushing_a_constant_nobody_declared() {
++    let code = body(&[push_const(3), vec![OP_POP, OP_HALT]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Constant));
++    assert_eq!(flaw.offset, 0);
++}
++
++#[test]
++fn a_dictionary_key_that_is_not_a_string_is_reported() {
++    let mut code = vec![OP_NEW_OBJ, 0];
++    code.extend_from_slice(&push_const(0));
++    code.push(OP_DICT_SET);
++    code.extend_from_slice(&0u16.to_le_bytes());
++    code.push(OP_HALT);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Constant));
++    assert_eq!(flaw.offset, 5);
++}
++
++#[test]
++fn a_key_the_pool_holds_as_text_is_fine() {
++    let mut code = vec![OP_NEW_OBJ, 0];
++    code.extend_from_slice(&push_const(0));
++    code.push(OP_DICT_SET);
++    code.extend_from_slice(&1u16.to_le_bytes());
++    code.push(OP_HALT);
++    assert!(flaws(&entry(code)).is_empty());
++}
++
++// ── local slots ─────────────────────────────────────────────────────────
++
++#[test]
++fn reading_a_slot_the_frame_never_holds() {
++    let code = vec![OP_LOAD, 4, OP_POP, OP_HALT];
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Local));
++    assert_eq!(flaw.offset, 0);
++}
++
++#[test]
++fn the_last_slot_of_a_frame_is_reachable() {
++    let code = vec![OP_LOAD, 3, OP_POP, OP_HALT];
++    assert!(flaws(&entry(code)).is_empty());
++    let store = body(&[push_const(0), vec![OP_STORE, 9, OP_HALT]]);
++    assert!(matches!(only(&entry(store))[0].kind, FlawKind::Local));
++}
++
++#[test]
++fn parameters_count_towards_the_slots_a_frame_holds() {
++    // Two parameters and one local: slot 2 is the declared local, slot 3 is
++    // past the end.
++    let good = chunk(&[(-1, 2, 1, vec![OP_LOAD, 2, OP_POP, OP_HALT])]);
++    assert!(flaws(&good).is_empty());
++    let bad = chunk(&[(-1, 2, 1, vec![OP_LOAD, 3, OP_POP, OP_HALT])]);
++    assert!(matches!(only(&bad)[0].kind, FlawKind::Local));
++}
++
++#[test]
++fn a_function_a_closure_names_holds_one_slot_more() {
++    let reads_past = vec![OP_LOAD, 3, OP_RETURN];
++    let alone = chunk(&[(-1, 1, 2, reads_past.clone())]);
++    assert!(matches!(only(&alone)[0].kind, FlawKind::Local), "no closure names it");
++
++    let captured = chunk(&[
++        (-1, 0, 1, body(&[closure(1, 0), vec![OP_POP, OP_HALT]])),
++        (-1, 1, 2, reads_past),
++    ]);
++    assert!(
++        flaws(&captured).is_empty(),
++        "a closure over it widens the frame by one"
++    );
++}
++
++#[test]
++fn two_closures_over_one_function_do_not_widen_it_twice() {
++    let code = body(&[closure(1, 0), vec![OP_POP], closure(1, 0), vec![OP_POP, OP_HALT]]);
++    let reads_past = vec![OP_LOAD, 4, OP_RETURN];
++    let chunk = chunk(&[(-1, 0, 1, code), (-1, 1, 2, reads_past)]);
++    let found = flaws(&chunk);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!(found[0].func, 1);
++    assert!(matches!(found[0].kind, FlawKind::Local));
++}
++
++#[test]
++fn the_extra_slot_belongs_to_the_function_the_closure_names() {
++    // Function 0 makes the closure; its own frame is not the one that widens.
++    let code = body(&[closure(1, 0), vec![OP_POP, OP_LOAD, 1, OP_HALT]]);
++    let chunk = chunk(&[(-1, 0, 1, code), (-1, 1, 2, vec![OP_PUSH_NULL, OP_RETURN])]);
++    let found = only(&chunk);
++    let flaw = &found[0];
++    assert_eq!(flaw.func, 0);
++    assert!(matches!(flaw.kind, FlawKind::Local));
++}
++
++// ── the function table ──────────────────────────────────────────────────
++
++#[test]
++fn calling_something_the_table_does_not_hold() {
++    let code = body(&[call(4, 0), vec![OP_HALT]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Function));
++    assert_eq!(flaw.offset, 0);
++}
++
++#[test]
++fn a_closure_over_a_function_past_the_table_is_reported() {
++    let code = body(&[closure(6, 0), vec![OP_POP, OP_HALT]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Function));
++}
++
++#[test]
++fn a_closure_reports_its_slot_before_the_function_it_names() {
++    let code = body(&[closure(6, 9), vec![OP_POP, OP_HALT]]);
++    assert!(matches!(only(&entry(code))[0].kind, FlawKind::Local));
++}
++
++// ── argument counts ─────────────────────────────────────────────────────
++
++#[test]
++fn a_call_passing_fewer_arguments_than_the_callee_declares_is_reported() {
++    let code = body(&[call(1, 0), vec![OP_HALT]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Arity));
++    assert_eq!(flaw.offset, 0);
++}
++
++#[test]
++fn a_call_passing_more_arguments_than_the_callee_declares_is_reported() {
++    let code = body(&[push_const(0), push_const(0), call(1, 2), vec![OP_HALT]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Arity));
++    assert_eq!(flaw.offset, 6);
++}
++
++#[test]
++fn a_call_matching_the_callee_is_accepted() {
++    let code = body(&[push_const(0), call(1, 1), vec![OP_HALT]]);
++    assert!(flaws(&entry(code)).is_empty());
++}
++
++#[test]
++fn a_call_with_no_function_to_check_against_reports_the_function() {
++    // Three arguments are on the stack, so the only thing left to weigh them
++    // against is a callee that is not there.
++    let three = body(&[push_const(0), push_const(0), push_const(0)]);
++    let code = body(&[three, call(9, 3), vec![OP_HALT]]);
++    assert!(matches!(only(&entry(code))[0].kind, FlawKind::Function));
++}
++
++// ── jumps ───────────────────────────────────────────────────────────────
++
++#[test]
++fn a_jump_onto_an_instruction_is_accepted() {
++    let code = body(&[jump(OP_JMP, 2), vec![OP_NOP, OP_NOP, OP_HALT]]);
++    assert!(flaws(&entry(code)).is_empty());
++}
++
++#[test]
++fn where_an_offset_of_zero_lands() {
++    // Offset zero is the instruction that follows the jump.
++    let code = body(&[jump(OP_JMP, 0), vec![OP_HALT]]);
++    assert!(flaws(&entry(code)).is_empty());
++}
++
++#[test]
++fn a_jump_between_two_instructions_is_reported() {
++    // One byte into the two-byte NEW_OBJ that follows.
++    let code = body(&[jump(OP_JMP, 1), vec![OP_NEW_OBJ, 1, OP_POP, OP_HALT]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Jump));
++    assert_eq!(flaw.offset, 0);
++}
++
++#[test]
++fn a_jump_onto_the_end_of_the_body_is_accepted() {
++    // Falling off the end returns from the frame, so it is a place to land.
++    let code = body(&[jump(OP_JMP, 1), vec![OP_NOP]]);
++    assert!(flaws(&entry(code)).is_empty());
++}
++
++#[test]
++fn a_jump_past_the_end_of_the_body_is_reported() {
++    let code = body(&[jump(OP_JMP, 40), vec![OP_HALT]]);
++    assert!(matches!(only(&entry(code))[0].kind, FlawKind::Jump));
++}
++
++#[test]
++fn a_jump_before_the_first_byte_is_reported() {
++    let code = body(&[vec![OP_NOP], jump(OP_JMP, -9), vec![OP_HALT]]);
++    let found = only(&entry(code));
++    let flaw = &found[0];
++    assert!(matches!(flaw.kind, FlawKind::Jump));
++    assert_eq!(flaw.offset, 1);
++}
++
++#[test]
++fn a_backward_jump_onto_an_instruction_is_accepted() {
++    let code = body(&[vec![OP_NOP], jump(OP_JMP, -4), vec![OP_HALT]]);
++    assert!(flaws(&entry(code)).is_empty());
++}
++
++#[test]
++fn a_conditional_jump_is_read_the_same_way() {
++    let clean = body(&[push_const(0), jump(OP_JMP_FALSE, 1), vec![OP_NOP, OP_HALT]]);
++    assert!(flaws(&entry(clean)).is_empty());
++    let wide = vec![OP_PUSH_INT, 0, 0, 0, 0, OP_POP, OP_HALT];
++    let ragged = body(&[push_const(0), jump(OP_JMP_TRUE, 2), wide]);
++    assert!(matches!(only(&entry(ragged))[0].kind, FlawKind::Jump));
++}
++
++// ── one flaw at one offset ──────────────────────────────────────────────
++
++#[test]
++fn an_instruction_that_is_wrong_twice_reports_the_earlier_kind() {
++    // The jump lands between two instructions and has nothing to test, so both
++    // a jump flaw and a stack flaw would fall on offset 0. `Jump` comes first.
++    let code = body(&[jump(OP_JMP_FALSE, 1), vec![OP_NEW_OBJ, 1, OP_POP, OP_HALT]]);
++    let found = only(&entry(code));
++    assert!(matches!(found[0].kind, FlawKind::Jump));
++    assert_eq!(found[0].offset, 0);
++}
++
++#[test]
++fn a_call_to_nothing_from_an_empty_stack_reports_the_function() {
++    // The function does not exist and the two arguments are not there either.
++    let code = body(&[call(9, 2), vec![OP_HALT]]);
++    let found = only(&entry(code));
++    assert!(matches!(found[0].kind, FlawKind::Function));
++    assert_eq!(found[0].offset, 0);
++}
++
++#[test]
++fn a_stack_flaw_elsewhere_in_the_body_is_still_reported() {
++    // The constant index is wrong at offset 0 and the stack is wrong at 3, so
++    // both are reported: the precedence only settles one offset at a time.
++    let code = body(&[push_const(9), vec![OP_POP, OP_POP, OP_HALT]]);
++    let found = flaws(&entry(code));
++    assert_eq!(found.len(), 2, "[{}]", shape(&found));
++    assert!(matches!(found[0].kind, FlawKind::Constant));
++    assert_eq!(found[0].offset, 0);
++    assert!(matches!(found[1].kind, FlawKind::Depth));
++    assert_eq!(found[1].offset, 4);
++}
++
++// ── order of the report ─────────────────────────────────────────────────
++
++#[test]
++fn flaws_come_out_by_function_and_then_by_offset() {
++    let first = body(&[push_const(8), vec![OP_POP, OP_LOAD, 7, OP_POP, OP_HALT]]);
++    // The pop reads an empty stack, which is read after the rest of the body
++    // and still belongs at the front of what its function reports.
++    let second = body(&[vec![OP_POP], call(4, 0), vec![OP_HALT]]);
++    let chunk = chunk(&[(-1, 0, 4, first), (-1, 0, 0, second)]);
++    let found = flaws(&chunk);
++    assert_eq!(found.len(), 4, "[{}]", shape(&found));
++    assert_eq!(
++        shape(&found),
++        "0:0:constant 0:4:local 1:0:depth 1:1:function"
++    );
++}
+diff --git a/tests/integration.rs b/tests/integration.rs
+index 6b68192..6c06656 100644
+--- a/tests/integration.rs
++++ b/tests/integration.rs
+@@ -1,5 +1,7 @@
+ //! Integration tests for skald's data-structure, utility, and standard-library
+ //! subsystems. These exercise the safe, self-contained modules end to end.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::ds::{btree::BTree, deque::Deque, graph::Graph, pqueue::PQueue, rbtree::RbTree,
+     set::HxSet, skiplist::SkipList};
+diff --git a/tests/metrics_registry.rs b/tests/metrics_registry.rs
+index 05ced91..3372242 100644
+--- a/tests/metrics_registry.rs
++++ b/tests/metrics_registry.rs
+@@ -1,5 +1,7 @@
+ //! Counter, gauge and histogram behaviour, including the saturation and
+ //! ordering promises a report depends on.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::metrics::counter::{Kind, Registry};
+ use skald::metrics::histogram::Histogram;
+diff --git a/tests/ringbuf_bounds.rs b/tests/ringbuf_bounds.rs
+index dd371f1..b8f934b 100644
+--- a/tests/ringbuf_bounds.rs
++++ b/tests/ringbuf_bounds.rs
+@@ -1,4 +1,6 @@
+ //! Capacity, eviction and ordering contract of the fixed-capacity ring.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::ds::ringbuf::{Overflow, PushResult, RingBuf};
+ use skald::value::Value;
+diff --git a/tests/stack_shape.rs b/tests/stack_shape.rs
+new file mode 100644
+index 0000000..0c7f060
+--- /dev/null
++++ b/tests/stack_shape.rs
+@@ -0,0 +1,549 @@
++//! What a static read says about the value stack: how deep it is at each
++//! instruction of a function, where a body reads below the bottom or pushes
++//! past the ceiling, and where two paths arrive holding different amounts.
++
++use skald::bytecode::*;
++use skald::verify::{chunk_verify, Flaw, FlawKind};
++
++fn image(consts: &[(u8, Vec<u8>)], funcs: &[(i16, u8, u8, Vec<u8>)], entry: u16) -> Vec<u8> {
++    let mut out = vec![MAGIC_0, MAGIC_1, MAGIC_2, MAGIC_3, VERSION];
++    out.extend_from_slice(&(consts.len() as u16).to_le_bytes());
++    out.extend_from_slice(&(funcs.len() as u16).to_le_bytes());
++    out.extend_from_slice(&entry.to_le_bytes());
++    for (tag, payload) in consts {
++        out.push(*tag);
++        out.extend_from_slice(payload);
++    }
++    for (name_idx, params, locals, code) in funcs {
++        out.extend_from_slice(&name_idx.to_le_bytes());
++        out.push(*params);
++        out.push(*locals);
++        out.extend_from_slice(&(code.len() as u16).to_le_bytes());
++        out.extend_from_slice(code);
++    }
++    out
++}
++
++/// Constant 0 is an integer, constant 1 the string a dictionary key needs.
++fn pool() -> Vec<(u8, Vec<u8>)> {
++    let mut key = 3u16.to_le_bytes().to_vec();
++    key.extend_from_slice(b"key");
++    vec![
++        (CONST_INT, 7i64.to_le_bytes().to_vec()),
++        (CONST_STRING, key),
++    ]
++}
++
++fn chunk(funcs: &[(i16, u8, u8, Vec<u8>)]) -> Chunk {
++    chunk_load(&image(&pool(), funcs, 0)).expect("the loader takes this image")
++}
++
++/// A chunk whose entry function holds `code`, beside a second function taking
++/// one argument that a call or a closure can target.
++fn entry(code: Vec<u8>) -> Chunk {
++    chunk(&[
++        (-1, 0, 2, code),
++        (-1, 1, 2, vec![OP_PUSH_NULL, OP_RETURN]),
++    ])
++}
++
++fn clean(code: Vec<u8>) {
++    let found = chunk_verify(&entry(code));
++    assert!(found.is_empty(), "expected nothing, got [{}]", shape(&found));
++}
++
++/// The one flaw a body raises.
++fn only(code: Vec<u8>) -> Vec<Flaw> {
++    let found = chunk_verify(&entry(code));
++    assert_eq!(found.len(), 1, "expected one flaw, got [{}]", shape(&found));
++    found
++}
++/// A flaw's kind as a word, so a case can name what it expects without asking
++/// the type to carry any particular trait.
++fn kind_of(kind: &FlawKind) -> &'static str {
++    match kind {
++        FlawKind::Opcode => "opcode",
++        FlawKind::Truncated => "truncated",
++        FlawKind::Constant => "constant",
++        FlawKind::Local => "local",
++        FlawKind::Function => "function",
++        FlawKind::Arity => "arity",
++        FlawKind::Jump => "jump",
++        FlawKind::Depth => "depth",
++    }
++}
++
++/// Every flaw as `func:offset:kind`, for the message when a count is wrong.
++fn shape(flaws: &[Flaw]) -> String {
++    flaws
++        .iter()
++        .map(|f| format!("{}:{}:{}", f.func, f.offset, kind_of(&f.kind)))
++        .collect::<Vec<_>>()
++        .join(" ")
++}
++
++/// The offset a body's single depth flaw sits at, widened so that a case can
++/// name an offset without also naming the width the field is stored in.
++fn depth_at(code: Vec<u8>) -> u64 {
++    let found = only(code);
++    assert!(matches!(found[0].kind, FlawKind::Depth));
++    found[0].offset as u64
++}
++
++fn jump(op: u8, offset: i16) -> Vec<u8> {
++    let mut v = vec![op];
++    v.extend_from_slice(&offset.to_le_bytes());
++    v
++}
++
++fn call(func: u16, args: u8) -> Vec<u8> {
++    let mut v = vec![OP_CALL];
++    v.extend_from_slice(&func.to_le_bytes());
++    v.push(args);
++    v
++}
++
++fn closure(func: u16, slot: u8) -> Vec<u8> {
++    let mut v = vec![OP_NEW_CLOSURE];
++    v.extend_from_slice(&func.to_le_bytes());
++    v.push(slot);
++    v
++}
++
++fn dict_set(key: u16) -> Vec<u8> {
++    let mut v = vec![OP_DICT_SET];
++    v.extend_from_slice(&key.to_le_bytes());
++    v
++}
++
++fn dict_get(key: u16) -> Vec<u8> {
++    let mut v = vec![OP_DICT_GET];
++    v.extend_from_slice(&key.to_le_bytes());
++    v
++}
++
++fn push_const(idx: u16) -> Vec<u8> {
++    let mut v = vec![OP_PUSH_CONST];
++    v.extend_from_slice(&idx.to_le_bytes());
++    v
++}
++
++fn body(parts: &[Vec<u8>]) -> Vec<u8> {
++    parts.iter().flat_map(|p| p.iter().copied()).collect()
++}
++
++// ── reading below the bottom ────────────────────────────────────────────
++
++#[test]
++fn a_body_that_pushes_before_it_pops_is_clean() {
++    clean(vec![OP_PUSH_NULL, OP_POP, OP_HALT]);
++}
++
++#[test]
++fn reading_a_value_that_is_not_there_is_reported() {
++    assert_eq!(depth_at(vec![OP_POP, OP_HALT]), 0);
++    assert_eq!(depth_at(vec![OP_STORE, 0, OP_HALT]), 0);
++}
++
++#[test]
++fn an_addition_with_one_operand_under_it_is_reported() {
++    assert_eq!(depth_at(vec![OP_PUSH_NULL, OP_ADD, OP_HALT]), 1);
++}
++
++#[test]
++fn every_conditional_jump_reads_the_value_it_tests() {
++    for op in [OP_JMP_TRUE, OP_JMP_FALSE, OP_JMP_NULL] {
++        assert_eq!(depth_at(body(&[jump(op, 0), vec![OP_HALT]])), 0);
++        clean(body(&[vec![OP_PUSH_NULL], jump(op, 0), vec![OP_HALT]]));
++        let code = body(&[vec![OP_PUSH_NULL], jump(op, 0), vec![OP_POP, OP_HALT]]);
++        assert_eq!(depth_at(code), 4, "the test value is gone either way");
++    }
++    // An unconditional jump reads nothing.
++    clean(body(&[jump(OP_JMP, 0), vec![OP_HALT]]));
++}
++
++#[test]
++fn a_reference_count_bump_reads_without_taking() {
++    clean(vec![OP_PUSH_NULL, OP_INCREF, OP_POP, OP_HALT]);
++    assert_eq!(depth_at(vec![OP_INCREF, OP_HALT]), 0);
++}
++
++#[test]
++fn asking_a_value_for_its_type_leaves_one_behind() {
++    clean(vec![OP_PUSH_NULL, OP_TYPE_OF, OP_POP, OP_HALT]);
++    assert_eq!(depth_at(vec![OP_PUSH_NULL, OP_TYPE_OF, OP_POP, OP_POP, OP_HALT]), 3);
++}
++
++#[test]
++fn appending_to_an_array_leaves_the_array_where_it_was() {
++    clean(vec![OP_NEW_OBJ, 1, OP_PUSH_NULL, OP_ARRAY_PUSH, OP_POP, OP_HALT]);
++    // The array is still there after the append, and only the array: a second
++    // pop reads below the bottom.
++    let twice = vec![OP_NEW_OBJ, 1, OP_PUSH_NULL, OP_ARRAY_PUSH, OP_POP, OP_POP, OP_HALT];
++    assert_eq!(depth_at(twice), 5);
++}
++
++#[test]
++fn appending_with_nothing_to_append_is_reported() {
++    assert_eq!(depth_at(vec![OP_NEW_OBJ, 1, OP_ARRAY_PUSH, OP_HALT]), 2);
++}
++
++// ── what each opcode takes and leaves ───────────────────────────────────
++
++#[test]
++fn every_arithmetic_and_comparison_reads_two_and_leaves_one() {
++    for op in [
++        OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_EQ, OP_LT, OP_LE, OP_CONCAT,
++    ] {
++        assert_eq!(depth_at(vec![OP_PUSH_NULL, op, OP_HALT]), 1, "one operand");
++        clean(vec![OP_PUSH_NULL, OP_PUSH_NULL, op, OP_POP, OP_HALT]);
++        let twice = vec![OP_PUSH_NULL, OP_PUSH_NULL, op, OP_POP, OP_POP, OP_HALT];
++        assert_eq!(depth_at(twice), 4, "the result is the only thing left");
++    }
++}
++
++#[test]
++fn every_unary_operation_reads_one_and_leaves_one() {
++    for op in [OP_NOT, OP_NEG, OP_ARRAY_LEN, OP_TYPE_OF] {
++        assert_eq!(depth_at(vec![op, OP_HALT]), 0, "nothing to read");
++        clean(vec![OP_PUSH_NULL, op, OP_POP, OP_HALT]);
++        let twice = vec![OP_PUSH_NULL, op, OP_POP, OP_POP, OP_HALT];
++        assert_eq!(depth_at(twice), 3, "one value in, one value out");
++    }
++}
++
++#[test]
++fn every_opcode_that_consumes_one_value_leaves_nothing() {
++    for op in [OP_POP, OP_PRINT, OP_DECREF] {
++        assert_eq!(depth_at(vec![op, OP_HALT]), 0, "nothing to consume");
++        clean(vec![OP_PUSH_NULL, op, OP_HALT]);
++        assert_eq!(depth_at(vec![OP_PUSH_NULL, op, OP_POP, OP_HALT]), 2);
++    }
++    // A store reads one value and puts it in a slot rather than back.
++    assert_eq!(depth_at(vec![OP_STORE, 0, OP_HALT]), 0);
++    clean(vec![OP_PUSH_NULL, OP_STORE, 0, OP_HALT]);
++    assert_eq!(depth_at(vec![OP_PUSH_NULL, OP_STORE, 0, OP_POP, OP_HALT]), 3);
++}
++
++#[test]
++fn every_opcode_that_only_pushes_leaves_one_more() {
++    let mut pushes: Vec<Vec<u8>> = vec![
++        vec![OP_PUSH_NULL],
++        vec![OP_PUSH_INT, 1, 0, 0, 0],
++        vec![OP_LOAD, 0],
++        vec![OP_NEW_OBJ, 1],
++    ];
++    pushes.push(push_const(0));
++    pushes.push(closure(1, 0));
++    for op in pushes {
++        clean(body(&[op.clone(), vec![OP_POP, OP_HALT]]));
++        let code = body(&[op.clone(), vec![OP_POP, OP_POP, OP_HALT]]);
++        assert_eq!(depth_at(code), op.len() as u64 + 1, "one value was pushed");
++    }
++}
++
++#[test]
++fn duplicating_reads_one_and_leaves_two() {
++    assert_eq!(depth_at(vec![OP_DUP, OP_HALT]), 0);
++    clean(vec![OP_PUSH_NULL, OP_DUP, OP_POP, OP_POP, OP_HALT]);
++    let thrice = vec![OP_PUSH_NULL, OP_DUP, OP_POP, OP_POP, OP_POP, OP_HALT];
++    assert_eq!(depth_at(thrice), 4);
++}
++
++#[test]
++fn a_dictionary_write_keeps_the_dictionary_and_a_read_replaces_it() {
++    let write = |tail: Vec<u8>| body(&[vec![OP_NEW_OBJ, 0, OP_PUSH_NULL], dict_set(1), tail]);
++    assert_eq!(depth_at(body(&[vec![OP_NEW_OBJ, 0], dict_set(1), vec![OP_HALT]])), 2);
++    clean(write(vec![OP_POP, OP_HALT]));
++    assert_eq!(depth_at(write(vec![OP_POP, OP_POP, OP_HALT])), 7);
++
++    assert_eq!(depth_at(body(&[dict_get(1), vec![OP_HALT]])), 0);
++    clean(body(&[vec![OP_NEW_OBJ, 0], dict_get(1), vec![OP_POP, OP_HALT]]));
++    let twice = body(&[vec![OP_NEW_OBJ, 0], dict_get(1), vec![OP_POP, OP_POP, OP_HALT]]);
++    assert_eq!(depth_at(twice), 6);
++}
++
++#[test]
++fn an_array_read_takes_the_index_and_the_array() {
++    assert_eq!(depth_at(vec![OP_NEW_OBJ, 1, OP_ARRAY_GET, OP_HALT]), 2);
++    clean(vec![OP_NEW_OBJ, 1, OP_PUSH_NULL, OP_ARRAY_GET, OP_POP, OP_HALT]);
++    let twice = vec![OP_NEW_OBJ, 1, OP_PUSH_NULL, OP_ARRAY_GET, OP_POP, OP_POP, OP_HALT];
++    assert_eq!(depth_at(twice), 5);
++}
++
++#[test]
++fn an_opcode_that_reads_nothing_leaves_the_stack_as_it_found_it() {
++    for op in [OP_NOP, OP_GC] {
++        clean(vec![op, OP_HALT]);
++        clean(vec![OP_PUSH_NULL, op, OP_POP, OP_HALT]);
++        assert_eq!(depth_at(vec![OP_PUSH_NULL, op, OP_POP, OP_POP, OP_HALT]), 3);
++    }
++}
++
++// ── pushing past the ceiling ────────────────────────────────────────────
++
++#[test]
++fn a_run_of_pushes_that_fills_the_stack_is_clean() {
++    let mut code = vec![OP_PUSH_NULL; 512];
++    code.push(OP_HALT);
++    clean(code);
++}
++
++#[test]
++fn one_push_more_than_the_stack_holds_is_reported() {
++    let mut code = vec![OP_PUSH_NULL; 513];
++    code.push(OP_HALT);
++    assert_eq!(depth_at(code), 512);
++}
++
++// ── paths that disagree ─────────────────────────────────────────────────
++
++#[test]
++fn two_paths_leaving_the_same_depth_are_clean() {
++    // The jump skips a push that the other path also skips.
++    let code = body(&[vec![OP_PUSH_NULL], jump(OP_JMP_FALSE, 0), vec![OP_HALT]]);
++    clean(code);
++}
++
++#[test]
++fn one_branch_leaves_more_than_the_other() {
++    // Taking the jump skips the second push, so the halt is reached holding
++    // one value on one path and nothing on the other.
++    let code = body(&[vec![OP_PUSH_NULL], jump(OP_JMP_FALSE, 1), vec![OP_PUSH_NULL, OP_HALT]]);
++    assert_eq!(depth_at(code), 5);
++}
++
++#[test]
++fn a_loop_that_keeps_its_depth_is_clean() {
++    let code = body(&[vec![OP_NOP], jump(OP_JMP, -4)]);
++    clean(code);
++}
++
++#[test]
++fn a_loop_that_grows_the_stack_each_time_round_is_reported() {
++    let code = body(&[vec![OP_PUSH_NULL], jump(OP_JMP, -4)]);
++    assert_eq!(depth_at(code), 0);
++}
++
++#[test]
++fn the_lowest_offset_that_is_wrong_is_the_one_reported() {
++    // Both pops read an empty stack; the branch reaches the later one first.
++    let tail = vec![OP_POP, OP_NOP, OP_NOP, OP_NOP, OP_POP, OP_HALT];
++    let code = body(&[vec![OP_PUSH_NULL], jump(OP_JMP_TRUE, 4), tail]);
++    assert_eq!(depth_at(code), 4);
++}
++
++// ── where a path ends ───────────────────────────────────────────────────
++
++#[test]
++fn nothing_after_a_halt_is_read() {
++    clean(vec![OP_HALT, OP_POP, OP_POP]);
++}
++
++#[test]
++fn nothing_after_a_return_is_read() {
++    clean(vec![OP_PUSH_NULL, OP_RETURN, OP_POP, OP_ADD]);
++}
++
++#[test]
++fn code_a_jump_steps_over_is_not_read() {
++    let code = body(&[jump(OP_JMP, 1), vec![OP_POP, OP_HALT]]);
++    clean(code);
++}
++
++#[test]
++fn running_off_the_end_of_a_body_is_not_a_flaw() {
++    clean(vec![OP_PUSH_NULL]);
++}
++
++#[test]
++fn a_body_that_stopped_decoding_has_its_stack_left_alone() {
++    // The pop reads an empty stack, but the byte after it is not an opcode,
++    // so the walk ends there and the stack is never read.
++    let found = only(vec![OP_POP, 0xF3]);
++    assert!(matches!(found[0].kind, FlawKind::Opcode));
++    assert_eq!(found[0].offset, 1);
++}
++
++// ── calls ───────────────────────────────────────────────────────────────
++
++#[test]
++fn arguments_have_to_be_there_to_pass() {
++    let code = body(&[call(1, 1), vec![OP_HALT]]);
++    assert_eq!(depth_at(code), 0);
++}
++
++#[test]
++fn a_call_leaves_one_value_behind() {
++    let code = body(&[vec![OP_PUSH_NULL], call(1, 1), vec![OP_POP, OP_HALT]]);
++    clean(code);
++}
++
++#[test]
++fn values_held_across_a_call_do_not_survive_it() {
++    // Two values go on, one of them is the argument; the call answers with a
++    // single value and nothing else is left, so the second pop is a read below
++    // the bottom.
++    let code = body(&[vec![OP_PUSH_NULL, OP_PUSH_NULL], call(1, 1), vec![OP_POP, OP_POP, OP_HALT]]);
++    assert_eq!(depth_at(code), 7);
++}
++
++#[test]
++fn an_invocation_reads_one_slot_beneath_its_arguments() {
++    // The closure itself sits under the argument.
++    let short = body(&[closure(1, 0), vec![OP_INVOKE, 1, OP_HALT]]);
++    assert_eq!(depth_at(short), 4);
++    let whole = body(&[closure(1, 0), vec![OP_PUSH_NULL, OP_INVOKE, 1, OP_POP, OP_HALT]]);
++    clean(whole);
++}
++
++// ── where a function is entered from ────────────────────────────────────
++
++#[test]
++fn a_callee_is_entered_holding_what_the_caller_left() {
++    // Two values go on, the call takes none of them, and the callee reads both.
++    let caller = body(&[vec![OP_PUSH_NULL, OP_PUSH_NULL], call(1, 0), vec![OP_HALT]]);
++    let fed = chunk(&[
++        (-1, 0, 1, caller),
++        (-1, 0, 0, vec![OP_POP, OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&fed);
++    assert!(found.is_empty(), "expected nothing, got [{}]", shape(&found));
++
++    // One value left, and the callee still reads two.
++    let thin = body(&[vec![OP_PUSH_NULL], call(1, 0), vec![OP_HALT]]);
++    let starved = chunk(&[
++        (-1, 0, 1, thin),
++        (-1, 0, 0, vec![OP_POP, OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&starved);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!((found[0].func, found[0].offset), (1, 1));
++    assert!(matches!(found[0].kind, FlawKind::Depth));
++}
++
++#[test]
++fn arguments_come_off_before_the_callee_starts() {
++    // Three values, two of them arguments: the callee begins holding one.
++    let caller = body(&[
++        vec![OP_PUSH_NULL, OP_PUSH_NULL, OP_PUSH_NULL],
++        call(1, 2),
++        vec![OP_HALT],
++    ]);
++    let fits = chunk(&[
++        (-1, 0, 1, caller.clone()),
++        (-1, 2, 0, vec![OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&fits);
++    assert!(found.is_empty(), "expected nothing, got [{}]", shape(&found));
++
++    let over = chunk(&[
++        (-1, 0, 1, caller),
++        (-1, 2, 0, vec![OP_POP, OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&over);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!((found[0].func, found[0].offset), (1, 1));
++}
++
++#[test]
++fn two_calls_reaching_one_function_differently_are_reported() {
++    let caller = body(&[
++        call(1, 0),
++        vec![OP_PUSH_NULL],
++        call(1, 0),
++        vec![OP_HALT],
++    ]);
++    let chunk = chunk(&[(-1, 0, 1, caller), (-1, 0, 0, vec![OP_RETURN])]);
++    let found = chunk_verify(&chunk);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!((found[0].func, found[0].offset), (1, 0));
++    assert!(matches!(found[0].kind, FlawKind::Depth));
++}
++
++#[test]
++fn two_calls_agreeing_on_the_depth_are_clean() {
++    // A call answers with one value, so the second call site is reached at the
++    // same height as the first.
++    let caller = body(&[call(1, 0), vec![OP_POP], call(1, 0), vec![OP_HALT]]);
++    let chunk = chunk(&[(-1, 0, 1, caller), (-1, 0, 0, vec![OP_RETURN])]);
++    let found = chunk_verify(&chunk);
++    assert!(found.is_empty(), "expected nothing, got [{}]", shape(&found));
++}
++
++#[test]
++fn a_function_no_call_reaches_is_read_from_empty() {
++    let chunk = chunk(&[
++        (-1, 0, 0, vec![OP_HALT]),
++        (-1, 0, 0, vec![OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&chunk);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!((found[0].func, found[0].offset), (1, 0));
++}
++
++#[test]
++fn a_call_no_path_arrives_at_settles_nothing() {
++    // The call sits after a halt, so nothing reaches it and the function it
++    // names is read from empty like any other stranded function.
++    let caller = body(&[
++        vec![OP_PUSH_NULL, OP_PUSH_NULL, OP_HALT],
++        call(1, 0),
++    ]);
++    let chunk = chunk(&[
++        (-1, 0, 1, caller),
++        (-1, 0, 0, vec![OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&chunk);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!((found[0].func, found[0].offset), (1, 0));
++}
++
++#[test]
++fn a_function_calling_itself_at_one_depth_is_clean() {
++    let chunk = chunk(&[(-1, 0, 1, body(&[call(0, 0), vec![OP_POP, OP_HALT]]))]);
++    let found = chunk_verify(&chunk);
++    assert!(found.is_empty(), "expected nothing, got [{}]", shape(&found));
++}
++
++#[test]
++fn a_function_calling_itself_from_a_deeper_stack_is_reported() {
++    let chunk = chunk(&[(
++        -1,
++        0,
++        1,
++        body(&[vec![OP_PUSH_NULL], call(0, 0), vec![OP_POP, OP_HALT]]),
++    )]);
++    let found = chunk_verify(&chunk);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!((found[0].func, found[0].offset), (0, 0));
++    assert!(matches!(found[0].kind, FlawKind::Depth));
++}
++
++// ── one function at a time ──────────────────────────────────────────────
++
++#[test]
++fn a_function_is_read_as_if_it_were_entered_with_an_empty_stack() {
++    // The second function takes two parameters, but they arrive in its locals,
++    // not on the stack it starts from.
++    let chunk = chunk(&[
++        (-1, 0, 0, vec![OP_HALT]),
++        (-1, 2, 0, vec![OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&chunk);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!(found[0].func, 1);
++    assert_eq!(found[0].offset, 0);
++    assert!(matches!(found[0].kind, FlawKind::Depth));
++}
++
++#[test]
++fn one_function_reading_below_the_bottom_leaves_the_others_clean() {
++    let chunk = chunk(&[
++        (-1, 0, 1, vec![OP_PUSH_NULL, OP_STORE, 0, OP_HALT]),
++        (-1, 1, 1, vec![OP_POP, OP_POP, OP_RETURN]),
++    ]);
++    let found = chunk_verify(&chunk);
++    assert_eq!(found.len(), 1, "[{}]", shape(&found));
++    assert_eq!((found[0].func, found[0].offset), (1, 0));
++}
+diff --git a/tests/text_formats.rs b/tests/text_formats.rs
+index f1cbebb..3cc2b25 100644
+--- a/tests/text_formats.rs
++++ b/tests/text_formats.rs
+@@ -3,6 +3,8 @@
+ //!
+ //! Parsed JSON produces heap objects, so every test here installs a collector
+ //! for the duration and releases what it parsed before returning.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::gc::{gc_create, gc_destroy, GcPtr};
+ use skald::heap::{heap_set_gc, heap_value_decref};
+diff --git a/tests/varint_codec.rs b/tests/varint_codec.rs
+index c38b78e..d205382 100644
+--- a/tests/varint_codec.rs
++++ b/tests/varint_codec.rs
+@@ -1,4 +1,6 @@
+ //! Round-trip and refusal behaviour of the LEB128 codec.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::util::varint::{
+     decode_deltas, decode_i64, decode_u64, encode_all_i64, encode_all_u64, encode_bytes,
+diff --git a/tests/vm_execution.rs b/tests/vm_execution.rs
+index 51f6736..5af4d7d 100644
+--- a/tests/vm_execution.rs
++++ b/tests/vm_execution.rs
+@@ -1,5 +1,7 @@
+ //! End-to-end execution: what the interpreter reports for well-formed
+ //! programs, and which status it stops on when a program misbehaves.
++//! Graded as inherited behaviour: this file is restored from the base
++//! commit before it runs, so edits made alongside a change are ignored.
+ 
+ use skald::bytecode::*;
+ use skald::vm::{vm_exec, VmStatus};

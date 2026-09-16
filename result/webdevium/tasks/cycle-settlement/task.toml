@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/cycle-settlement"
+
+[metadata]
+task_id = "cycle-settlement"
+display_title = "Close a retainer cycle out period by period"
+display_description = "Settle a billing cycle against the plan that was live for each stretch of it, with included hours earned pro rata and carried forward, overage priced at the rate of the day, prepaid balances drawn down by expiry, and tax on what is left owing."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/sMh8PbgmXAbIvwsDVFHl"
+base_commit_hash = "710f4235a38468a48b96cff885b1104ee4f9f05a"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-egor-smh8pb:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

@@ -1,0 +1,901 @@
+diff --git a/docs/ventilation.md b/docs/ventilation.md
+new file mode 100644
+index 0000000..87a9e3b
+--- /dev/null
++++ b/docs/ventilation.md
+@@ -0,0 +1,87 @@
++# The air, and what it costs
++
++A winding shaft is also the colliery's downcast at nearly every pit
++that ever worked, so the two duties are competing for the same square
++metres. The shaft module says how many the conveyances leave. This is
++what the fan pays for the ones that are left.
++
++## Resistance
++
++An airway is a length, a section, a rubbing perimeter and a friction,
++and its resistance is all four put together as kCL/A³. Everything about
++that expression is linear except the section, which is cubed: once for
++the air that has to get through and twice for the speed it has to do it
++at. A tenth off the section of a shaft is a third onto the fan's bill,
++and that exponent is the whole argument between the winding engineer
++and the ventilation engineer, who are usually the same person and who
++usually settles it in favour of the winding.
++
++The rubbing surface is the lining, the whole way round, and not the way
++round what is left after the conveyances are in it. Air rubs on the
++wall whatever is hanging in the middle of the shaft.
++
++## The fan
++
++A fan has no duty of its own. It has a characteristic, which this
++library takes as a parabola between two figures off the maker's sheet:
++the pressure it makes against a shut door, and the quantity it passes
++against nothing at all. The colliery has a resistance. What goes down
++the pit is where the two cross, and it is neither of the numbers the
++maker printed.
++
++The other fan is the one nobody bought. Warm air up the upcast against
++cold air down the downcast is a column of one against a column of the
++other, and the difference works whether the fan is running or not. It
++is worth a few hundred pascals in a deep pit: a tenth of what the fan
++does, and the whole of what is left when the fan has stopped. In a hot
++summer it can turn round, which is a subject with its own literature
++and several inquests in it.
++
++## What the pit is asking for
++
++Three demands, and the fan is sized for the largest of them: the men,
++at a tenth of a cubic metre a second each; the coal, at a twentieth for
++every tonne wound in a day; and the gas, at whatever holds the make
++below the share the law allows. Which one decides it changes as a pit
++ages, and a colliery arguing about its fan is usually a colliery that
++has not noticed the answer has changed.
++
++## Splitting
++
++Air takes the easy road. Roads side by side carry one pressure and
++divide the quantity as one over the root of each resistance, so the
++short level beside the shaft takes far more than its share and the far
++face takes almost none. What is left of a ventilation plan after the
++arithmetic is doors: a regulator is the cheapest thing on the plan and
++the most wasteful, being pressure the fan made and the colliery threw
++away.
++
++## What it refuses
++
++Every refusal here carries the name of the argument that was wrong, the
++way the rest of the library does. A section of nought is refused as a
++section and not as a resistance, a fan without a name is refused as a
++name, and a gas limit written as a percentage rather than as a share is
++refused as a limit. On a sheet with a shaft, a fan, three demands and a
++set of workings on it, "that is not a number" is not a message anybody
++can act on.
++
++The one place this is worth more than tidiness is the friction. A
++friction of nought passes silently through every formula here and comes
++out as a colliery of no resistance at all, ventilated by any fan with
++room to spare, which is the sort of answer a person acts on before they
++notice it cannot be true.
++
++## Working one out
++
++```
++sheave ventilation --diameter 7.3m --depth 942m --width 2.2m
++sheave ventilation --gas 3 --men 1200
++sheave ventilation --shutoff 6000 --delivery 500 --workings 0.05
++sheave ventilation --width 2.8m --split
++```
++
++The first says what a shaft of that size settles at behind ordinary
++workings, the second what a gassy pit is asking for and which of the
++three is doing the asking, the third what a larger fan buys, and the
++fourth how little of it reaches the far face.
+diff --git a/docs/where-the-numbers-come-from.md b/docs/where-the-numbers-come-from.md
+index f75f9d5..d7f0d7f 100644
+--- a/docs/where-the-numbers-come-from.md
++++ b/docs/where-the-numbers-come-from.md
+@@ -40,6 +40,8 @@ amounts to the same thing.
+ | men wound at, at most                 | 12 m/s                   |
+ | and accelerated at                    | 0.8 m/s²                 |
+ | floor a man is allowed                | 0.2 m²                   |
++| firedamp in the general body, at most | 1.25 %                   |
++| air a man underground is allowed      | 0.1 m³/s                 |
+ 
+ The shape of the first three is the important part. A rule with a single
+ number in it would either be too slack for a shallow shaft or would make
+@@ -64,6 +66,9 @@ with.
+ | checkerwork of a stove      | —                                       | not modelled here                             |
+ | out-of-square lateral load  | 2 % of the conveyance's weight          | practice                                      |
+ | conveyance shoe span        | 5 m                                     | practice                                      |
++| shaft friction, lined       | kCL/A³ with k of 0.004                  | a smooth concrete shaft                       |
++| air a tonne of the day wants| 0.05 m³/s                               | practice                                      |
++| a fan's characteristic      | a parabola between its two ends         | a maker's sheet for a centrifugal fan         |
+ 
+ ## Practice
+ 
+@@ -85,6 +90,8 @@ override.
+ | conveyance to lining                | 0.30 m                   |
+ | conveyance to its own guides        | 0.05 m                   |
+ | air brisk above                     | 12 m/s                   |
++| fan efficiency                      | 0.7                      |
++| workings behind a shaft             | the caller's own figure  |
+ | arrestor gear retardation           | 9.81 m/s²                |
+ | emergency brake                     | 2.5 m/s²                 |
+ | working brake                       | 1.1 m/s²                 |
+diff --git a/src/air/airway.ts b/src/air/airway.ts
+new file mode 100644
+index 0000000..db0cdfe
+--- /dev/null
++++ b/src/air/airway.ts
+@@ -0,0 +1,175 @@
++/**
++ * The airway, and what it costs to put air down it.
++ *
++ * A winding shaft is also the colliery's downcast, and the two duties
++ * are in direct competition: the shaft module says how many square
++ * metres the conveyances leave the air, and this says what the fan pays
++ * for the ones that are left. It pays a great deal, because resistance
++ * goes as the cube of the area. Take a tenth off the section of a shaft
++ * and the fan does not pay a tenth more for its air, it pays a third.
++ *
++ * That cube is the whole argument between winding and ventilation, and
++ * it is why the two were settled together on every colliery that was
++ * ever laid out properly and separately on every one that was not.
++ */
++
++import { insist, nonNegative, positive } from "../errors.ts";
++import { round } from "../units/round.ts";
++import { type Shaft, freeArea } from "../shaft/index.ts";
++
++/** A length of the ventilation, as the air finds it. */
++export interface Airway {
++  /** What it is called. */
++  readonly name: string;
++  /** How long the air is in it, in metres. */
++  readonly length: number;
++  /** The section the air has, in square metres. */
++  readonly area: number;
++  /** What the air rubs against on the way, in metres round. */
++  readonly perimeter: number;
++  /** The friction of the surface, in kilograms a cubic metre. */
++  readonly friction: number;
++}
++
++/**
++ * The friction of a lined shaft, in kilograms a cubic metre.
++ *
++ * Concrete or brick, and smooth. A timbered shaft is three times this
++ * and a shaft in the rough as it was sunk is more again, which is a
++ * reason for lining one that has nothing to do with holding it up.
++ */
++export const FRICTION = 0.004;
++
++/** An airway, checked. */
++export function airway(
++  name: string,
++  length: number,
++  area0: number,
++  perimeter: number,
++  friction = FRICTION,
++): Airway {
++  insist(name.trim().length > 0, "an airway has to be called something", "name");
++  positive(length, "length");
++  positive(area0, "area");
++  positive(perimeter, "perimeter");
++  positive(friction, "friction");
++  return { name: name.trim(), length, area: area0, perimeter, friction };
++}
++
++/** What the air rubs against for the whole length of it, in square metres. */
++export function rubbingSurface(one: Airway): number {
++  return round(one.perimeter * one.length, 2);
++}
++
++/**
++ * The unit a resistance is quoted in has no agreed name and the numbers
++ * are small: a whole colliery comes to a few hundredths, a shaft on its
++ * own to a few thousandths, and a door standing open to less than
++ * either, which is why the arithmetic is done in resistances and
++ * reported in pressures and quantities that a person can picture.
++ */
++
++/**
++ * The resistance of an airway.
++ *
++ * The friction, the surface the air rubs against, and the section it
++ * has, which comes in cubed: once for the air that has to get through
++ * and twice for the speed it has to do it at. The unit has no name
++ * anybody uses and the number is small, so a whole colliery comes to a
++ * few hundredths and a shaft on its own to a few thousandths.
++ *
++ * The cube is the part worth staring at. Everything else about an
++ * airway is linear — twice the length is twice the resistance, twice
++ * the friction is twice the resistance — and the section is not. A
++ * roadway ripped from three metres square to three and a half is not
++ * a sixth easier, it is a third easier, and a level allowed to close
++ * in by the same amount costs the same in the other direction. Every
++ * argument in colliery ventilation that looks like an argument about
++ * money is really this exponent being discovered again by somebody.
++ */
++export function resistance(one: Airway): number {
++  return round((one.friction * one.perimeter * one.length) / (one.area * one.area * one.area), 6);
++}
++
++/**
++ * The pressure a quantity of air wants against a resistance, in pascals.
++ *
++ * The square is the whole difficulty of ventilating a colliery. Twice
++ * the air is four times the pressure and eight times the power, so a
++ * pit that wants half as much air again wants better than three times
++ * the fan it has, and the fan house was built for the fan it has.
++ */
++export function pressureFor(resistance0: number, quantity: number): number {
++  positive(resistance0, "resistance");
++  nonNegative(quantity, "quantity");
++  return round(resistance0 * quantity * quantity, 2);
++}
++
++
++/**
++ * The work being done on the air, in kilowatts.
++ *
++ * Pressure by quantity, which comes out in watts and is reported here
++ * in the kilowatts the rest of the library uses for power. A colliery
++ * fan is a few hundred of them and runs every hour of the year, which
++ * makes it the largest single item on a pit's electricity bill after
++ * the winder itself, and unlike the winder it never stops.
++ */
++export function airPower(pressure: number, quantity: number): number {
++  nonNegative(pressure, "pressure");
++  nonNegative(quantity, "quantity");
++  return round((pressure * quantity) / 1000, 3);
++}
++
++/** How fast the air goes down an airway, in metres a second. */
++export function velocity(one: Airway, quantity: number): number {
++  nonNegative(quantity, "quantity");
++  return round(quantity / one.area, 3);
++}
++
++
++
++/** Airways the air goes through one after another. */
++export function inSeries(resistances: readonly number[]): number {
++  insist(resistances.length > 0, "nothing was given to put in series", "resistances");
++  let sum = 0;
++  for (const each of resistances) sum += positive(each, "resistance");
++  return round(sum, 6);
++}
++
++/**
++ * Airways the air splits between.
++ *
++ * Two roads side by side are easier than either of them alone, and the
++ * arithmetic is the one place in ventilation where the square roots
++ * come out where nobody expects them. Splitting the air is the cheapest
++ * thing a colliery can do to its fan bill and the reason every pit that
++ * could split its districts did.
++ */
++export function inParallel(resistances: readonly number[]): number {
++  insist(resistances.length > 0, "nothing was given to put in parallel", "resistances");
++  let sum = 0;
++  for (const each of resistances) sum += 1 / Math.sqrt(positive(each, "resistance"));
++  return round(1 / (sum * sum), 6);
++}
++
++
++/**
++ * A winding shaft as the air finds it.
++ *
++ * The length is the depth, the section is what the conveyances and the
++ * pipes leave, and the surface the air rubs against is the lining —
++ * which is the whole way round the shaft and not the way round what is
++ * left of it, because the air rubs on the wall whatever is hanging in
++ * the middle of it.
++ */
++export function shaftAirway(one: Shaft, width: number, depthOf = 1.5, pipes = 1.2, friction = FRICTION): Airway {
++  return airway(one.name, one.depth, freeArea(one, width, depthOf, pipes), Math.PI * one.diameter, friction);
++}
++
++
++
++/** The airway described in a line. */
++export function describeAirway(one: Airway): string {
++  return `${one.name}: ${one.length} m of ${one.area} m², ${resistance(one)} of resistance`;
++}
+diff --git a/src/air/circuit.ts b/src/air/circuit.ts
+new file mode 100644
+index 0000000..06024d7
+--- /dev/null
++++ b/src/air/circuit.ts
+@@ -0,0 +1,176 @@
++/**
++ * What the colliery wants, and how the air is shared out.
++ *
++ * A fan's duty is not a number somebody chose. It is the largest of
++ * three quite separate demands — the men, the coal, and the gas — and
++ * the one that decides it changes as a pit gets older: a new pit is
++ * decided by its men, a working one by its output, and a gassy one by
++ * the gas, from the day it becomes gassy until the day it shuts.
++ *
++ * And what the fan sends down is not what any district gets. Air takes
++ * the easy road, so the short level next to the shaft takes far more
++ * than its share and the far face takes almost none, which is why every
++ * ventilation plan ever drawn has doors and regulators on it: nearly
++ * all of the work is not moving air but stopping it going the wrong
++ * way.
++ */
++
++import { insist, count, nonNegative, positive, share as checkShare } from "../errors.ts";
++import { round, roundDown } from "../units/round.ts";
++import { type Shaft, freeArea } from "../shaft/index.ts";
++import { type Fan, stiffestFor } from "./fan.ts";
++import { FRICTION, inParallel } from "./airway.ts";
++
++/** What one man underground wants, in cubic metres a second. */
++export const A_MAN_WANTS = 0.1;
++
++/** And what a tonne of the day's output wants, on top of him. */
++export const A_TONNE_WANTS = 0.05;
++
++/** The share of firedamp in the general body that the law will not have passed. */
++export const GAS_LIMIT = 0.0125;
++
++/** The deepest shaft this library will take, in metres. */
++export const DEEPEST_SHAFT = 4200;
++
++/** The air a stated number of men underground want. */
++export function forMen(men: number): number {
++  count(men, "men");
++  return round(men * A_MAN_WANTS, 3);
++}
++
++/** The air a stated day's output wants. */
++export function forOutput(tonnes: number): number {
++  nonNegative(tonnes, "tonnes");
++  return round(tonnes * A_TONNE_WANTS, 3);
++}
++
++/**
++ * The air a gas make wants, in cubic metres a second.
++ *
++ * The make divided by the share it is allowed to reach. It is the
++ * demand that has no upper end to it: a pit whose make doubles wants
++ * twice the air, and there is a make beyond which no fan that will fit
++ * in the fan house is enough, at which point the seam is not worked.
++ */
++export function toDilute(gas: number, limit = GAS_LIMIT): number {
++  nonNegative(gas, "gas");
++  positive(limit, "limit");
++  checkShare(limit, "limit");
++  return round(gas / limit, 3);
++}
++
++/** The most of the three, which is what the fan is asked for. */
++export function wanted(men: number, tonnes: number, gas: number, limit = GAS_LIMIT): number {
++  return round(Math.max(forMen(men), forOutput(tonnes), toDilute(gas, limit)), 3);
++}
++
++/**
++ * Which of the three demands is deciding it.
++ *
++ * The men, the coal or the gas, and the answer is worth having on the
++ * sheet beside the number: a pit that is decided by its men gets no
++ * more air by winding less coal, and a pit decided by its gas gets none
++ * by sending fewer men.
++ */
++export function decidedBy(men: number, tonnes: number, gas: number, limit = GAS_LIMIT): string {
++  const most = wanted(men, tonnes, gas, limit);
++  if (toDilute(gas, limit) >= most) return "gas";
++  if (forOutput(tonnes) >= most) return "coal";
++  return "men";
++}
++
++
++
++/**
++ * How a quantity shares itself between roads side by side.
++ *
++ * Every road carries the same pressure, so the air divides as one over
++ * the root of each resistance and not as one over each. The easy road
++ * takes more than people expect and the hard one less, and a district
++ * on the end of a long tight road can be getting a tenth of what the
++ * plan says it is getting.
++ *
++ * The root is why splitting works at all. Two roads of the same
++ * resistance side by side are a quarter of one of them and not a half,
++ * so a colliery that drives a second road to a district has not halved
++ * what that district costs the fan, it has quartered it — and a
++ * colliery whose second road has fallen in has not lost half of the
++ * air down there, it has lost three quarters of the easy part of it.
++ */
++export function splitBetween(quantity: number, resistances: readonly number[]): number[] {
++  positive(quantity, "quantity");
++  const whole = inParallel(resistances);
++  const pressure = whole * quantity * quantity;
++  return resistances.map((each) => round(Math.sqrt(pressure / each), 3));
++}
++
++/**
++ * A regulator is a door with a hole in it and it is the cheapest thing
++ * in a ventilation plan, which is why plans are full of them. It is
++ * also the most wasteful: every regulator on a road is pressure the fan
++ * made and the colliery threw away, and a plan with a regulator on
++ * every road but one is a plan whose fan is a size larger than the pit
++ * needed. The alternative is a road widened or a second one driven,
++ * which costs more once and nothing thereafter.
++ */
++
++/**
++ * The regulator a branch wants, in resistance.
++ *
++ * A door part open, put in the road that is taking too much. What it
++ * has to add is whatever turns the branch's own resistance into the one
++ * that would pass only the wanted quantity at the pressure the branch
++ * is under. A negative answer is a road that is already short and wants
++ * widening rather than a door.
++ */
++export function regulatorFor(pressure: number, wanted0: number, branch: number): number {
++  positive(pressure, "pressure");
++  positive(wanted0, "wanted");
++  positive(branch, "branch");
++  return round(pressure / (wanted0 * wanted0) - branch, 6);
++}
++
++/** Whether a branch needs a regulator at all, or is the one the others are regulated against. */
++export function needsRegulating(pressure: number, wanted0: number, branch: number): boolean {
++  return regulatorFor(pressure, wanted0, branch) > 0;
++}
++
++/**
++ * The deepest shaft of that section a fan will still ventilate, in
++ * metres.
++ *
++ * The resistance of a shaft grows with its depth and nothing else does,
++ * so there is a depth at which the crossing falls exactly on the
++ * quantity wanted and a metre more is a pit short of air. Taken to the
++ * metre below, because the metre above is the one that does not work,
++ * and never past the deepest shaft this library will take at all: on a
++ * wide shaft behind slack workings the arithmetic runs away to depths
++ * nobody has ever sunk to, and an answer of eleven thousand metres is
++ * a statement about shafts being cheap airways rather than about any
++ * shaft anybody could put down.
++ */
++export function deepestVentilated(
++  one: Fan,
++  section: number,
++  perimeter: number,
++  wanted0: number,
++  workings = 0,
++  friction = FRICTION,
++): number {
++  positive(section, "section");
++  positive(perimeter, "perimeter");
++  nonNegative(workings, "workings");
++  positive(friction, "friction");
++  const stiffest = stiffestFor(one, wanted0);
++  const left = stiffest - workings;
++  insist(left > 0, "that fan will not ventilate those workings at any depth at all", "workings");
++  const aMetre = (friction * perimeter) / (section * section * section);
++  return roundDown(Math.min(left / aMetre, DEEPEST_SHAFT), 0);
++}
++
++
++/** The circuit described in a line. */
++export function describeCircuit(men: number, tonnes: number, gas: number): string {
++  return `${wanted(men, tonnes, gas)} m³/s, and it is the ${decidedBy(men, tonnes, gas)} that wants it`;
++}
+diff --git a/src/air/fan.ts b/src/air/fan.ts
+new file mode 100644
+index 0000000..58ee16e
+--- /dev/null
++++ b/src/air/fan.ts
+@@ -0,0 +1,146 @@
++/**
++ * The fan, and where it settles.
++ *
++ * A fan has no duty of its own. It has a characteristic — a curve of
++ * what pressure it will make against what quantity — and the colliery
++ * has a resistance, and the air that goes down the pit is where the two
++ * cross. Nothing else decides it. A fan bought for four hundred cubic
++ * metres a second on a pit that wants two hundred does not deliver four
++ * hundred and does not deliver two hundred: it delivers whatever the
++ * crossing says, and the sheet the maker supplied is not the answer.
++ *
++ * The other half of it is that a colliery has a second fan it did not
++ * buy. Warm air up the upcast and cold air down the downcast is a
++ * column of one against a column of the other, and the difference is a
++ * pressure that works whether the fan is running or not — the one that
++ * keeps a pit ventilated through a breakdown, and the one that reverses
++ * in a hot summer and has drowned men in a downcast.
++ */
++
++import { insist, nonNegative, positive, real, share as checkShare } from "../errors.ts";
++import { round } from "../units/round.ts";
++import { GRAVITY } from "../units/measure.ts";
++import { Airway, airPower } from "./airway.ts";
++
++/** A fan, as the maker's sheet describes it. */
++export interface Fan {
++  /** What it is called. */
++  readonly name: string;
++  /** The pressure it makes against a shut door, in pascals. */
++  readonly shutoff: number;
++  /** The quantity it passes against nothing at all, in cubic metres a second. */
++  readonly delivery: number;
++  /** What share of the work in it reaches the air. */
++  readonly efficiency: number;
++}
++
++/** What a fan turns into air, of what it is given. */
++export const FAN_EFFICIENCY = 0.7;
++
++/** A fan, checked. */
++export function fan(name: string, shutoff = 3500, delivery = 400, efficiency = FAN_EFFICIENCY): Fan {
++  insist(name.trim().length > 0, "a fan has to be called something", "name");
++  positive(shutoff, "shutoff");
++  positive(delivery, "delivery");
++  checkShare(efficiency, "efficiency");
++  positive(efficiency, "efficiency");
++  return { name: name.trim(), shutoff, delivery, efficiency };
++}
++
++/**
++ * What the fan makes at a stated quantity, in pascals.
++ *
++ * The curve between the two ends of it, which is a parabola: all of the
++ * pressure and none of the air against a shut door, all of the air and
++ * none of the pressure at free delivery. Past that it makes nothing,
++ * because a fan asked to pass more air than it can is not a fan, it is
++ * a hole in the wall of the fan house.
++ */
++export function characteristic(one: Fan, quantity: number): number {
++  nonNegative(quantity, "quantity");
++  const share0 = quantity / one.delivery;
++  return round(Math.max(0, one.shutoff * (1 - share0 * share0)), 2);
++}
++
++/**
++ * The natural ventilating pressure, in pascals.
++ *
++ * The upcast is warm and the downcast is cold, so one column of air
++ * weighs less than the other and the difference drives the colliery. It
++ * is worth a few hundred pascals in a deep pit, which is a tenth of
++ * what the fan does and the whole of what the fan does after the fan
++ * has stopped.
++ */
++export function naturalPressure(depth: number, downcast = 1.2, upcast = 1.1): number {
++  positive(depth, "depth");
++  positive(downcast, "downcast");
++  positive(upcast, "upcast");
++  return round((downcast - upcast) * GRAVITY * depth, 2);
++}
++
++/**
++ * The natural pressure is the reason a colliery is ventilated at all on
++ * the day its fan is stopped for repair, and the reason a pit that has
++ * stood through a hot summer is entered with a lamp and not with a
++ * light. It is worth a few hundred pascals in a deep shaft, which is a
++ * tenth of what the fan does and the whole of what remains when the fan
++ * is doing nothing.
++ */
++
++/** Where a fan and a circuit cross: the quantity and the pressure at it. */
++export interface Working {
++  /** What goes down the pit, in cubic metres a second. */
++  readonly quantity: number;
++  /** What it takes to put it there, in pascals. */
++  readonly pressure: number;
++}
++
++/**
++ * Where the fan and the colliery settle.
++ *
++ * The crossing of the two curves, with the natural pressure counted on
++ * the fan's side because that is the side it works on — or against it,
++ * written as a negative, which is the hot summer when the upcast is
++ * cooler than the day and the pit ventilates itself backwards. A fan
++ * the natural pressure has beaten outright passes nothing at all.
++ */
++export function operatingPoint(one: Fan, resistance: number, natural = 0): Working {
++  positive(resistance, "resistance");
++  real(natural, "natural");
++  if (one.shutoff + natural <= 0) return { quantity: 0, pressure: 0 };
++  const curve = one.shutoff / (one.delivery * one.delivery);
++  const quantity = Math.sqrt((one.shutoff + natural) / (resistance + curve));
++  return { quantity: round(quantity, 3), pressure: round(resistance * quantity * quantity, 2) };
++}
++
++/** What the air costs at the fan's own shaft, in kilowatts. */
++export function fanPower(one: Fan, resistance: number, natural = 0): number {
++  const _shape: Airway | null = null;
++  void _shape;
++  const at = operatingPoint(one, resistance, natural);
++  return round(airPower(at.pressure, at.quantity) / one.efficiency, 3);
++}
++
++
++
++/**
++ * The stiffest colliery that fan will still ventilate.
++ *
++ * The resistance at which the crossing falls exactly on the quantity
++ * wanted. Anything tighter than this and the pit is short of air with
++ * the fan running flat out, which is the week somebody is sent to look
++ * for doors standing open.
++ */
++export function stiffestFor(one: Fan, wanted: number, natural = 0): number {
++  positive(wanted, "wanted");
++  insist(wanted < one.delivery, "no fan passes more than its free delivery", "wanted");
++  return round(characteristic(one, wanted) / (wanted * wanted) + natural / (wanted * wanted), 6);
++}
++
++
++
++
++/** The fan described in a line. */
++export function describeFan(one: Fan): string {
++  return `${one.name}: ${one.shutoff} Pa shut, ${one.delivery} m³/s free, ${round(one.efficiency * 100, 0)}% of it into the air`;
++}
+diff --git a/src/air/index.ts b/src/air/index.ts
+new file mode 100644
+index 0000000..ce92c84
+--- /dev/null
++++ b/src/air/index.ts
+@@ -0,0 +1,5 @@
++/** The ventilation: the airways, the fan, and what the colliery wants. */
++
++export * from "./airway.ts";
++export * from "./fan.ts";
++export * from "./circuit.ts";
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 2909b45..50fcf32 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -14,6 +14,7 @@ export * from "./rope.ts";
+ export * from "./safety.ts";
+ export * from "./shaft.ts";
+ export * from "./size.ts";
++export * from "./ventilation.ts";
+ export * from "./wear.ts";
+ export * from "./winder.ts";
+ export * from "./works.ts";
+diff --git a/src/cli/commands/ventilation.ts b/src/cli/commands/ventilation.ts
+new file mode 100644
+index 0000000..c3da2dd
+--- /dev/null
++++ b/src/cli/commands/ventilation.ts
+@@ -0,0 +1,185 @@
++/**
++ * `sheave ventilation` — what the air costs, once the winding has had
++ * its share of the shaft.
++ *
++ * The shaft command says how many square metres the conveyances leave
++ * the air. This says what the fan pays for them, where the fan and the
++ * colliery settle, and which of the three demands — the men, the coal
++ * or the gas — is the one deciding how much air the pit is asked for.
++ */
++
++import { Args } from "../args.ts";
++import { flag, number, onlyKnown, option, quantity } from "../args.ts";
++import { shaft, area, airSpeed, comfortable, freeArea, BRISK_AIR } from "../../shaft/shaft.ts";
++import {
++  A_MAN_WANTS,
++  A_TONNE_WANTS,
++  FRICTION,
++  GAS_LIMIT,
++  airPower,
++  decidedBy,
++  deepestVentilated,
++  describeAirway,
++  fan,
++  fanPower,
++  inSeries,
++  naturalPressure,
++  operatingPoint,
++  resistance,
++  shaftAirway,
++  splitBetween,
++  stiffestFor,
++  velocity,
++  wanted,
++} from "../../air/index.ts";
++import { heading, line, metres, places, share, speed, verdict, wrapped } from "../../report/format.ts";
++import { blocks, left, right, table } from "../../report/table.ts";
++
++const KNOWN = [
++  "diameter",
++  "depth",
++  "conveyances",
++  "width",
++  "across",
++  "pipes",
++  "friction",
++  "workings",
++  "men",
++  "tonnes",
++  "gas",
++  "shutoff",
++  "delivery",
++  "efficiency",
++  "upcast",
++  "split",
++  "widen",
++];
++
++/** Run it. */
++export function ventilationCommand(args: Args): string[] {
++  onlyKnown(args, KNOWN);
++  const one = shaft(
++    "the downcast",
++    option(args, "diameter") === undefined ? 7.3 : quantity(args, "diameter"),
++    option(args, "depth") === undefined ? 942 : quantity(args, "depth"),
++    number(args, "conveyances", 2),
++  );
++  const width = option(args, "width") === undefined ? 2.2 : quantity(args, "width");
++  const across = option(args, "across") === undefined ? 1.5 : quantity(args, "across");
++  const pipes = option(args, "pipes") === undefined ? 1.2 : quantity(args, "pipes");
++  const friction = number(args, "friction", FRICTION);
++  const workings = number(args, "workings", 0.03);
++  const blowing = fan(
++    "the fan",
++    number(args, "shutoff", 3500),
++    number(args, "delivery", 400),
++    number(args, "efficiency", 0.7),
++  );
++
++  const down = shaftAirway(one, width, across, pipes, friction);
++  const circuit = inSeries([resistance(down), workings]);
++  const natural = option(args, "upcast") === undefined ? 0 : naturalPressure(one.depth, 1.2, number(args, "upcast", 1.1));
++  const at = operatingPoint(blowing, circuit, natural);
++  const men = number(args, "men", 900);
++  const tonnes = number(args, "tonnes", 3000);
++  const gas = number(args, "gas", 1.5);
++  const asked = wanted(men, tonnes, gas);
++
++  const rows: Array<readonly [string, string]> = [
++    ["shaft section", `${places(area(one), 1)} m²`],
++    ["what the winding leaves the air", `${places(freeArea(one, width, across, pipes), 1)} m²`],
++    ["resistance of the shaft", places(resistance(down), 6)],
++    ["and of the workings behind it", places(workings, 6)],
++    ["the fan and the pit settle at", `${places(at.quantity, 1)} m³/s`],
++    ["against a pressure of", `${places(at.pressure, 0)} Pa`],
++    ["which is, in the air", `${places(airPower(at.pressure, at.quantity), 1)} kW`],
++    ["and at the fan shaft", `${places(fanPower(blowing, circuit, natural), 1)} kW`],
++  ];
++
++  if (natural > 0) rows.push(["the warm upcast is worth", `${places(natural, 0)} Pa of it`]);
++
++  const asking: Array<readonly [string, string]> = [
++    ["men underground", places(men, 0)],
++    ["wound in a day", `${places(tonnes, 0)} t`],
++    ["gas made", `${places(gas, 2)} m³/s`],
++    ["so the pit is asking for", `${places(asked, 1)} m³/s`],
++    ["and it is", `the ${decidedBy(men, tonnes, gas)} that is asking`],
++    ["the fan delivers it", verdict(at.quantity >= asked)],
++    ["short by", `${places(Math.max(0, asked - at.quantity), 1)} m³/s`],
++    ["air past the conveyances", speed(airSpeed(one, at.quantity, width, across))],
++    ["men can ride in that", verdict(comfortable(one, at.quantity, width, across))],
++    ["most they could ride in", `${places(freeArea(one, width, across, pipes) * BRISK_AIR, 0)} m³/s`],
++  ];
++
++  if (asked < blowing.delivery && stiffestFor(blowing, asked) > workings) {
++    asking.push([
++      "deepest this fan would carry",
++      metres(deepestVentilated(blowing, freeArea(one, width, across, pipes), Math.PI * one.diameter, asked, workings, friction)),
++    ]);
++  } else {
++    asking.push(["deepest this fan would carry", "no depth at all: this fan is beaten before it starts"]);
++  }
++
++  const out: string[] = [
++    ...heading(describeAirway(down)),
++    ...table([left(""), right("")], rows.map((each) => [each[0], each[1]])),
++    "",
++    ...heading("what the pit is asking for"),
++    ...table([left(""), right("")], asking.map((each) => [each[0], each[1]])),
++  ];
++
++  if (flag(args, "split")) {
++    const districts = [workings, workings * 2, workings * 5];
++    const shares = splitBetween(at.quantity, districts);
++    out.push(
++      "",
++      ...heading("three districts side by side"),
++      ...table(
++        [left("district"), right("resistance"), right("takes"), right("of the whole")],
++        districts.map((each, index) => [
++          ["the short level", "the middle level", "the far face"][index] as string,
++          places(each, 4),
++          `${places(shares[index] as number, 1)} m³/s`,
++          share((shares[index] as number) / at.quantity),
++        ]),
++      ),
++    );
++  }
++
++  if (flag(args, "widen")) {
++    const now = freeArea(one, width, across, pipes);
++    out.push(
++      "",
++      ...heading("a wider conveyance, and what the fan pays for it"),
++      ...table(
++        [left("width"), right("free area"), right("costs the fan")],
++        [2.2, 2.4, 2.6, 2.8].map((each) => {
++          const then = freeArea(one, each, across, pipes);
++          return [
++            metres(each, 2),
++            `${places(then, 1)} m²`,
++            `${places((now * now * now) / (then * then * then), 3)} to one`,
++          ];
++        }),
++      ),
++    );
++  }
++
++  return blocks(
++    out,
++    [
++      line("a man underground wants", `${places(A_MAN_WANTS, 2)} m³/s`),
++      line("a tonne of the day's coal wants", `${places(A_TONNE_WANTS, 2)} m³/s`),
++      line("and the gas is held under", share(GAS_LIMIT)),
++      line("air is brisk to ride in above", speed(BRISK_AIR)),
++      line("the air itself goes down at", speed(velocity(down, at.quantity))),
++    ],
++    wrapped(
++      "Resistance goes as the cube of the section, so the argument between the winding and the " +
++        "ventilation is not a close one: a tenth off the section is worth a third of the fan " +
++        "bill. The other half of it is that air takes the easy road, so what a district " +
++        "gets is not what the plan says but what the square roots say, and nearly all of the work " +
++        "in a ventilation plan is stopping air going where it wants to go.",
++    ),
++  );
++}
+diff --git a/src/cli/main.ts b/src/cli/main.ts
+index 3abefd5..0c3cc5a 100644
+--- a/src/cli/main.ts
++++ b/src/cli/main.ts
+@@ -29,6 +29,7 @@ import { ropeCommand } from "./commands/rope.ts";
+ import { safetyCommand } from "./commands/safety.ts";
+ import { shaftCommand } from "./commands/shaft.ts";
+ import { sizeCommand } from "./commands/size.ts";
++import { ventilationCommand } from "./commands/ventilation.ts";
+ import { wearCommand } from "./commands/wear.ts";
+ import { winderCommand } from "./commands/winder.ts";
+ import { worksCommand } from "./commands/works.ts";
+@@ -54,6 +55,7 @@ const COMMANDS: readonly Command[] = [
+   { name: "conveyance", says: "the cage against the skip, which is an argument about tare", run: conveyanceCommand },
+   { name: "cycle", says: "the wind, and the standing time that beats it", run: cycleCommand },
+   { name: "power", says: "what the engine does, and the r.m.s. that is not the peak", run: powerCommand },
++  { name: "ventilation", says: "what the air costs, once the winding has had its share of the shaft", run: ventilationCommand },
+   { name: "safety", says: "the gear that does not trust the engineman", run: safetyCommand },
+   { name: "winder", says: "a whole installation, read from a file", run: winderCommand },
+   { name: "size", says: "an installation for a duty, in one direction", run: sizeCommand },
+diff --git a/src/index.ts b/src/index.ts
+index e976fb0..df6e993 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -7,16 +7,17 @@
+  *
+  * Each namespace is one part of the installation, in the order the load
+  * travels: the units it is all written in, the rope, the shaft it hangs
+- * in, the drum or wheel that drives it, the conveyance on the end of
+- * it, the cycle it works to, the engine that does the work, the gear
+- * that stops it going wrong, the whole installation, the design it is
+- * signed off against, what it costs, the colliery above it, and the
+- * report it is written up in.
++ * in, the air that has to get past it, the drum or wheel that drives
++ * it, the conveyance on the end of it, the cycle it works to, the
++ * engine that does the work, the gear that stops it going wrong, the
++ * whole installation, the design it is signed off against, what it
++ * costs, the colliery above it, and the report it is written up in.
+  */
+ 
+ export * as units from "./units/index.ts";
+ export * as rope from "./rope/index.ts";
+ export * as shaft from "./shaft/index.ts";
++export * as air from "./air/index.ts";
+ export * as drum from "./drum/index.ts";
+ export * as cage from "./cage/index.ts";
+ export * as cycle from "./cycle/index.ts";

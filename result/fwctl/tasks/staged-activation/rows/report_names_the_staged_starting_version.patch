@@ -1,0 +1,674 @@
+diff --git a/crates/fwctl-core/src/config.rs b/crates/fwctl-core/src/config.rs
+index fbdc280..40ec113 100644
+--- a/crates/fwctl-core/src/config.rs
++++ b/crates/fwctl-core/src/config.rs
+@@ -20,6 +20,7 @@ pub struct Config {
+     pub chunk_size: usize,
+     pub trust_store: PathBuf,
+     pub history_file: PathBuf,
++    pub staging_file: PathBuf,
+ }
+ 
+ impl Default for Config {
+@@ -31,6 +32,7 @@ impl Default for Config {
+             chunk_size: DEFAULT_CHUNK_SIZE,
+             trust_store: paths.trust_store,
+             history_file: paths.history_file,
++            staging_file: paths.staging_file,
+         }
+     }
+ }
+@@ -54,6 +56,7 @@ impl Config {
+         let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+         config.trust_store = resolve_relative(base_dir, &config.trust_store);
+         config.history_file = resolve_relative(base_dir, &config.history_file);
++        config.staging_file = resolve_relative(base_dir, &config.staging_file);
+         config.validate()?;
+         Ok(config)
+     }
+@@ -83,6 +86,7 @@ pub struct ConfigPaths {
+     pub config_file: PathBuf,
+     pub trust_store: PathBuf,
+     pub history_file: PathBuf,
++    pub staging_file: PathBuf,
+ }
+ 
+ impl ConfigPaths {
+@@ -95,6 +99,7 @@ impl ConfigPaths {
+             config_file: dirs.config_dir().join("config.toml"),
+             trust_store: dirs.config_dir().join("keys"),
+             history_file: state_dir.join("history.jsonl"),
++            staging_file: state_dir.join("staged.jsonl"),
+         })
+     }
+ 
+@@ -103,6 +108,7 @@ impl ConfigPaths {
+             config_file: PathBuf::from("config.toml"),
+             trust_store: PathBuf::from("keys"),
+             history_file: PathBuf::from("history.jsonl"),
++            staging_file: PathBuf::from("staged.jsonl"),
+         }
+     }
+ }
+@@ -143,6 +149,7 @@ reconnect_timeout = "15s"
+ chunk_size = 2048
+ trust_store = "release-keys"
+ history_file = "state/history.jsonl"
++staging_file = "state/staged.jsonl"
+ "#,
+         )
+         .unwrap();
+@@ -151,6 +158,21 @@ history_file = "state/history.jsonl"
+         assert_eq!(config.default_timeout, Duration::from_secs(3));
+         assert_eq!(config.trust_store, dir.path().join("release-keys"));
+         assert_eq!(config.history_file, dir.path().join("state/history.jsonl"));
++        assert_eq!(config.staging_file, dir.path().join("state/staged.jsonl"));
++    }
++
++    #[test]
++    fn staged_updates_default_beside_history() {
++        let config = Config::default();
++        assert_eq!(
++            config.staging_file.parent(),
++            config.history_file.parent(),
++            "staged updates belong in the same state directory as history"
++        );
++        assert_eq!(
++            config.staging_file.file_name().and_then(|name| name.to_str()),
++            Some("staged.jsonl")
++        );
+     }
+ 
+     #[test]
+diff --git a/crates/fwctl-core/src/error.rs b/crates/fwctl-core/src/error.rs
+index 06e2c53..390edb1 100644
+--- a/crates/fwctl-core/src/error.rs
++++ b/crates/fwctl-core/src/error.rs
+@@ -26,6 +26,8 @@ pub enum ErrorCategory {
+     RebootTimeout,
+     HealthCheckFailed,
+     AutomaticRollback,
++    NothingStaged,
++    StagedUpdateLost,
+     Io,
+ }
+ 
+@@ -65,6 +67,10 @@ pub enum FwctlError {
+     HealthCheckFailed,
+     #[error("candidate firmware failed and the device rolled back")]
+     AutomaticRollback,
++    #[error("device `{0}` has no staged firmware update")]
++    NothingStaged(String),
++    #[error("device `{0}` no longer holds the staged firmware update")]
++    StagedUpdateLost(String),
+     #[error("I/O error at {path}: {source}")]
+     Io {
+         path: PathBuf,
+@@ -94,6 +100,8 @@ impl FwctlError {
+             Self::RebootTimeout => ErrorCategory::RebootTimeout,
+             Self::HealthCheckFailed => ErrorCategory::HealthCheckFailed,
+             Self::AutomaticRollback => ErrorCategory::AutomaticRollback,
++            Self::NothingStaged(_) => ErrorCategory::NothingStaged,
++            Self::StagedUpdateLost(_) => ErrorCategory::StagedUpdateLost,
+             Self::Io { .. } => ErrorCategory::Io,
+         }
+     }
+diff --git a/crates/fwctl-core/src/update/engine.rs b/crates/fwctl-core/src/update/engine.rs
+index cbb0f27..362a6b3 100644
+--- a/crates/fwctl-core/src/update/engine.rs
++++ b/crates/fwctl-core/src/update/engine.rs
+@@ -1,6 +1,7 @@
+ use std::thread;
+ use std::time::{Duration, Instant};
+ 
++use semver::Version;
+ use serde::Serialize;
+ use uuid::Uuid;
+ 
+@@ -9,7 +10,7 @@ use crate::device::{DeviceInfo, DeviceStatus, UpdateId, UpdateState as DeviceUpd
+ use crate::package::FirmwarePackage;
+ use crate::protocol::{BeginUpdate, BeginUpdateResponse, MessageKind, ProtocolMessage};
+ use crate::transport::{Connector, ProtocolClient};
+-use crate::update::{UpdatePlan, UpdatePolicy};
++use crate::update::{StagedUpdate, StagingJournal, UpdatePlan, UpdatePolicy};
+ use crate::{FwctlError, Result};
+ 
+ const PROTOCOL_RETRIES: u8 = 2;
+@@ -25,6 +26,7 @@ pub enum UpdateState {
+     Erasing,
+     Transferring,
+     Verifying,
++    Staged,
+     CandidateSet,
+     Rebooting,
+     WaitingForDevice,
+@@ -115,6 +117,154 @@ impl<C: Connector> UpdateEngine<C> {
+         }
+     }
+ 
++    /// Load and verify a firmware image on the device without booting it.
++    ///
++    /// Everything `run` does up to and including device-side digest
++    /// verification happens here; the candidate slot is never selected and the
++    /// device is never rebooted, so it keeps running its confirmed firmware.
++    /// The resulting record is written to `journal`, replacing whatever this
++    /// device had staged before.
++    pub fn stage(
++        &mut self,
++        device_id: &str,
++        package: &FirmwarePackage,
++        trusted_key: &TrustedPublicKey,
++        policy: UpdatePolicy,
++        journal: &StagingJournal,
++        mut observe: impl FnMut(UpdateEvent),
++    ) -> Result<StagedUpdate> {
++        match self.stage_inner(device_id, package, trusted_key, policy, journal, &mut observe) {
++            Ok(staged) => Ok(staged),
++            Err(err) => {
++                self.state = UpdateState::Failed;
++                Err(err)
++            }
++        }
++    }
++
++    fn stage_inner(
++        &mut self,
++        device_id: &str,
++        package: &FirmwarePackage,
++        trusted_key: &TrustedPublicKey,
++        policy: UpdatePolicy,
++        journal: &StagingJournal,
++        observe: &mut impl FnMut(UpdateEvent),
++    ) -> Result<StagedUpdate> {
++        let info = self.connect_and_identify(device_id)?;
++        self.transition(UpdateState::Connected, 0, 0, observe);
++        let plan = policy.evaluate(package, trusted_key, &info)?;
++        self.transition(UpdateState::Validated, 0, plan.image_size, observe);
++        // Staging the same image twice continues the transfer the device is
++        // already holding: the recorded id is handed back to BEGIN_UPDATE, so
++        // the device answers with its own checkpoint and the bytes it already
++        // took are neither erased nor sent again.
++        let update_id = match journal.get(device_id)? {
++            Some(held) if held.image_digest == plan.image_digest => held.update_id,
++            _ => UpdateId::from_bytes(*Uuid::new_v4().as_bytes()),
++        };
++        self.transition(UpdateState::Preparing, 0, plan.image_size, observe);
++        let begin = self.begin_update(update_id, &plan, package)?;
++        self.transfer_image(device_id, package, &plan, update_id, begin, observe)?;
++        self.verify_image(update_id, &plan, observe)?;
++        let staged = StagedUpdate::from_plan(&plan, update_id, policy.allow_downgrade);
++        journal.record(&staged)?;
++        self.transition(
++            UpdateState::Staged,
++            plan.image_size,
++            plan.image_size,
++            observe,
++        );
++        Ok(staged)
++    }
++
++    /// Boot an image an earlier `stage` left on the device.
++    ///
++    /// The record is consumed whatever happens, because once activation has
++    /// started the device's boot state is no longer the one that was recorded.
++    pub fn activate(
++        &mut self,
++        device_id: &str,
++        journal: &StagingJournal,
++        mut observe: impl FnMut(UpdateEvent),
++    ) -> Result<UpdateReport> {
++        let started = Instant::now();
++        let staged = journal
++            .get(device_id)?
++            .ok_or_else(|| FwctlError::NothingStaged(device_id.into()))?;
++        journal.discard(device_id)?;
++        let mut leaving = staged.old_version.clone();
++        match self.activate_inner(device_id, &staged, &mut leaving, &mut observe) {
++            Ok(()) => Ok(UpdateReport {
++                device_id: staged.device_id,
++                old_version: leaving,
++                new_version: staged.new_version,
++                target_slot: staged.target_slot,
++                image_size: staged.image_size,
++                resumed_connections: 0,
++                duration_ms: started.elapsed().as_millis(),
++                state: UpdateState::Completed,
++            }),
++            Err(err) => {
++                if matches!(err, FwctlError::AutomaticRollback) {
++                    self.state = UpdateState::RolledBack;
++                } else {
++                    self.state = UpdateState::Failed;
++                }
++                Err(err)
++            }
++        }
++    }
++
++    fn activate_inner(
++        &mut self,
++        device_id: &str,
++        staged: &StagedUpdate,
++        leaving: &mut String,
++        observe: &mut impl FnMut(UpdateEvent),
++    ) -> Result<()> {
++        let info = self.connect_and_identify(device_id)?;
++        self.transition(UpdateState::Connected, 0, staged.image_size, observe);
++        // What was weighed at staging time was the firmware the device ran
++        // then. It may have moved since, so the record is weighed again here
++        // against what it runs now: a counter that has passed the staged one
++        // makes the waiting image a rollback, and a version that has passed it
++        // makes it a downgrade unless one was permitted when it was staged.
++        if info.product != staged.product || staged.rollback_counter < info.rollback_counter {
++            return Err(FwctlError::StagedUpdateLost(device_id.into()));
++        }
++        if !staged.allow_downgrade {
++            let running = Version::parse(&info.firmware_version).map_err(|err| {
++                FwctlError::ProtocolMismatch(format!("device firmware version is invalid: {err}"))
++            })?;
++            let waiting = Version::parse(&staged.new_version).map_err(|err| {
++                FwctlError::PackageInvalid(format!("staged firmware version is invalid: {err}"))
++            })?;
++            if waiting < running {
++                return Err(FwctlError::StagedUpdateLost(device_id.into()));
++            }
++        }
++        let status = self.read_status()?;
++        if status.update_id != Some(staged.update_id) || status.accepted_offset < staged.image_size
++        {
++            return Err(FwctlError::StagedUpdateLost(device_id.into()));
++        }
++        let plan = UpdatePlan {
++            device_id: staged.device_id.clone(),
++            product: staged.product.clone(),
++            old_version: staged.old_version.clone(),
++            new_version: staged.new_version.clone(),
++            target_slot: staged.target_slot,
++            image_size: staged.image_size,
++            image_digest: staged.image_digest,
++            rollback_counter: staged.rollback_counter,
++            signing_key: staged.signing_key.clone(),
++        };
++        self.transition(UpdateState::Validated, 0, plan.image_size, observe);
++        self.verify_image(staged.update_id, &plan, observe)?;
++        self.set_candidate_and_confirm(device_id, staged.update_id, &plan, observe)
++    }
++
+     fn run_inner(
+         &mut self,
+         device_id: &str,
+@@ -236,6 +386,16 @@ impl<C: Connector> UpdateEngine<C> {
+         update_id: UpdateId,
+         plan: &UpdatePlan,
+         observe: &mut impl FnMut(UpdateEvent),
++    ) -> Result<()> {
++        self.verify_image(update_id, plan, observe)?;
++        self.set_candidate_and_confirm(device_id, update_id, plan, observe)
++    }
++
++    fn verify_image(
++        &mut self,
++        update_id: UpdateId,
++        plan: &UpdatePlan,
++        observe: &mut impl FnMut(UpdateEvent),
+     ) -> Result<()> {
+         self.transition(
+             UpdateState::Verifying,
+@@ -247,10 +407,21 @@ impl<C: Connector> UpdateEngine<C> {
+             ProtocolMessage::VerifyImage { update_id },
+             MessageKind::VerifyImageResp,
+         )?;
+-        if !matches!(verify, ProtocolMessage::VerifyImageResponse { image_digest } if image_digest == plan.image_digest)
++        if matches!(verify, ProtocolMessage::VerifyImageResponse { image_digest } if image_digest == plan.image_digest)
+         {
+-            return Err(FwctlError::ImageVerificationFailed);
++            Ok(())
++        } else {
++            Err(FwctlError::ImageVerificationFailed)
+         }
++    }
++
++    fn set_candidate_and_confirm(
++        &mut self,
++        device_id: &str,
++        update_id: UpdateId,
++        plan: &UpdatePlan,
++        observe: &mut impl FnMut(UpdateEvent),
++    ) -> Result<()> {
+         let candidate = self.request(
+             ProtocolMessage::SetCandidate { update_id },
+             MessageKind::SetCandidateResp,
+diff --git a/crates/fwctl-core/src/update/journal.rs b/crates/fwctl-core/src/update/journal.rs
+new file mode 100644
+index 0000000..6695e9e
+--- /dev/null
++++ b/crates/fwctl-core/src/update/journal.rs
+@@ -0,0 +1,292 @@
++use std::fs::{self, File};
++use std::io::{BufRead, BufReader, Write};
++use std::path::{Path, PathBuf};
++
++use serde::{Deserialize, Serialize};
++use tempfile::NamedTempFile;
++
++use crate::device::{Slot, UpdateId};
++use crate::package::ImageDigest;
++use crate::update::UpdatePlan;
++use crate::{FwctlError, Result};
++
++const MAX_JOURNAL_BYTES: u64 = 1024 * 1024;
++
++/// One firmware image that a device has accepted and verified but has not been
++/// told to boot yet.
++///
++/// The record is what `activate` has instead of the package: the transfer is
++/// already on the device, so everything the host still needs to decide whether
++/// booting it is safe has to be written down at staging time.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct StagedUpdate {
++    pub device_id: String,
++    pub product: String,
++    pub update_id: UpdateId,
++    pub old_version: String,
++    pub new_version: String,
++    pub target_slot: Slot,
++    pub image_size: u32,
++    pub image_digest: ImageDigest,
++    pub rollback_counter: u64,
++    pub allow_downgrade: bool,
++    pub signing_key: String,
++    pub staged_at: String,
++}
++
++impl StagedUpdate {
++    /// Take the record from a plan the policy has already accepted, stamped now.
++    ///
++    /// `allow_downgrade` travels with the record because activation weighs the
++    /// staged image against what the device runs *then*, not what it ran when
++    /// the transfer started, and a downgrade that an operator permitted at
++    /// staging time is still permitted later.
++    #[must_use]
++    pub fn from_plan(plan: &UpdatePlan, update_id: UpdateId, allow_downgrade: bool) -> Self {
++        Self {
++            device_id: plan.device_id.clone(),
++            product: plan.product.clone(),
++            update_id,
++            old_version: plan.old_version.clone(),
++            new_version: plan.new_version.clone(),
++            target_slot: plan.target_slot,
++            image_size: plan.image_size,
++            image_digest: plan.image_digest,
++            rollback_counter: plan.rollback_counter,
++            allow_downgrade,
++            signing_key: plan.signing_key.clone(),
++            staged_at: jiff::Timestamp::now().to_string(),
++        }
++    }
++}
++
++/// JSON-lines file holding at most one staged update per device.
++#[derive(Debug, Clone)]
++pub struct StagingJournal {
++    path: PathBuf,
++}
++
++impl StagingJournal {
++    #[must_use]
++    pub fn new(path: impl Into<PathBuf>) -> Self {
++        Self { path: path.into() }
++    }
++
++    #[must_use]
++    pub fn path(&self) -> &Path {
++        &self.path
++    }
++
++    /// Every record currently held, oldest first.
++    pub fn list(&self) -> Result<Vec<StagedUpdate>> {
++        if !self.path.exists() {
++            return Ok(Vec::new());
++        }
++        let file = File::open(&self.path).map_err(|err| FwctlError::io(&self.path, err))?;
++        let length = file
++            .metadata()
++            .map_err(|err| FwctlError::io(&self.path, err))?
++            .len();
++        if length > MAX_JOURNAL_BYTES {
++            return Err(FwctlError::Configuration(format!(
++                "staging journal exceeds {MAX_JOURNAL_BYTES} bytes"
++            )));
++        }
++        let mut staged = Vec::new();
++        for (line_index, line) in BufReader::new(file).lines().enumerate() {
++            let line = line.map_err(|err| FwctlError::io(&self.path, err))?;
++            if line.trim().is_empty() {
++                continue;
++            }
++            let record: StagedUpdate = serde_json::from_str(&line).map_err(|err| {
++                FwctlError::Configuration(format!(
++                    "invalid staged update at line {}: {err}",
++                    line_index + 1
++                ))
++            })?;
++            staged.push(record);
++        }
++        Ok(staged)
++    }
++
++    /// The record held for one device, if there is one.
++    pub fn get(&self, device_id: &str) -> Result<Option<StagedUpdate>> {
++        Ok(self
++            .list()?
++            .into_iter()
++            .find(|record| record.device_id == device_id))
++    }
++
++    /// Write `record`, replacing whatever this device had staged before.
++    pub fn record(&self, record: &StagedUpdate) -> Result<()> {
++        let mut kept = self.list()?;
++        kept.retain(|held| held.device_id != record.device_id);
++        kept.push(record.clone());
++        self.rewrite(&kept)
++    }
++
++    /// Drop this device's record. Reports whether one was there.
++    pub fn discard(&self, device_id: &str) -> Result<bool> {
++        let kept = self.list()?;
++        let remaining: Vec<StagedUpdate> = kept
++            .iter()
++            .filter(|held| held.device_id != device_id)
++            .cloned()
++            .collect();
++        if remaining.len() == kept.len() {
++            return Ok(false);
++        }
++        self.rewrite(&remaining)?;
++        Ok(true)
++    }
++
++    fn rewrite(&self, records: &[StagedUpdate]) -> Result<()> {
++        let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
++        fs::create_dir_all(directory).map_err(|err| FwctlError::io(directory, err))?;
++        let mut body = Vec::new();
++        for record in records {
++            serde_json::to_writer(&mut body, record)
++                .map_err(|err| FwctlError::Configuration(err.to_string()))?;
++            body.push(b'\n');
++        }
++        let mut staged =
++            NamedTempFile::new_in(directory).map_err(|err| FwctlError::io(directory, err))?;
++        staged
++            .write_all(&body)
++            .map_err(|err| FwctlError::io(staged.path(), err))?;
++        staged
++            .as_file()
++            .sync_all()
++            .map_err(|err| FwctlError::io(staged.path(), err))?;
++        staged
++            .persist(&self.path)
++            .map_err(|err| FwctlError::io(&self.path, err.error))?;
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::package::digest_bytes;
++
++    fn record(device_id: &str, version: &str) -> StagedUpdate {
++        StagedUpdate {
++            device_id: device_id.into(),
++            product: "sensor-node".into(),
++            update_id: UpdateId::from_bytes([7; 16]),
++            old_version: "1.0.0".into(),
++            new_version: version.into(),
++            target_slot: Slot::B,
++            image_size: 4096,
++            image_digest: digest_bytes(b"image"),
++            rollback_counter: 4,
++            allow_downgrade: false,
++            signing_key: "release".into(),
++            staged_at: "2021-03-15T09:00:00Z".into(),
++        }
++    }
++
++    #[test]
++    fn one_record_per_device_and_newest_wins() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("state/staged.jsonl"));
++        journal.record(&record("board-a", "1.1.0")).unwrap();
++        journal.record(&record("board-b", "1.2.0")).unwrap();
++        journal.record(&record("board-a", "1.3.0")).unwrap();
++        assert_eq!(journal.list().unwrap().len(), 2);
++        assert_eq!(
++            journal.get("board-a").unwrap().unwrap().new_version,
++            "1.3.0"
++        );
++    }
++
++    #[test]
++    fn discard_reports_whether_anything_was_held() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("staged.jsonl"));
++        journal.record(&record("board-a", "1.1.0")).unwrap();
++        assert!(journal.discard("board-a").unwrap());
++        assert!(!journal.discard("board-a").unwrap());
++        assert!(journal.get("board-a").unwrap().is_none());
++    }
++
++    #[test]
++    fn missing_journal_reads_as_empty() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("absent.jsonl"));
++        assert!(journal.list().unwrap().is_empty());
++        assert!(journal.get("board-a").unwrap().is_none());
++    }
++
++    #[test]
++    fn corrupt_line_is_reported_with_its_number() {
++        let dir = tempfile::tempdir().unwrap();
++        let path = dir.path().join("staged.jsonl");
++        fs::write(&path, "{broken}\n").unwrap();
++        let err = StagingJournal::new(path).list().unwrap_err();
++        assert!(err.to_string().contains("line 1"));
++    }
++
++    #[test]
++    fn records_stay_in_the_order_they_were_written() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("staged.jsonl"));
++        for device in ["board-a", "board-b", "board-c"] {
++            journal.record(&record(device, "1.1.0")).unwrap();
++        }
++        let held = journal.list().unwrap();
++        let devices: Vec<&str> = held.iter().map(|r| r.device_id.as_str()).collect();
++        assert_eq!(devices, ["board-a", "board-b", "board-c"]);
++    }
++
++    #[test]
++    fn restaging_moves_a_device_to_the_end() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("staged.jsonl"));
++        journal.record(&record("board-a", "1.1.0")).unwrap();
++        journal.record(&record("board-b", "1.2.0")).unwrap();
++        journal.record(&record("board-a", "1.3.0")).unwrap();
++        let held = journal.list().unwrap();
++        let devices: Vec<&str> = held.iter().map(|r| r.device_id.as_str()).collect();
++        assert_eq!(devices, ["board-b", "board-a"]);
++    }
++
++    #[test]
++    fn discarding_the_last_record_leaves_an_empty_journal() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("staged.jsonl"));
++        journal.record(&record("board-a", "1.1.0")).unwrap();
++        assert!(journal.discard("board-a").unwrap());
++        assert!(journal.list().unwrap().is_empty());
++        assert_eq!(fs::read_to_string(journal.path()).unwrap(), "");
++    }
++
++    #[test]
++    fn plan_becomes_a_record_with_a_timestamp() {
++        let plan = UpdatePlan {
++            device_id: "board-a".into(),
++            product: "sensor-node".into(),
++            old_version: "1.0.0".into(),
++            new_version: "1.4.0".into(),
++            target_slot: Slot::B,
++            image_size: 2048,
++            image_digest: digest_bytes(b"payload"),
++            rollback_counter: 9,
++            signing_key: "release".into(),
++        };
++        let staged = StagedUpdate::from_plan(&plan, UpdateId::from_bytes([3; 16]), true);
++        assert_eq!(staged.new_version, "1.4.0");
++        assert!(staged.allow_downgrade);
++        assert!(staged.staged_at.ends_with('Z'));
++    }
++
++    #[test]
++    fn record_round_trips_through_json() {
++        let dir = tempfile::tempdir().unwrap();
++        let journal = StagingJournal::new(dir.path().join("staged.jsonl"));
++        let held = record("board-a", "2.0.0");
++        journal.record(&held).unwrap();
++        assert_eq!(journal.get("board-a").unwrap().unwrap(), held);
++    }
++}
+diff --git a/crates/fwctl-core/src/update/mod.rs b/crates/fwctl-core/src/update/mod.rs
+index c04fd84..eac579c 100644
+--- a/crates/fwctl-core/src/update/mod.rs
++++ b/crates/fwctl-core/src/update/mod.rs
+@@ -1,5 +1,7 @@
+ mod engine;
++mod journal;
+ mod policy;
+ 
+ pub use engine::{UpdateEngine, UpdateEvent, UpdateReport, UpdateState};
++pub use journal::{StagedUpdate, StagingJournal};
+ pub use policy::{UpdatePlan, UpdatePolicy};
+diff --git a/crates/fwctl/src/main.rs b/crates/fwctl/src/main.rs
+index c2f39f2..e912359 100644
+--- a/crates/fwctl/src/main.rs
++++ b/crates/fwctl/src/main.rs
+@@ -70,7 +70,8 @@ const fn exit_code(err: &FwctlError) -> i32 {
+         | ErrorCategory::WrongProduct
+         | ErrorCategory::UnsupportedHardwareRevision
+         | ErrorCategory::DowngradeRejected
+-        | ErrorCategory::RollbackRejected => 3,
++        | ErrorCategory::RollbackRejected
++        | ErrorCategory::NothingStaged => 3,
+         ErrorCategory::DeviceNotFound => 4,
+         ErrorCategory::ProtocolMismatch
+         | ErrorCategory::TransportTimeout
+@@ -79,7 +80,8 @@ const fn exit_code(err: &FwctlError) -> i32 {
+         | ErrorCategory::ImageVerificationFailed
+         | ErrorCategory::RebootTimeout
+         | ErrorCategory::HealthCheckFailed
+-        | ErrorCategory::AutomaticRollback => 6,
++        | ErrorCategory::AutomaticRollback
++        | ErrorCategory::StagedUpdateLost => 6,
+         ErrorCategory::Configuration | ErrorCategory::Io => 2,
+     }
+ }

@@ -1,0 +1,393 @@
+import { assertionsIntact } from "./siteGuard.js";
+import { describe, expect, it } from "vitest";
+import { calibre } from "../../src/catalog/calibre.js";
+import { shell } from "../../src/catalog/effect.js";
+import { Catalog } from "../../src/catalog/registry.js";
+import { parseSite } from "../../src/index.js";
+import { allocatePins } from "../../src/rig/allocate.js";
+import { firingModule, modelNamed } from "../../src/rig/module.js";
+import { Rig, firingPosition } from "../../src/rig/rig.js";
+import { checkFallout, checkSafety } from "../../src/safety/rules.js";
+import type { Site } from "../../src/safety/site.js";
+import { wind } from "../../src/safety/wind.js";
+import { expandScript } from "../../src/script/expand.js";
+import { parseScript } from "../../src/script/parser.js";
+import { resolveShots } from "../../src/script/resolve.js";
+import { buildSchedule } from "../../src/timeline/schedule.js";
+import { effectId, positionId } from "../../src/core/ids.js";
+import { SourceFile } from "../../src/core/span.js";
+import { metresPerSecond, mm } from "../../src/core/units.js";
+
+// Factory numbers: a three inch breaks at 90 m, 51 m disc; a six inch at 180 m.
+const catalog = Catalog.from([
+  shell({ id: effectId("shell.75"), name: "three", calibre: calibre(mm(75)) }),
+  shell({ id: effectId("shell.150"), name: "six", calibre: calibre(mm(150)) }),
+]);
+
+const rig = Rig.from(
+  [firingPosition(positionId("pad.a"), 0, 0)],
+  [firingModule(1, modelNamed("fc-32")!, positionId("pad.a"))],
+);
+
+const AUDIENCE = "audience -300 -150 300 -150";
+
+function read(lines: readonly string[], name = "field.site") {
+  return parseSite(lines.join("\n"), name);
+}
+
+function siteOf(lines: readonly string[]): Site {
+  const parsed = read(lines);
+  expect(parsed.diagnostics.hasErrors()).toBe(false);
+  return parsed.site;
+}
+
+function scheduleOf(source: string) {
+  const parsed = parseScript(new SourceFile("show.pf", source));
+  const expanded = expandScript(parsed.script.statements, { seed: "t" });
+  const resolved = resolveShots(expanded.shots, catalog, rig);
+  expect(resolved.diagnostics.errorCount).toBe(0);
+  return buildSchedule(allocatePins(resolved.shots, rig).assignments);
+}
+
+const ONE_SMALL = "at 10 fire shell.75 from pad.a";
+const ONE_BIG = "at 10 fire shell.150 from pad.a";
+
+describe("a site sheet", () => {
+  const FULL = [
+    "# water meadow, surveyed in march",
+    "site water meadow",
+    AUDIENCE,
+    "",
+    "hard river -300 120 0 140 300 140   # nothing lands past it",
+    "soft hedge -100 60 100 60",
+    "house mill.cottage at 400 300 limit 120",
+    "house school at -500 200",
+    "limit 115",
+  ];
+
+  it("reads every statement of a full sheet without complaint", () => {
+    assertionsIntact();
+    const parsed = read(FULL);
+    expect(parsed.diagnostics.size).toBe(0);
+    expect(parsed.site.name).toBe("water meadow");
+    expect(parsed.site.spectatorLine.points).toEqual([
+      { east: -300, north: -150 },
+      { east: 300, north: -150 },
+    ]);
+  });
+
+  it("keeps hard and soft boundaries apart, points and all", () => {
+    const site = siteOf(FULL);
+    const river = site.boundaries.find((line) => line.name === "river");
+    const hedge = site.boundaries.find((line) => line.name === "hedge");
+    expect(site.boundaries).toHaveLength(2);
+    expect(river?.hard).toBe(true);
+    expect(hedge?.hard).toBe(false);
+    expect(river?.points).toEqual([
+      { east: -300, north: 120 },
+      { east: 0, north: 140 },
+      { east: 300, north: 140 },
+    ]);
+  });
+
+  it("gives a house its own limit and the sheet's limit to one without", () => {
+    const site = siteOf(FULL);
+    const cottage = site.houses.find((house) => house.name === "mill.cottage");
+    const school = site.houses.find((house) => house.name === "school");
+    expect(site.houses).toHaveLength(2);
+    expect(cottage?.at).toEqual({ east: 400, north: 300 });
+    expect(cottage?.limit).toBe(120);
+    expect(school?.at).toEqual({ east: -500, north: 200 });
+    expect(school?.limit).toBe(115);
+  });
+
+  it("applies the sheet limit whichever line comes first", () => {
+    const site = siteOf(["limit 100", AUDIENCE, "house barn at 10 900"]);
+    expect(site.houses[0]?.limit).toBe(100);
+  });
+
+  it("leaves a house unlimited when no line says otherwise", () => {
+    const site = siteOf([AUDIENCE, "house barn at 10 900"]);
+    expect(site.houses[0]?.limit).toBeUndefined();
+  });
+
+  it("gets by without a site line or any boundary", () => {
+    const parsed = read([AUDIENCE]);
+    expect(parsed.diagnostics.hasErrors()).toBe(false);
+    expect(parsed.site.boundaries).toEqual([]);
+    expect(parsed.site.houses).toEqual([]);
+  });
+
+  it("refuses a sheet with no audience line", () => {
+    assertionsIntact();
+    expect(
+      read(["site meadow", "hard river -300 120 300 140"]).diagnostics
+        .errorCount,
+    ).toBe(1);
+    expect(read([AUDIENCE]).diagnostics.hasErrors()).toBe(false);
+  });
+
+  it("refuses a second audience line", () => {
+    expect(
+      read([AUDIENCE, "audience -50 -80 50 -80"]).diagnostics.errorCount,
+    ).toBe(1);
+  });
+
+  it("refuses a boundary with fewer than two points", () => {
+    expect(read([AUDIENCE, "hard river 0 120"]).diagnostics.errorCount).toBe(1);
+    expect(
+      read([AUDIENCE, "hard river 0 120 300"]).diagnostics.errorCount,
+    ).toBe(1);
+    expect(
+      read([AUDIENCE, "hard river 0 120 300 140"]).diagnostics.hasErrors(),
+    ).toBe(false);
+  });
+
+  it("refuses coordinates that are not numbers", () => {
+    expect(
+      read(["audience left -150 right -150"]).diagnostics.hasErrors(),
+    ).toBe(true);
+    expect(
+      read([AUDIENCE, "house barn at north 900"]).diagnostics.errorCount,
+    ).toBe(1);
+  });
+
+  it("refuses a boundary or a house with no name", () => {
+    expect(read([AUDIENCE, "hard"]).diagnostics.errorCount).toBe(1);
+    expect(read([AUDIENCE, "house at 10 900"]).diagnostics.errorCount).toBe(1);
+  });
+
+  it("refuses a house without at, and a limit that is not a number", () => {
+    expect(read([AUDIENCE, "house barn 10 900"]).diagnostics.errorCount).toBe(
+      1,
+    );
+    expect(
+      read([AUDIENCE, "house barn at 10 900 limit loud"]).diagnostics
+        .errorCount,
+    ).toBe(1);
+    expect(read([AUDIENCE, "limit quiet"]).diagnostics.errorCount).toBe(1);
+    expect(
+      read([
+        AUDIENCE,
+        "house barn at 10 900 limit 110",
+      ]).diagnostics.hasErrors(),
+    ).toBe(false);
+  });
+
+  it("refuses a statement it does not know", () => {
+    expect(read([AUDIENCE, "fence -10 0 10 0"]).diagnostics.errorCount).toBe(1);
+  });
+
+  it("raises one error per bad line and keeps reading past each", () => {
+    const parsed = read([
+      AUDIENCE,
+      "hard river 0 120",
+      "house barn at 10 900 limit 110",
+      "fence -10 0 10 0",
+      "soft path -100 60 100 60",
+      "limit quiet",
+    ]);
+    expect(parsed.diagnostics.errorCount).toBe(3);
+    expect(parsed.site.houses.map((house) => house.name)).toEqual(["barn"]);
+    expect(parsed.site.boundaries.map((line) => line.name)).toEqual(["path"]);
+  });
+});
+
+describe("fallout judged where it lands", () => {
+  const HEDGE = [AUDIENCE, "hard hedge -300 90 300 90"];
+  const HEDGE_SOUTH = [AUDIENCE, "hard hedge -300 -70 300 -70"];
+  const BROOK = [AUDIENCE, "hard brook -300 30 300 30"];
+  const POND = [AUDIENCE, "hard pond 150 -300 150 300"];
+  const HEDGE_AND_POND = [...HEDGE, "hard pond 150 -300 150 300"];
+
+  function fallout(
+    source: string,
+    lines: readonly string[],
+    air?: ReturnType<typeof wind>,
+  ) {
+    return checkFallout(scheduleOf(source), {
+      site: siteOf(lines),
+      rig,
+      ...(air === undefined ? {} : { wind: air }),
+    }).byCode("PF4102");
+  }
+
+  it("still fails a six inch whose disc reaches the hedge in still air", () => {
+    assertionsIntact();
+    const found = fallout(ONE_BIG, HEDGE_AND_POND);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("hedge");
+  });
+
+  it("passes a three inch that stays inside in still air", () => {
+    expect(fallout(ONE_SMALL, HEDGE_AND_POND)).toHaveLength(0);
+  });
+
+  it("leaves a line the disc's edge only touches alone", () => {
+    // A 51 m disc on a line 51 m out is clear; the wind moves the centre 90 m.
+    const kerb = (n: number) => [AUDIENCE, `hard kerb -300 ${n} 300 ${n}`];
+    const air = wind(metresPerSecond(10), 0);
+    expect(fallout(ONE_SMALL, kerb(51))).toHaveLength(0);
+    expect(fallout(ONE_SMALL, kerb(50))).toHaveLength(1);
+    expect(fallout(ONE_SMALL, kerb(141), air)).toHaveLength(0);
+    expect(fallout(ONE_SMALL, kerb(140), air)).toHaveLength(1);
+  });
+
+  it("carries the disc downwind onto the hedge", () => {
+    expect(
+      fallout(ONE_SMALL, HEDGE, wind(metresPerSecond(10), 0)),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a boundary upwind of the mortar alone", () => {
+    assertionsIntact();
+    expect(
+      fallout(ONE_SMALL, HEDGE_SOUTH, wind(metresPerSecond(10), 0)),
+    ).toHaveLength(0);
+  });
+
+  it("leaves a boundary across the wind alone", () => {
+    expect(
+      fallout(ONE_SMALL, HEDGE, wind(metresPerSecond(10), 90)),
+    ).toHaveLength(0);
+    expect(
+      fallout(ONE_SMALL, POND, wind(metresPerSecond(10), 90)),
+    ).toHaveLength(0);
+  });
+
+  it("counts a line the casing flew over as crossed", () => {
+    // The disc lands 90 m out, the brook at 30 m is past its radius behind it.
+    expect(
+      fallout(ONE_SMALL, BROOK, wind(metresPerSecond(10), 0)),
+    ).toHaveLength(1);
+  });
+
+  it("counts a line the disc came down clean beyond", () => {
+    // Twenty metres a second puts the whole disc past the hedge, still crossed.
+    expect(
+      fallout(ONE_SMALL, HEDGE, wind(metresPerSecond(20), 0)),
+    ).toHaveLength(1);
+    expect(
+      fallout(ONE_SMALL, HEDGE_SOUTH, wind(metresPerSecond(20), 0)),
+    ).toHaveLength(0);
+  });
+
+  it("resolves a diagonal wind against each boundary", () => {
+    const found = fallout(
+      ONE_SMALL,
+      HEDGE_AND_POND,
+      wind(metresPerSecond(10), 45),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("hedge");
+  });
+
+  it("finds the flight crossing a later segment of a bent boundary", () => {
+    // Its first stretch is off east; the second lies across the flight path.
+    const wall = [AUDIENCE, "hard wall 200 30 100 30 -100 30"];
+    expect(fallout(ONE_SMALL, wall, wind(metresPerSecond(10), 0))).toHaveLength(
+      1,
+    );
+  });
+
+  it("measures to the nearest segment of a bent boundary", () => {
+    const bank = [AUDIENCE, "hard bank -300 200 0 60 300 200"];
+    expect(fallout(ONE_SMALL, bank)).toHaveLength(0);
+    expect(fallout(ONE_BIG, bank)).toHaveLength(1);
+  });
+
+  it("reports a crossing once per effect and boundary however many shots", () => {
+    expect(
+      fallout(
+        "at 10 ripple 4 of shell.150 from pad.a every 300ms",
+        HEDGE_AND_POND,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("never fails on a soft boundary", () => {
+    expect(
+      fallout(ONE_BIG, [AUDIENCE, "soft path -300 30 300 30"]),
+    ).toHaveLength(0);
+  });
+});
+
+describe("noise at the houses", () => {
+  // A six inch reads just over 83 dB at 600 m and 77 dB at 1200 m.
+  function noise(source: string, lines: readonly string[]) {
+    return checkSafety(scheduleOf(source), { site: siteOf(lines), rig })
+      .diagnostics;
+  }
+
+  it("fails a house whose limit the show passes", () => {
+    assertionsIntact();
+    const found = noise(ONE_BIG, [AUDIENCE, "house mill at 0 600 limit 80"]);
+    expect(found.byCode("PF4200")).toHaveLength(1);
+    expect(found.byCode("PF4202").length).toBeGreaterThan(0);
+    expect(found.byCode("PF4202")[0]?.message).toContain("shell.150");
+    expect(found.hasErrors()).toBe(true);
+  });
+
+  it("warns inside three decibels of the limit", () => {
+    const found = noise(ONE_BIG, [AUDIENCE, "house mill at 0 600 limit 85"]);
+    expect(found.byCode("PF4200")).toHaveLength(0);
+    expect(found.byCode("PF4201")).toHaveLength(1);
+    expect(found.hasErrors()).toBe(false);
+  });
+
+  it("says nothing at a house with room to spare", () => {
+    expect(
+      noise(ONE_BIG, [AUDIENCE, "house mill at 0 600 limit 90"]).size,
+    ).toBe(0);
+  });
+
+  it("judges each house at its own distance and limit", () => {
+    const near = "house mill at 0 600 limit 80";
+    const far = "house farm at 0 1200 limit 80";
+    expect(noise(ONE_BIG, [AUDIENCE, near, far]).byCode("PF4200")).toHaveLength(
+      1,
+    );
+    expect(
+      noise(ONE_BIG, [AUDIENCE, near, "house farm at 0 1200 limit 75"]).byCode(
+        "PF4200",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("takes the sheet limit for a house without one", () => {
+    expect(
+      noise(ONE_BIG, [AUDIENCE, "house mill at 0 600", "limit 80"]).byCode(
+        "PF4200",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("stays quiet about a house nobody gave a limit", () => {
+    expect(noise(ONE_BIG, [AUDIENCE, "house mill at 0 600"]).size).toBe(0);
+  });
+
+  it("adds reports that land together on an energy basis", () => {
+    assertionsIntact();
+    const together = [ONE_BIG, "at 10 fire shell.150 from pad.a"].join("\n");
+    const apart = [ONE_BIG, "at 12 fire shell.150 from pad.a"].join("\n");
+    const house = [AUDIENCE, "house mill at 0 600 limit 85"];
+    expect(noise(together, house).byCode("PF4200")).toHaveLength(1);
+    expect(noise(apart, house).byCode("PF4200")).toHaveLength(0);
+    expect(noise(apart, house).byCode("PF4201")).toHaveLength(1);
+  });
+
+  it("names every single effect over the limit, not only the loudest", () => {
+    const both = [ONE_BIG, "at 14 fire shell.75 from pad.a"].join("\n");
+    const named = noise(both, [
+      AUDIENCE,
+      "house mill at 0 600 limit 75",
+    ]).byCode("PF4202");
+    expect(named).toHaveLength(2);
+    expect(named.map((finding) => finding.message).join("\n")).toContain(
+      "shell.75",
+    );
+    expect(named.map((finding) => finding.message).join("\n")).toContain(
+      "shell.150",
+    );
+  });
+});

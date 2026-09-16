@@ -1,0 +1,5 @@
+FROM node:24-bookworm
+WORKDIR /app
+COPY . /app
+RUN npm ci
+RUN command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*)

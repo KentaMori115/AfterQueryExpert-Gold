@@ -1,0 +1,52 @@
+[workspace]
+members = [
+    "crates/fwctl",
+    "crates/fwctl-core",
+    "crates/fwctl-device",
+    "crates/fwctl-sim",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+repository = "https://github.com/redacted-owner/fwctl"
+
+[workspace.dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+crc32fast = "1.5.1"
+directories = "6.0.0"
+ed25519-dalek = "3.0.0"
+humantime = "2.4.0"
+humantime-serde = "1.1.1"
+jiff = "0.2.35"
+hex = "0.4.3"
+semver = "1.0.28"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+serialport = { version = "4.10.0", default-features = false }
+tempfile = "3.27.0"
+thiserror = "2.0.20"
+toml = "1.1.4"
+uuid = { version = "1.26.0", features = ["v4"] }
+zip = { version = "8.4.0", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+overflow-checks = true
+panic = "abort"
+strip = "symbols"

@@ -1,0 +1,34 @@
+watching 5OCmMF1ftXp1uLmy9309 every 120s (Ctrl-C to stop)
+15:19:32 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          running
+    qualityCheck       -
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+15:23:34 status=Validating
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       running
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+15:29:37 status=Validation Failed
+    ciChecks           passed
+    aiCheck            passed
+    similarity         passed
+    oracleNop          passed
+    qualityCheck       failed / fail
+    easinessProbe      -
+    difficultyProbe    -
+    failureValidation  -
+== TERMINAL: Validation Failed ==
+   * failedStage=quality_check: Task quality checks failed: anti cheating measures, report integrity, separate verifier integrity.
+   * qualityCheck:anti_cheating_measures [fail] Although test/config files are restored and assertion tampering is checked, arbitrary submitted source runs inside Vitest and can spawn a non-Node process or install filesystem/process hooks. The runner only kills processes named node, so such code can watch and alter the temporary JUnit files or final reward artifacts, making grading gameable.
+   * qualityCheck:report_integrity [fail] Normal failures and missing reports are handled safely, but reports are produced by Vitest in the same process that imports untrusted submitted code. That code can discover the --outputFile argument or spawn a surviving watcher and fabricate/alter the temporary JUnit before it is moved and graded; the Chai guard does not protect report I/O.
+   * qualityCheck:separate_verifier_integrity [fail] The image separation and committed model.patch flow are otherwise correct, but verification can depend on a process spawned by submitted source. pkill targets only node, leaving a shell/Python child able to mutate /tmp JUnit output or /logs artifacts after the suite, contrary to the requirement that leftover processes cannot affect grading.
+   * qualityCheck: fail

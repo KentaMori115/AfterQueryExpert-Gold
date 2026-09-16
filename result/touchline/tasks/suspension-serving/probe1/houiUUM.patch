@@ -1,0 +1,1217 @@
+diff --git a/docs/api.md b/docs/api.md
+index f44073b..91fcd4e 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -422,9 +422,38 @@ later card had already earned can disappear.
+ 
+ ### `GET /players/:playerId/record?asOf=YYYY-MM-DD`
+ `asOf` is required. Answers `playerId`, `clubId`, `asOf`, `cards`, `yellows`, `reds`, `points`,
+-`finesPence`, `matchesBanned`, `standing`.
++`finesPence`, `matchesBanned`, `matchesServed`, `matchesOutstanding`, `standing`.
+ 
+-`standing` is `suspended` when anything is being served, `warned` from 3 points, else `clear`.
++`standing` is `suspended` while any match remains outstanding as of `asOf`, `warned` from 3 points,
++else `clear`.
++
++### `GET /players/:playerId/suspensions?asOf=YYYY-MM-DD`
++`asOf` is required. Answers `playerId`, `asOf`, `matchesBanned`, `matchesServed`,
++`matchesOutstanding`, `suspended` and `entries`, oldest first.
++
++Each entry carries `cardId`, `fixtureId`, `teamId`, `shownOn`, `matches`, `served`, `outstanding`,
++`servedIn` (fixture ids in serving order) and `clearedOn` (the day its last match was served, else
++`null`).
++
++Only cards that carry a ban appear in `entries`. A ban is served over games of the side the card was
++shown for; only `played` fixtures serve anything. Each played game serves one match off the earliest
++outstanding card shown to that side before it (strictly: the game where the card was shown does not
++count). Rescinded cards drop out and any games they had consumed fall through to later cards.
++
++While any match remains outstanding the player is barred from every side of their current club. A
++transfer moves the bar to the new club; the serving games stay tied to the old team.
++
++Both routes need a bearer token, take no other query field, and treat days and unknown ids like
++other readings.
++
++### `GET /fixtures/:fixtureId/eligibility`
++No query parameters. Answers `fixtureId`, `playedOn`, `asOf` (the day before the game) and
++`ineligible`: every registered player at either club who has a match outstanding as of `asOf`, home
++side first then by player id.
++
++Each entry carries `playerId`, `clubId`, `teamId` (their side in this game) and `outstanding`.
++
++Needs a bearer token and treats unknown ids like other readings.
+ 
+ ---
+ 
+diff --git a/src/modules/discipline/discipline.controller.ts b/src/modules/discipline/discipline.controller.ts
+index c009cad..0b7f27d 100644
+--- a/src/modules/discipline/discipline.controller.ts
++++ b/src/modules/discipline/discipline.controller.ts
+@@ -6,6 +6,7 @@ import type {
+   RecordQuery,
+   RescindCardBody,
+   ShowCardBody,
++  SuspensionsQuery,
+ } from './discipline.schema';
+ 
+ export class DisciplineController {
+@@ -62,4 +63,21 @@ export class DisciplineController {
+       next(err);
+     }
+   };
++
++  suspensions = (req: Request, res: Response, next: NextFunction): void => {
++    try {
++      const query = req.query as unknown as SuspensionsQuery;
++      res.json(this.service.suspensions(Number(req.params.playerId), query.asOf));
++    } catch (err) {
++      next(err);
++    }
++  };
++
++  eligibility = (req: Request, res: Response, next: NextFunction): void => {
++    try {
++      res.json(this.service.eligibility(Number(req.params.fixtureId)));
++    } catch (err) {
++      next(err);
++    }
++  };
+ }
+diff --git a/src/modules/discipline/discipline.routes.test.ts b/src/modules/discipline/discipline.routes.test.ts
+index df78d9d..b3d0b10 100644
+--- a/src/modules/discipline/discipline.routes.test.ts
++++ b/src/modules/discipline/discipline.routes.test.ts
+@@ -382,6 +382,8 @@ describe('what a player record adds up to', () => {
+       'clubId',
+       'finesPence',
+       'matchesBanned',
++      'matchesOutstanding',
++      'matchesServed',
+       'playerId',
+       'points',
+       'reds',
+diff --git a/src/modules/discipline/discipline.routes.ts b/src/modules/discipline/discipline.routes.ts
+index 55fb4bc..321ad18 100644
+--- a/src/modules/discipline/discipline.routes.ts
++++ b/src/modules/discipline/discipline.routes.ts
+@@ -4,6 +4,7 @@ import type { Database } from '../../db/client';
+ import { requireAuth, requireScope } from '../../middleware/requireAuth';
+ import { validateRequest } from '../../middleware/validateRequest';
+ import type { AuthService } from '../auth/auth.service';
++import { FixtureRepository } from '../fixtures/fixture.repository';
+ import type { FixtureService } from '../fixtures/fixture.service';
+ import type { PlayerService } from '../players/player.service';
+ import type { TeamService } from '../teams/team.service';
+@@ -18,6 +19,7 @@ import {
+   recordQuery,
+   rescindCardBody,
+   showCardBody,
++  suspensionsQuery,
+ } from './discipline.schema';
+ import { DisciplineService } from './discipline.service';
+ 
+@@ -33,7 +35,14 @@ export function buildDisciplineModule(
+   players: PlayerService,
+   teams: TeamService,
+ ): DisciplineModule {
+-  const service = new DisciplineService(new DisciplineRepository(db), fixtures, players, teams);
++  const fixtureRepo = new FixtureRepository(db);
++  const service = new DisciplineService(
++    new DisciplineRepository(db),
++    fixtures,
++    fixtureRepo,
++    players,
++    teams,
++  );
+   const controller = new DisciplineController(service);
+   const router = Router();
+   const authed = requireAuth(auth);
+@@ -78,5 +87,19 @@ export function buildDisciplineModule(
+     controller.record,
+   );
+ 
++  router.get(
++    '/players/:playerId/suspensions',
++    authed,
++    validateRequest({ params: playerIdParams, query: suspensionsQuery }),
++    controller.suspensions,
++  );
++
++  router.get(
++    '/fixtures/:fixtureId/eligibility',
++    authed,
++    validateRequest({ params: fixtureIdParams, query: noQuery }),
++    controller.eligibility,
++  );
++
+   return { router, service };
+ }
+diff --git a/src/modules/discipline/discipline.schema.ts b/src/modules/discipline/discipline.schema.ts
+index adce4e2..be526a4 100644
+--- a/src/modules/discipline/discipline.schema.ts
++++ b/src/modules/discipline/discipline.schema.ts
+@@ -41,3 +41,8 @@ export type ShowCardBody = z.infer<typeof showCardBody>;
+ export type RescindCardBody = z.infer<typeof rescindCardBody>;
+ export type ListCardsQuery = z.infer<typeof listCardsQuery>;
+ export type RecordQuery = z.infer<typeof recordQuery>;
++
++/** The suspensions reading takes an asOf, like every other reading in the league. */
++export const suspensionsQuery = z.object({ asOf: dayField }).strict();
++
++export type SuspensionsQuery = z.infer<typeof suspensionsQuery>;
+diff --git a/src/modules/discipline/discipline.service.ts b/src/modules/discipline/discipline.service.ts
+index 4803beb..ca26323 100644
+--- a/src/modules/discipline/discipline.service.ts
++++ b/src/modules/discipline/discipline.service.ts
+@@ -8,8 +8,9 @@
+  * taking a card away can undo a ban that a later card had already picked up.
+  */
+ import { ConflictError, NotFoundError } from '../../lib/AppError';
+-import { isAfter, requireRealDay } from '../../lib/days';
++import { addDays, isAfter, requireRealDay } from '../../lib/days';
+ import type { FixtureService } from '../fixtures/fixture.service';
++import type { FixtureRepository } from '../fixtures/fixture.repository';
+ import type { PlayerService } from '../players/player.service';
+ import type { TeamService } from '../teams/team.service';
+ import { DisciplineRepository, type CardFilter } from './discipline.repository';
+@@ -20,6 +21,7 @@ import {
+   type Card,
+   type Offence,
+ } from './discipline.types';
++import { computeSuspensions, type SuspensionEntry, type SuspensionSummary } from './suspension';
+ 
+ export interface ShowCard {
+   playerId: number;
+@@ -37,13 +39,40 @@ export interface DisciplineRecord {
+   points: number;
+   finesPence: number;
+   matchesBanned: number;
++  matchesServed: number;
++  matchesOutstanding: number;
+   standing: 'clear' | 'warned' | 'suspended';
+ }
+ 
++export interface SuspensionsResult {
++  playerId: number;
++  asOf: string;
++  matchesBanned: number;
++  matchesServed: number;
++  matchesOutstanding: number;
++  suspended: boolean;
++  entries: SuspensionEntry[];
++}
++
++export interface EligibilityEntry {
++  playerId: number;
++  clubId: number;
++  teamId: number;
++  outstanding: number;
++}
++
++export interface EligibilityResult {
++  fixtureId: number;
++  playedOn: string;
++  asOf: string;
++  ineligible: EligibilityEntry[];
++}
++
+ export class DisciplineService {
+   constructor(
+     private readonly repo: DisciplineRepository,
+     private readonly fixtures: FixtureService,
++    private readonly fixtureRepo: FixtureRepository,
+     private readonly players: PlayerService,
+     private readonly teams: TeamService,
+   ) {}
+@@ -153,6 +182,21 @@ export class DisciplineService {
+     }
+   }
+ 
++  /**
++   * Builds the played-games-by-team map needed for suspension computation.
++   *
++   * Collects the unique team ids from the given cards and fetches the played
++   * games for each one up to asOf.
++   */
++  private playedByTeamFor(cards: Card[], asOf: string): Map<number, import('../fixtures/fixture.types').Fixture[]> {
++    const teamIds = new Set(cards.map((c) => c.teamId));
++    const map = new Map<number, import('../fixtures/fixture.types').Fixture[]>();
++    for (const teamId of teamIds) {
++      map.set(teamId, this.fixtureRepo.playedForTeamUpTo(teamId, asOf));
++    }
++    return map;
++  }
++
+   /**
+    * What a player's record adds up to on a given day.
+    *
+@@ -166,17 +210,18 @@ export class DisciplineService {
+ 
+     let points = 0;
+     let finesPence = 0;
+-    let matchesBanned = 0;
+     let yellows = 0;
+     let reds = 0;
+     for (const card of cards) {
+       points += card.points;
+       finesPence += card.finePence;
+-      matchesBanned += Math.max(card.straightBan, card.accumulationBan);
+       if (card.colour === 'red') reds += 1;
+       else yellows += 1;
+     }
+ 
++    const playedByTeam = this.playedByTeamFor(cards, day);
++    const suspension = computeSuspensions(cards, playedByTeam);
++
+     return {
+       playerId: player.id,
+       clubId: player.clubId,
+@@ -186,8 +231,85 @@ export class DisciplineService {
+       reds,
+       points,
+       finesPence,
+-      matchesBanned,
+-      standing: matchesBanned > 0 ? 'suspended' : points >= 3 ? 'warned' : 'clear',
++      matchesBanned: suspension.matchesBanned,
++      matchesServed: suspension.matchesServed,
++      matchesOutstanding: suspension.matchesOutstanding,
++      standing: suspension.matchesOutstanding > 0 ? 'suspended' : points >= 3 ? 'warned' : 'clear',
++    };
++  }
++
++  /**
++   * Detailed suspension entries for a player as of a given day.
++   */
++  suspensions(playerId: number, asOf: string): SuspensionsResult {
++    const player = this.players.get(playerId);
++    const day = requireRealDay(asOf, 'asOf');
++    const cards = this.repo.forPlayerUpTo(playerId, day);
++
++    const playedByTeam = this.playedByTeamFor(cards, day);
++    const summary = computeSuspensions(cards, playedByTeam);
++
++    return {
++      playerId: player.id,
++      asOf: day,
++      matchesBanned: summary.matchesBanned,
++      matchesServed: summary.matchesServed,
++      matchesOutstanding: summary.matchesOutstanding,
++      suspended: summary.suspended,
++      entries: summary.entries,
++    };
++  }
++
++  /**
++   * Players ineligible to play in a fixture on the day before the game.
++   *
++   * Reads the suspension state as of the day before playedOn, and lists every
++   * registered player at either club who has a match outstanding that day.
++   */
++  eligibility(fixtureId: number): EligibilityResult {
++    const fixture = this.fixtures.get(fixtureId);
++    const sides = this.fixtureRepo.clubsForFixture(fixtureId);
++    if (!sides) {
++      throw new NotFoundError(`There is no fixture ${fixtureId}`);
++    }
++
++    // asOf is the day before the game
++    const asOf = addDays(fixture.playedOn, -1);
++
++    const { homeTeamId, awayTeamId, homeClubId, awayClubId } = sides;
++
++    const ineligible: EligibilityEntry[] = [];
++
++    // Process home club first, then away club; within each club sort by player id
++    for (const { clubId, teamId } of [
++      { clubId: homeClubId, teamId: homeTeamId },
++      { clubId: awayClubId, teamId: awayTeamId },
++    ]) {
++      const playerIds = this.fixtureRepo.registeredPlayersAtClub(clubId);
++
++      for (const playerId of playerIds) {
++        const cards = this.repo.forPlayerUpTo(playerId, asOf);
++        if (cards.length === 0) continue;
++
++        const playedByTeam = this.playedByTeamFor(cards, asOf);
++        const summary = computeSuspensions(cards, playedByTeam);
++
++        if (summary.matchesOutstanding > 0) {
++          ineligible.push({
++            playerId,
++            clubId,
++            teamId,
++            outstanding: summary.matchesOutstanding,
++          });
++        }
++      }
++    }
++
++    return {
++      fixtureId,
++      playedOn: fixture.playedOn,
++      asOf,
++      ineligible,
+     };
+   }
+ }
+diff --git a/src/modules/discipline/suspension.routes.test.ts b/src/modules/discipline/suspension.routes.test.ts
+new file mode 100644
+index 0000000..d3bffc4
+--- /dev/null
++++ b/src/modules/discipline/suspension.routes.test.ts
+@@ -0,0 +1,643 @@
++/**
++ * Tests for the suspension-aware endpoints:
++ *  GET /players/:playerId/suspensions?asOf=
++ *  GET /fixtures/:fixtureId/eligibility
++ *
++ * Also verifies that the record endpoint's `standing` and the two new fields
++ * work correctly now that serving is computed properly.
++ */
++import {
++  aFixedLeague,
++  aFixture,
++  api,
++  bare,
++  floor,
++  type Floor,
++} from '../../../tests/helpers';
++
++const MATCH_DAYS = [
++  '2031-09-06',
++  '2031-10-04',
++  '2031-11-01',
++  '2031-12-06',
++  '2032-01-10',
++  '2032-02-07',
++  '2032-03-06',
++];
++
++/** A league with two players (one home, one away) we can show cards to. */
++async function aLeagueWithPlayers(f: Floor) {
++  const league = await aFixedLeague(f, 4, { teamCapacity: 10 });
++  const home = league.teams[0]!;
++  const away = league.teams[1]!;
++  const homeClub = league.clubs[0]!;
++  const awayClub = league.clubs[1]!;
++
++  const homePlayer = (
++    await api(f).post(`/clubs/${homeClub.id}/players`).send({
++      firstName: 'Owen',
++      lastName: 'Tasker',
++      bornOn: '2005-03-14',
++      position: 'midfielder',
++      squadNumber: 8,
++      registeredOn: '2031-07-20',
++    })
++  ).body;
++
++  const awayPlayer = (
++    await api(f).post(`/clubs/${awayClub.id}/players`).send({
++      firstName: 'Neil',
++      lastName: 'Burns',
++      bornOn: '2004-06-22',
++      position: 'defender',
++      squadNumber: 5,
++      registeredOn: '2031-07-20',
++    })
++  ).body;
++
++  return { ...league, home, away, homeClub, awayClub, homePlayer, awayPlayer };
++}
++
++/**
++ * Schedules a specific game between two given teams on a given day.
++ */
++async function scheduleGame(
++  f: Floor,
++  league: Awaited<ReturnType<typeof aLeagueWithPlayers>>,
++  homeTeamId: number,
++  awayTeamId: number,
++  dayIndex: number,
++) {
++  return aFixture(
++    f,
++    league.division.id,
++    homeTeamId,
++    awayTeamId,
++    league.venue.id,
++    { playedOn: MATCH_DAYS[dayIndex] ?? '' },
++  );
++}
++
++/** Shows a card in a fixture. */
++async function book(
++  f: Floor,
++  fixtureId: number,
++  playerId: number,
++  offence: string,
++  shownOn: string,
++) {
++  return api(f).post(`/fixtures/${fixtureId}/cards`).send({ playerId, offence, shownOn });
++}
++
++/**
++ * Reports and confirms a result, making the fixture status `played`.
++ */
++async function playGame(
++  f: Floor,
++  fixtureId: number,
++  homeTeamId: number,
++  awayTeamId: number,
++  dayIndex: number,
++) {
++  const playedOn = MATCH_DAYS[dayIndex]!;
++  const result = (
++    await api(f).post(`/fixtures/${fixtureId}/result`).send({
++      homeGoals: 1,
++      awayGoals: 0,
++      reportedByTeamId: homeTeamId,
++      reportedOn: playedOn,
++    })
++  ).body;
++  const confirmRes = await api(f)
++    .post(`/results/${result.id}/confirm`)
++    .send({ confirmedByTeamId: awayTeamId, confirmedOn: playedOn });
++  return confirmRes;
++}
++
++describe('GET /players/:playerId/suspensions', () => {
++  it('answers the right shape with no banning cards', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=2032-05-16`,
++    );
++    expect(res.status).toBe(200);
++    expect(Object.keys(res.body).sort()).toEqual([
++      'asOf',
++      'entries',
++      'matchesBanned',
++      'matchesOutstanding',
++      'matchesServed',
++      'playerId',
++      'suspended',
++    ]);
++    expect(res.body.playerId).toBe(league.homePlayer.id);
++    expect(res.body.asOf).toBe('2032-05-16');
++    expect(res.body.matchesBanned).toBe(0);
++    expect(res.body.matchesServed).toBe(0);
++    expect(res.body.matchesOutstanding).toBe(0);
++    expect(res.body.suspended).toBe(false);
++    expect(res.body.entries).toEqual([]);
++  });
++
++  it('carries a full ban entry when no subsequent games have been played', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    // game0: home team hosts away team
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'violentConduct', MATCH_DAYS[0]!);
++
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=2032-05-16`,
++    );
++    expect(res.status).toBe(200);
++    expect(res.body.matchesBanned).toBe(3);
++    expect(res.body.matchesServed).toBe(0);
++    expect(res.body.matchesOutstanding).toBe(3);
++    expect(res.body.suspended).toBe(true);
++    expect(res.body.entries).toHaveLength(1);
++
++    const entry = res.body.entries[0];
++    expect(entry.cardId).toBeGreaterThan(0);
++    expect(entry.fixtureId).toBe(game0.id);
++    expect(entry.teamId).toBe(league.home.id);
++    expect(entry.shownOn).toBe(MATCH_DAYS[0]);
++    expect(entry.matches).toBe(3);
++    expect(entry.served).toBe(0);
++    expect(entry.outstanding).toBe(3);
++    expect(entry.servedIn).toEqual([]);
++    expect(entry.clearedOn).toBe(null);
++  });
++
++  it('does NOT count the game where the card was shown as serving the ban', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    // game0: home vs away - card shown for home player
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++    // Play game0 (the game where the card was shown)
++    await playGame(f, game0.id, league.home.id, league.away.id, 0);
++
++    // Check at asOf = day of game0: no game strictly after the card shown yet
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=${MATCH_DAYS[0]}`,
++    );
++    expect(res.body.matchesServed).toBe(0);
++    expect(res.body.matchesOutstanding).toBe(1);
++    expect(res.body.suspended).toBe(true);
++  });
++
++  it('serves one match per subsequent played game for the card team', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    // game0: home team vs away - card shown for home player
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++    // Play game0 (doesn't serve the ban)
++    await playGame(f, game0.id, league.home.id, league.away.id, 0);
++
++    // game1: home team plays again (different opponent)
++    const opp2 = league.teams[2]!;
++    const game1 = await scheduleGame(f, league, league.home.id, opp2.id, 1);
++    await playGame(f, game1.id, league.home.id, opp2.id, 1);
++
++    // Now game1 should serve the 1-match ban
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=${MATCH_DAYS[1]}`,
++    );
++    expect(res.body.matchesBanned).toBe(1);
++    expect(res.body.matchesServed).toBe(1);
++    expect(res.body.matchesOutstanding).toBe(0);
++    expect(res.body.suspended).toBe(false);
++    expect(res.body.entries[0].servedIn).toEqual([game1.id]);
++    expect(res.body.entries[0].clearedOn).toBe(MATCH_DAYS[1]);
++    expect(res.body.entries[0].outstanding).toBe(0);
++  });
++
++  it('serves matches across multiple games for a multi-match ban', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const opp2 = league.teams[2]!;
++    const opp3 = league.teams[3]!;
++
++    // game0: card shown - 3 match ban
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'violentConduct', MATCH_DAYS[0]!);
++    await playGame(f, game0.id, league.home.id, league.away.id, 0);
++
++    // game1: serves 1 of 3
++    const game1 = await scheduleGame(f, league, league.home.id, opp2.id, 1);
++    await playGame(f, game1.id, league.home.id, opp2.id, 1);
++
++    // game2: serves 2 of 3
++    const game2 = await scheduleGame(f, league, league.home.id, opp3.id, 2);
++    await playGame(f, game2.id, league.home.id, opp3.id, 2);
++
++    // game3 not yet played
++    const game3 = await scheduleGame(f, league, league.away.id, league.home.id, 3);
++
++    // After game2: 2 served, 1 outstanding
++    const mid = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=${MATCH_DAYS[2]}`,
++    );
++    expect(mid.body.matchesServed).toBe(2);
++    expect(mid.body.matchesOutstanding).toBe(1);
++    expect(mid.body.entries[0].servedIn).toEqual([game1.id, game2.id]);
++    expect(mid.body.entries[0].clearedOn).toBe(null); // not yet cleared
++
++    // Play game3 to serve the last match
++    await playGame(f, game3.id, league.away.id, league.home.id, 3);
++    const done = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=${MATCH_DAYS[3]}`,
++    );
++    expect(done.body.matchesServed).toBe(3);
++    expect(done.body.matchesOutstanding).toBe(0);
++    expect(done.body.suspended).toBe(false);
++    expect(done.body.entries[0].servedIn).toEqual([game1.id, game2.id, game3.id]);
++    expect(done.body.entries[0].clearedOn).toBe(MATCH_DAYS[3]);
++    expect(done.body.entries[0].outstanding).toBe(0);
++  });
++
++  it('only counts played games - awarded, postponed and abandoned serve nothing', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++
++    // game0: card shown
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++    // Play game0 (doesn't serve)
++    await playGame(f, game0.id, league.home.id, league.away.id, 0);
++
++    // game1: postponed - should not serve
++    const opp2 = league.teams[2]!;
++    const game1 = await scheduleGame(f, league, league.home.id, opp2.id, 1);
++    await api(f).post(`/fixtures/${game1.id}/postpone`).send({ postponedOn: MATCH_DAYS[0] });
++
++    // game2: awarded - should not serve
++    const opp3 = league.teams[3]!;
++    const game2 = await scheduleGame(f, league, league.home.id, opp3.id, 2);
++    await api(f).post(`/fixtures/${game2.id}/award`).send({
++      awardedOn: MATCH_DAYS[2],
++      awardedToTeamId: league.home.id,
++      reason: 'noShow',
++    });
++
++    // Still outstanding since no played game served the ban
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=${MATCH_DAYS[2]}`,
++    );
++    expect(res.body.matchesServed).toBe(0);
++    expect(res.body.matchesOutstanding).toBe(1);
++    expect(res.body.suspended).toBe(true);
++  });
++
++  it('handles rescinded cards: their games fall through to later cards', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const opp2 = league.teams[2]!;
++
++    // game0: first banning card (1 match ban)
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    const card1 = (
++      await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!)
++    ).body;
++
++    // game1: second banning card (say violentConduct = 3 match ban, but after rescind
++    // of first card the points go from 3 to 3 directly, so accum ban might still apply)
++    // Actually let's use a simpler case: just show a second card after the first
++    const game1 = await scheduleGame(f, league, league.home.id, opp2.id, 1);
++    const card2 = (
++      await book(f, game1.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[1]!)
++    ).body;
++
++    // game2 and game3: both played (these should serve the two bans)
++    // Use a different opponent for game2 to avoid scheduling conflicts
++    const opp3 = league.teams[3]!;
++    const game2 = await scheduleGame(f, league, league.home.id, opp3.id, 2);
++    await playGame(f, game2.id, league.home.id, opp3.id, 2);
++    const game3 = await scheduleGame(f, league, league.away.id, league.home.id, 3);
++    await playGame(f, game3.id, league.away.id, league.home.id, 3);
++
++    // Before rescinding: card1 served in game2, card2 served in game3
++    const before = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=${MATCH_DAYS[3]}`,
++    );
++    expect(before.body.matchesBanned).toBe(2);
++    expect(before.body.matchesServed).toBe(2);
++    expect(before.body.entries[0].servedIn).toEqual([game2.id]);
++    expect(before.body.entries[1].servedIn).toEqual([game3.id]);
++
++    // Now rescind card1
++    await api(f).post(`/cards/${card1.id}/rescind`).send({ rescindedOn: MATCH_DAYS[1] });
++
++    // After rescinding card1: card1 drops out, game2 (which served card1) now falls through
++    // to card2. So card2 should be served in game2 and game3? NO wait - card2 is 1 match.
++    // After rescinding: only card2 remains (1 match ban). 
++    // game2 was used by card1 before. Now card1 is gone, so game2 falls through.
++    // game2 is strictly after card2's shownOn (MATCH_DAYS[1] < MATCH_DAYS[2])? YES
++    // So card2 gets served in game2.
++    
++    const after = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=${MATCH_DAYS[3]}`,
++    );
++    expect(after.body.matchesBanned).toBe(1);
++    expect(after.body.matchesServed).toBe(1);
++    expect(after.body.entries).toHaveLength(1);
++    expect(after.body.entries[0].cardId).toBe(card2.id);
++    expect(after.body.entries[0].servedIn).toEqual([game2.id]);
++  });
++
++  it('leaves out cards shown after asOf', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'violentConduct', MATCH_DAYS[0]!);
++
++    // Ask before the card was shown
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=2031-09-05`,
++    );
++    expect(res.body.matchesBanned).toBe(0);
++    expect(res.body.entries).toHaveLength(0);
++  });
++
++  it('only counts entries with a non-zero ban', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    // dissent = 1 point, no ban
++    await book(f, game0.id, league.homePlayer.id, 'dissent', MATCH_DAYS[0]!);
++
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/suspensions?asOf=2032-05-16`,
++    );
++    expect(res.body.matchesBanned).toBe(0);
++    expect(res.body.entries).toHaveLength(0);
++  });
++
++  it('requires asOf', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    expect(
++      (await api(f).get(`/players/${league.homePlayer.id}/suspensions`)).status,
++    ).toBe(400);
++  });
++
++  it('refuses a malformed asOf', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    expect(
++      (await api(f).get(`/players/${league.homePlayer.id}/suspensions?asOf=yesterday`)).status,
++    ).toBe(400);
++    expect(
++      (await api(f).get(`/players/${league.homePlayer.id}/suspensions?asOf=2031-09-31`)).status,
++    ).toBe(409);
++  });
++
++  it('answers 404 for an unknown player', async () => {
++    const f = floor();
++    await aLeagueWithPlayers(f);
++    expect(
++      (await api(f).get('/players/9999/suspensions?asOf=2032-05-16')).status,
++    ).toBe(404);
++  });
++
++  it('needs a bearer token', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    expect(
++      (await bare(f).get(`/players/${league.homePlayer.id}/suspensions?asOf=2032-05-16`)).status,
++    ).toBe(401);
++  });
++
++  it('refuses unknown query fields', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    expect(
++      (
++        await api(f).get(
++          `/players/${league.homePlayer.id}/suspensions?asOf=2032-05-16&extra=x`,
++        )
++      ).status,
++    ).toBe(400);
++  });
++});
++
++describe('GET /fixtures/:fixtureId/eligibility', () => {
++  it('answers the right shape with no ineligible players', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const fixture = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++
++    const res = await api(f).get(`/fixtures/${fixture.id}/eligibility`);
++    expect(res.status).toBe(200);
++    expect(Object.keys(res.body).sort()).toEqual([
++      'asOf',
++      'fixtureId',
++      'ineligible',
++      'playedOn',
++    ]);
++    expect(res.body.fixtureId).toBe(fixture.id);
++    expect(res.body.playedOn).toBe(MATCH_DAYS[0]);
++    expect(res.body.asOf).toBe('2031-09-05'); // day before MATCH_DAYS[0]
++    expect(res.body.ineligible).toEqual([]);
++  });
++
++  it('lists the home player as ineligible when they have outstanding matches', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++
++    // Game 0: home team hosts away, home player gets banned
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'violentConduct', MATCH_DAYS[0]!);
++    // game0 is scheduled, not played - so no matches served yet
++
++    // Game 1: home team plays again
++    const game1 = await scheduleGame(f, league, league.home.id, league.teams[2]!.id, 1);
++
++    // Check eligibility for game1 (asOf = day before MATCH_DAYS[1])
++    const res = await api(f).get(`/fixtures/${game1.id}/eligibility`);
++    expect(res.status).toBe(200);
++    expect(res.body.asOf).toBe('2031-10-03'); // day before MATCH_DAYS[1]
++
++    const ineligible = res.body.ineligible;
++    expect(ineligible).toHaveLength(1);
++    expect(ineligible[0].playerId).toBe(league.homePlayer.id);
++    expect(ineligible[0].clubId).toBe(league.homeClub.id);
++    expect(ineligible[0].teamId).toBe(league.home.id);
++    expect(ineligible[0].outstanding).toBe(3);
++  });
++
++  it('shows the away player for the away team side', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++
++    // Game 0: home vs away, away player gets banned
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.awayPlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++
++    // Game 1: the same two teams face each other again
++    const game1 = await scheduleGame(f, league, league.away.id, league.home.id, 1);
++
++    const res = await api(f).get(`/fixtures/${game1.id}/eligibility`);
++    const ineligible = res.body.ineligible;
++    expect(ineligible).toHaveLength(1);
++    // The away player's club is the home team in game1 (game1: away club hosts home club)
++    expect(ineligible[0].playerId).toBe(league.awayPlayer.id);
++    expect(ineligible[0].clubId).toBe(league.awayClub.id);
++    expect(ineligible[0].teamId).toBe(league.away.id); // away team in game0 = home team in game1... no
++    // Actually the 'teamId' is their side in THIS game (game1)
++    // game1 has home_team_id = league.away.id, away_team_id = league.home.id
++    // The away player's club is awayClub, which has teamId = league.away.id
++    // league.away.id is the home team in game1
++    // So teamId should be league.away.id (since that's the awayClub's team that happens to be home in game1)
++    expect(ineligible[0].teamId).toBe(league.away.id);
++  });
++
++  it('lists home players first then away, each sorted by player id', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++
++    // Add a second home player
++    const homePlayer2 = (
++      await api(f).post(`/clubs/${league.homeClub.id}/players`).send({
++        firstName: 'Sam',
++        lastName: 'Archer',
++        bornOn: '2003-01-01',
++        position: 'forward',
++        squadNumber: 9,
++        registeredOn: '2031-07-20',
++      })
++    ).body;
++
++    // Game 0: home vs away; give cards to both home players and the away player
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++    await book(f, game0.id, league.awayPlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++    // homePlayer2 gets a red too
++    await book(f, game0.id, homePlayer2.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++
++    // Game 1: same two teams
++    const game1 = await scheduleGame(f, league, league.away.id, league.home.id, 1);
++    const res = await api(f).get(`/fixtures/${game1.id}/eligibility`);
++    const ineligible = res.body.ineligible;
++
++    // game1: home = league.away.id (awayClub), away = league.home.id (homeClub)
++    // Home side first = awayClub first, then homeClub
++    // awayClub has: awayPlayer (1 outstanding)
++    // homeClub has: homePlayer (1 outstanding), homePlayer2 (1 outstanding)
++    expect(ineligible).toHaveLength(3);
++    // First: awayPlayer (home side = awayClub = home in game1)
++    expect(ineligible[0].playerId).toBe(league.awayPlayer.id);
++    expect(ineligible[0].teamId).toBe(league.away.id);
++    // Then: homeClub players sorted by id
++    expect(ineligible[1].playerId).toBe(league.homePlayer.id);
++    expect(ineligible[1].teamId).toBe(league.home.id);
++    expect(ineligible[2].playerId).toBe(homePlayer2.id);
++    expect(ineligible[2].teamId).toBe(league.home.id);
++  });
++
++  it('clears from the list once a ban is served', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++
++    // game0: card shown (1-match ban)
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++    await playGame(f, game0.id, league.home.id, league.away.id, 0);
++
++    // game1: home plays the ban (this game serves the ban - played_on > shownOn)
++    const game1 = await scheduleGame(f, league, league.home.id, league.teams[2]!.id, 1);
++    await playGame(f, game1.id, league.home.id, league.teams[2]!.id, 1);
++
++    // game2: check eligibility (use away vs home since we've used home vs teams[2] already for game1)
++    const opp3 = league.teams[3]!;
++    const game2 = await scheduleGame(f, league, league.away.id, league.home.id, 2);
++    // Eligibility for game2: asOf = day before MATCH_DAYS[2]
++    // By that point game1 has been played, serving the 1-match ban
++    const res = await api(f).get(`/fixtures/${game2.id}/eligibility`);
++    expect(res.body.ineligible).toHaveLength(0);
++  });
++
++  it('needs a bearer token', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const fixture = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    expect((await bare(f).get(`/fixtures/${fixture.id}/eligibility`)).status).toBe(401);
++  });
++
++  it('answers 404 for an unknown fixture', async () => {
++    const f = floor();
++    await aLeagueWithPlayers(f);
++    expect((await api(f).get('/fixtures/9999/eligibility')).status).toBe(404);
++  });
++
++  it('refuses unknown query fields', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const fixture = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    expect((await api(f).get(`/fixtures/${fixture.id}/eligibility?asOf=2031-09-05`)).status).toBe(400);
++    expect((await api(f).get(`/fixtures/${fixture.id}/eligibility?extra=x`)).status).toBe(400);
++  });
++});
++
++describe('record standing reflects served matches', () => {
++  it('is suspended with zero served when no subsequent games have been played', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/record?asOf=${MATCH_DAYS[0]}`,
++    );
++    expect(res.body.standing).toBe('suspended');
++    expect(res.body.matchesBanned).toBe(1);
++    expect(res.body.matchesServed).toBe(0);
++    expect(res.body.matchesOutstanding).toBe(1);
++  });
++
++  it('becomes clear once all matches in a ban are served', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++
++    // game0: 1-match ban
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'denyingGoalscoringOpportunity', MATCH_DAYS[0]!);
++    await playGame(f, game0.id, league.home.id, league.away.id, 0);
++
++    // game1: serves the ban
++    const game1 = await scheduleGame(f, league, league.home.id, league.teams[2]!.id, 1);
++    await playGame(f, game1.id, league.home.id, league.teams[2]!.id, 1);
++
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/record?asOf=${MATCH_DAYS[1]}`,
++    );
++    expect(res.body.standing).toBe('warned'); // 3 points but no outstanding ban
++    expect(res.body.matchesBanned).toBe(1);
++    expect(res.body.matchesServed).toBe(1);
++    expect(res.body.matchesOutstanding).toBe(0);
++  });
++
++  it('stays suspended when some matches remain outstanding', async () => {
++    const f = floor();
++    const league = await aLeagueWithPlayers(f);
++    const opp2 = league.teams[2]!;
++
++    // game0: 3-match ban (violent conduct)
++    const game0 = await scheduleGame(f, league, league.home.id, league.away.id, 0);
++    await book(f, game0.id, league.homePlayer.id, 'violentConduct', MATCH_DAYS[0]!);
++    await playGame(f, game0.id, league.home.id, league.away.id, 0);
++
++    // game1: serves 1 of 3
++    const game1 = await scheduleGame(f, league, league.home.id, opp2.id, 1);
++    await playGame(f, game1.id, league.home.id, opp2.id, 1);
++
++    const res = await api(f).get(
++      `/players/${league.homePlayer.id}/record?asOf=${MATCH_DAYS[1]}`,
++    );
++    expect(res.body.standing).toBe('suspended');
++    expect(res.body.matchesServed).toBe(1);
++    expect(res.body.matchesOutstanding).toBe(2);
++  });
++});
+diff --git a/src/modules/discipline/suspension.ts b/src/modules/discipline/suspension.ts
+new file mode 100644
+index 0000000..3873f01
+--- /dev/null
++++ b/src/modules/discipline/suspension.ts
+@@ -0,0 +1,132 @@
++/**
++ * Working out how much of a suspension a player has served and what remains.
++ *
++ * Bans are served over games of the side the card was shown for. Only played
++ * games serve anything. Each played game serves one match off the earliest
++ * outstanding card shown to that side BEFORE it (strictly: shown on an earlier
++ * day than the game was played). Rescinded cards drop out and any games they
++ * had consumed fall through to later cards.
++ */
++import type { Card } from './discipline.types';
++import type { Fixture } from '../fixtures/fixture.types';
++
++export interface SuspensionEntry {
++  cardId: number;
++  fixtureId: number;
++  teamId: number;
++  shownOn: string;
++  matches: number;
++  served: number;
++  outstanding: number;
++  servedIn: number[];
++  clearedOn: string | null;
++}
++
++export interface SuspensionSummary {
++  matchesBanned: number;
++  matchesServed: number;
++  matchesOutstanding: number;
++  suspended: boolean;
++  entries: SuspensionEntry[];
++}
++
++/**
++ * Computes the suspension state from a set of cards (already filtered to
++ * non-rescinded cards on or before asOf) and played games indexed by team.
++ *
++ * `playedByTeam` maps teamId -> fixtures played by that team, sorted oldest
++ * first, on or before asOf.
++ *
++ * Only games played STRICTLY AFTER a card was shown can serve that card
++ * ("shown to that side before it" in the spec). The game where a card is shown
++ * does not count towards serving the ban it carries.
++ */
++export function computeSuspensions(
++  cards: Card[],
++  playedByTeam: Map<number, Fixture[]>,
++): SuspensionSummary {
++  // Only cards that actually carry a ban matter.
++  const banningCards = cards.filter(
++    (c) => Math.max(c.straightBan, c.accumulationBan) > 0,
++  );
++
++  if (banningCards.length === 0) {
++    return {
++      matchesBanned: 0,
++      matchesServed: 0,
++      matchesOutstanding: 0,
++      suspended: false,
++      entries: [],
++    };
++  }
++
++  // For each team, maintain a cursor into the sorted played-games list.
++  // Games are consumed in order; once a game serves a card it cannot serve another.
++  // We track the position (index) within the per-team array so that each card
++  // only picks up games not yet used by earlier cards.
++  const teamCursors = new Map<number, number>();
++  for (const [teamId] of playedByTeam) {
++    teamCursors.set(teamId, 0);
++  }
++
++  const entries: SuspensionEntry[] = [];
++  let totalBanned = 0;
++  let totalServed = 0;
++
++  for (const card of banningCards) {
++    const ban = Math.max(card.straightBan, card.accumulationBan);
++    const teamId = card.teamId;
++    const fixtures = playedByTeam.get(teamId) ?? [];
++    let cursor = teamCursors.get(teamId) ?? 0;
++
++    // Advance the cursor past any games that are NOT strictly after the card was shown.
++    // A game on the same day as the card (the game where the card was shown) does not serve.
++    while (cursor < fixtures.length && (fixtures[cursor]?.playedOn ?? '') <= card.shownOn) {
++      cursor += 1;
++    }
++
++    // Take up to `ban` games from the remaining pool.
++    const servedIn: number[] = [];
++    let clearedOn: string | null = null;
++
++    while (servedIn.length < ban && cursor < fixtures.length) {
++      const fixture = fixtures[cursor]!;
++      servedIn.push(fixture.id);
++      if (servedIn.length === ban) {
++        clearedOn = fixture.playedOn;
++      }
++      cursor += 1;
++    }
++
++    // Update the cursor so the next card doesn't re-use these games.
++    teamCursors.set(teamId, cursor);
++
++    const served = servedIn.length;
++    const outstanding = ban - served;
++
++    entries.push({
++      cardId: card.id,
++      fixtureId: card.fixtureId,
++      teamId: card.teamId,
++      shownOn: card.shownOn,
++      matches: ban,
++      served,
++      outstanding,
++      servedIn,
++      clearedOn,
++    });
++
++    totalBanned += ban;
++    totalServed += served;
++  }
++
++  const totalOutstanding = totalBanned - totalServed;
++
++  return {
++    matchesBanned: totalBanned,
++    matchesServed: totalServed,
++    matchesOutstanding: totalOutstanding,
++    suspended: totalOutstanding > 0,
++    entries,
++  };
++}
+diff --git a/src/modules/fixtures/fixture.repository.ts b/src/modules/fixtures/fixture.repository.ts
+index 252ab52..641d098 100644
+--- a/src/modules/fixtures/fixture.repository.ts
++++ b/src/modules/fixtures/fixture.repository.ts
+@@ -165,4 +165,69 @@ export class FixtureRepository {
+     this.db.prepare(`UPDATE fixtures SET ${sets.join(', ')} WHERE id = ?`).run(...(args as []));
+     return this.byId(id) as Fixture;
+   }
++
++  /** Played games for a team up to and including a day, oldest first. */
++  playedForTeamUpTo(teamId: number, asOf: string): Fixture[] {
++    const found = asRows<FixtureRow>(
++      this.db
++        .prepare(
++          `SELECT * FROM fixtures
++            WHERE (home_team_id = ? OR away_team_id = ?)
++              AND status = 'played'
++              AND played_on <= ?
++            ORDER BY played_on ASC, kick_off ASC, id ASC`,
++        )
++        .all(teamId, teamId, asOf),
++    );
++    return found.map(toFixture);
++  }
++
++  /**
++   * The club ids of both sides in a fixture, for the eligibility check.
++   * Returns undefined when the fixture does not exist.
++   */
++  clubsForFixture(
++    fixtureId: number,
++  ): { homeTeamId: number; awayTeamId: number; homeClubId: number; awayClubId: number } | undefined {
++    const row = asRow<{
++      home_team_id: number;
++      away_team_id: number;
++      home_club_id: number;
++      away_club_id: number;
++    }>(
++      this.db
++        .prepare(
++          `SELECT f.home_team_id, f.away_team_id,
++                  ht.club_id AS home_club_id,
++                  at.club_id AS away_club_id
++             FROM fixtures f
++             JOIN teams ht ON ht.id = f.home_team_id
++             JOIN teams at ON at.id = f.away_team_id
++            WHERE f.id = ?`,
++        )
++        .get(fixtureId),
++    );
++    if (!row) return undefined;
++    return {
++      homeTeamId: row.home_team_id,
++      awayTeamId: row.away_team_id,
++      homeClubId: row.home_club_id,
++      awayClubId: row.away_club_id,
++    };
++  }
++
++  /**
++   * All registered players at a club, for the eligibility check.
++   * Returns player ids only, sorted ascending.
++   */
++  registeredPlayersAtClub(clubId: number): number[] {
++    const rows = asRows<{ id: number }>(
++      this.db
++        .prepare(
++          `SELECT id FROM players WHERE club_id = ? AND status = 'registered' ORDER BY id ASC`,
++        )
++        .all(clubId),
++    );
++    return rows.map((r) => r.id);
++  }
+ }

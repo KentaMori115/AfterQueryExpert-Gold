@@ -1,0 +1,1201 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 43213e6..732680a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,13 @@ versioning; the engine is pre-1.0, so minor versions may change behaviour.
+ 
+ ## Unreleased
+ 
++* Indexes are wired into the planner. `Session.create_index` and
++  `Session.drop_index` manage them, `SHOW INDEXES` reports them, and a scan
++  serves point lookups, `IN` lists, `IS NULL` and ranges from one when it can.
++* A single `ORDER BY` key on a sorted index is read straight out of the index,
++  so the sort disappears and a `LIMIT` above it stops the scan early.
++* `rows_scanned` now counts the rows an access path really reads, which is how
++  an indexed query shows its work.
+ * Continuous integration on GitHub Actions: the suite runs on Python 3.10
+   through 3.12, ruff lints the tree, and the example scripts and the command
+   line interface are smoke-tested on every push.
+diff --git a/README.md b/README.md
+index dbcdbdc..ef7fa69 100644
+--- a/README.md
++++ b/README.md
+@@ -74,11 +74,27 @@ scalar and aggregate functions.
+ | Paging | `LIMIT`, `OFFSET` |
+ | Set ops | `UNION`, `UNION ALL` |
+ | Expressions | arithmetic, `\|\|`, `CASE`, `CAST`, 60+ scalar and 13 aggregate functions |
+-| Metadata | `EXPLAIN`, `EXPLAIN VERBOSE`, `SHOW TABLES`, `SHOW COLUMNS`, `DESCRIBE` |
++| Metadata | `EXPLAIN`, `EXPLAIN VERBOSE`, `SHOW TABLES`, `SHOW COLUMNS`, `DESCRIBE`, `SHOW INDEXES` |
+ 
+ Not implemented yet: subqueries, common table expressions, window functions,
+ `INTERSECT`/`EXCEPT`, and writes of any kind. The engine is read-only.
+ 
++## Indexes
++
++Register an index and the planner will use it where it can:
++
++```python
++session.create_index("orders", "customer_id")
++session.create_index("orders", "ordered_on", kind="sorted")
++
++session.sql("SELECT * FROM orders WHERE customer_id IN (1, 5)")   # hash lookup
++session.sql("SELECT * FROM orders ORDER BY ordered_on")           # no sort at all
++```
++
++Indexes are a speed decision and nothing more: the rows that come back, and
++the order they come back in, are exactly what the same query returns without
++them. `SHOW INDEXES` says what the catalog holds.
++
+ ## How a query flows through the engine
+ 
+ ```
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 0dd9297..9ee1e56 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -100,6 +100,33 @@ exactly one decision: whether a join becomes a hash join or a nested-loop join.
+ `extract_equi_keys` splits the condition into column-to-column equalities plus a
+ residual predicate; if there is at least one equality the hash join wins.
+ 
++Before any of that, the planner picks the scan's *access path*
++(`execution/access_path.py`). A table with no indexes has one path, the full
++scan. A table with indexes may have several, and exactly one of them is used:
++
++| Path | Serves | From |
++| --- | --- | --- |
++| lookup | `col = <literal>`, `col IN (...)`, `col IS NULL` | a hash index, or a sorted index for the first two |
++| range | every `<`, `<=`, `>`, `>=` conjunct on one column, folded into one interval | a sorted index |
++| ordered | a single `ORDER BY` key on the indexed column | a sorted index |
++
++Ranking is lookup, then range, then ordered, and ties go to the column that
++comes first in the table's schema, so the choice never depends on the order
++the predicates were written in. Conjuncts the path does not answer stay on the
++operator and are applied to each fetched row.
++
++An ordered path removes the `Sort` above it rather than feeding it, which is
++the only case where the access path changes the operator tree above the scan.
++The sort key is followed down through projections that only rename columns,
++because `ORDER BY` on a column outside the select list is projected as a
++hidden column first.
++
++An index changes no answer. Offsets come out of an index grouped by key, so
++they are sorted back into table order before the rows are fetched, and a
++descending ordered read reverses keys without disturbing rows that share one.
++The visible difference is `rows_scanned`, which counts the rows an access path
++really reads.
++
+ Operators (`execution/operators/`) form a pull-based tree. `execute` returns a
+ generator of `RecordBatch` objects, so nothing runs until the consumer starts
+ iterating and `LIMIT` can stop a scan early. Operators never emit an empty
+diff --git a/docs/sql-reference.md b/docs/sql-reference.md
+index 983bb10..46aa205 100644
+--- a/docs/sql-reference.md
++++ b/docs/sql-reference.md
+@@ -213,8 +213,29 @@ EXPLAIN VERBOSE SELECT ...    -- plus the unoptimized and physical plans
+ SHOW TABLES
+ SHOW COLUMNS FROM customers
+ DESCRIBE customers            -- synonym for SHOW COLUMNS
++SHOW INDEXES                  -- every index in the catalog
++SHOW INDEXES FROM customers   -- just one table's
+ ```
+ 
++`SHOW INDEXES` reports `table_name`, `column_name`, `kind`, `entries`,
++`distinct_keys` and `has_nulls`, ordered by table and then by column.
++`entries` counts every row the index was built from, including rows whose key
++is null, and `has_nulls` reads `YES` or `NO` the way `SHOW COLUMNS` reports
++nullability.
++
++Indexes are created from the embedding code rather than in SQL:
++
++```python
++session.create_index("orders", "customer_id")             # hash
++session.create_index("orders", "ordered_on", kind="sorted")
++session.drop_index("orders", "customer_id")               # True if one went
++```
++
++A hash index answers equality, `IN` and `IS NULL`. A sorted index answers
++equality, `IN` and ranges, and can also supply `ORDER BY` on its own column
++without a sort. Neither changes a result: same rows, same order, fewer of
++them read.
++
+ ## Not implemented
+ 
+ Subqueries (scalar, `IN`, `EXISTS`), common table expressions, window functions
+diff --git a/slateql/execution/access_path.py b/slateql/execution/access_path.py
+new file mode 100644
+index 0000000..58cd01f
+--- /dev/null
++++ b/slateql/execution/access_path.py
+@@ -0,0 +1,330 @@
++"""Choosing how a scan finds its rows.
++
++A scan reads a table from the front unless an index can answer the predicates
++the optimizer pushed into it, or supply the order a sort above it wants.  This
++module inspects those pushed conjuncts, decides which single index to use, and
++hands back the conjuncts the index cannot answer so the operator still applies
++them.
++
++Nothing here changes what a scan produces.  An index narrows the rows that get
++read; every row it hands back is a row a full scan would have handed back too,
++in the position the table put it.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any, Optional, Sequence
++
++from ..plan import expressions as X
++from ..plan.logical import Scan
++from ..storage.table import Index, Table
++from ..util.ordering import compare_values
++
++__all__ = [
++    "AccessPath",
++    "LookupPath",
++    "RangePath",
++    "OrderedPath",
++    "OrderRequest",
++    "choose_access_path",
++]
++
++_RANGE_OPS = frozenset({"<", "<=", ">", ">="})
++#: How a comparison reads once the column is on its left.
++_FLIPPED = {"<": ">", "<=": ">=", ">": "<", ">=": "<="}
++
++
++@dataclass(frozen=True)
++class OrderRequest:
++    """The single sort key a scan could be asked to produce directly."""
++
++    column: str
++    descending: bool = False
++    nulls_first: bool = False
++
++
++@dataclass(frozen=True)
++class AccessPath:
++    """An index and the way a scan will walk it."""
++
++    index: Index
++    column: str
++
++    def offsets(self) -> list[int]:  # pragma: no cover - overridden everywhere
++        raise NotImplementedError
++
++    def describe(self) -> str:  # pragma: no cover - overridden everywhere
++        raise NotImplementedError
++
++
++@dataclass(frozen=True)
++class LookupPath(AccessPath):
++    """Rows found by key: one equality, an ``IN`` list, or ``IS NULL``.
++
++    Keys are looked up one at a time, so the index reports its offsets grouped
++    by key.  They are sorted before use: a lookup finds rows, it does not
++    reorder the table.
++    """
++
++    keys: tuple[Any, ...] = ()
++    nulls: bool = False
++
++    def offsets(self) -> list[int]:
++        if self.nulls:
++            return sorted(self.index.null_offsets())
++        if not self.keys:
++            return []
++        finder = getattr(self.index, "lookup_any", None)
++        found = finder(self.keys) if finder else self.index.equal_any(self.keys)
++        return sorted(found)
++
++    def describe(self) -> str:
++        if self.nulls:
++            return f"lookup {self.column} IS NULL"
++        return f"lookup {self.column} in {len(self.keys)} key(s)"
++
++
++@dataclass(frozen=True)
++class RangePath(AccessPath):
++    """Rows found between bounds, folded from every range conjunct on one column."""
++
++    low: Any = None
++    high: Any = None
++    include_low: bool = True
++    include_high: bool = True
++    empty: bool = False
++
++    def offsets(self) -> list[int]:
++        if self.empty:
++            return []
++        return sorted(
++            self.index.range(
++                low=self.low,
++                high=self.high,
++                include_low=self.include_low,
++                include_high=self.include_high,
++            )
++        )
++
++    def describe(self) -> str:
++        left = "[" if self.include_low else "("
++        right = "]" if self.include_high else ")"
++        return f"range {self.column} {left}{self.low!r}, {self.high!r}{right}"
++
++
++@dataclass(frozen=True)
++class OrderedPath(AccessPath):
++    """Every row, walked in key order, so the sort above can be dropped."""
++
++    descending: bool = False
++    nulls_first: bool = False
++
++    def offsets(self) -> list[int]:
++        return self.index.in_key_order(
++            descending=self.descending, nulls_first=self.nulls_first
++        )
++
++    def describe(self) -> str:
++        direction = "desc" if self.descending else "asc"
++        placement = "nulls first" if self.nulls_first else "nulls last"
++        return f"ordered {self.column} {direction} {placement}"
++
++
++def _is_column(expression: X.Expr, column: str, alias: str) -> bool:
++    """Whether ``expression`` names ``column`` of the relation being scanned."""
++
++    return (
++        isinstance(expression, X.Column)
++        and expression.name == column
++        and expression.qualifier in (None, alias)
++    )
++
++
++def _literal(expression: X.Expr) -> tuple[bool, Any]:
++    """``(True, value)`` when ``expression`` is a constant the index can use."""
++
++    if isinstance(expression, X.Literal):
++        return True, expression.value
++    return False, None
++
++
++def _equality_key(conjunct: X.Expr, column: str, alias: str) -> tuple[bool, Any]:
++    """Recognise ``col = <literal>`` written from either side."""
++
++    if not isinstance(conjunct, X.BinaryExpr) or conjunct.op != "=":
++        return False, None
++    if _is_column(conjunct.left, column, alias):
++        return _literal(conjunct.right)
++    if _is_column(conjunct.right, column, alias):
++        return _literal(conjunct.left)
++    return False, None
++
++
++def _in_keys(conjunct: X.Expr, column: str, alias: str) -> tuple[bool, tuple[Any, ...]]:
++    """Recognise ``col IN (<literals>)``.
++
++    A null in the list matches nothing, so it is dropped rather than looked
++    up, and a list of nothing but nulls leaves no keys at all.
++    """
++
++    if not isinstance(conjunct, X.InList) or conjunct.negated:
++        return False, ()
++    if not _is_column(conjunct.operand, column, alias):
++        return False, ()
++    keys: list[Any] = []
++    for item in conjunct.items:
++        ok, value = _literal(item)
++        if not ok:
++            return False, ()
++        if value is not None:
++            keys.append(value)
++    return True, tuple(keys)
++
++
++def _is_null_test(conjunct: X.Expr, column: str, alias: str) -> bool:
++    return (
++        isinstance(conjunct, X.IsNull)
++        and not conjunct.negated
++        and _is_column(conjunct.operand, column, alias)
++    )
++
++
++def _range_bound(conjunct: X.Expr, column: str, alias: str) -> Optional[tuple[str, Any]]:
++    """Recognise a comparison and report it with the column on the left."""
++
++    if not isinstance(conjunct, X.BinaryExpr) or conjunct.op not in _RANGE_OPS:
++        return None
++    if _is_column(conjunct.left, column, alias):
++        ok, value = _literal(conjunct.right)
++        return (conjunct.op, value) if ok else None
++    if _is_column(conjunct.right, column, alias):
++        ok, value = _literal(conjunct.left)
++        return (_FLIPPED[conjunct.op], value) if ok else None
++    return None
++
++
++def _fold_bounds(bounds: Sequence[tuple[str, Any]]) -> dict[str, Any]:
++    """Intersect every comparison on one column into a single interval.
++
++    A bound of NULL is not a bound: comparing with NULL is unknown, and WHERE
++    keeps only rows that are exactly TRUE, so such a predicate matches nothing
++    at all.
++    """
++
++    folded: dict[str, Any] = {
++        "low": None,
++        "high": None,
++        "include_low": True,
++        "include_high": True,
++        "empty": False,
++    }
++    for op, value in bounds:
++        if value is None:
++            folded["empty"] = True
++            continue
++        if op in (">", ">="):
++            inclusive = op == ">="
++            if folded["low"] is None:
++                folded["low"], folded["include_low"] = value, inclusive
++                continue
++            order = compare_values(value, folded["low"])
++            if order > 0:
++                folded["low"], folded["include_low"] = value, inclusive
++            elif order == 0 and not inclusive:
++                folded["include_low"] = False
++        else:
++            inclusive = op == "<="
++            if folded["high"] is None:
++                folded["high"], folded["include_high"] = value, inclusive
++                continue
++            order = compare_values(value, folded["high"])
++            if order < 0:
++                folded["high"], folded["include_high"] = value, inclusive
++            elif order == 0 and not inclusive:
++                folded["include_high"] = False
++    return folded
++
++
++def _lookup_for(
++    index: Index, column: str, alias: str, conjuncts: Sequence[X.Expr]
++) -> Optional[tuple[LookupPath, int]]:
++    """The first key lookup this index can answer, and which conjunct it uses."""
++
++    for position, conjunct in enumerate(conjuncts):
++        ok, value = _equality_key(conjunct, column, alias)
++        if ok:
++            keys = () if value is None else (value,)
++            return LookupPath(index=index, column=column, keys=keys), position
++        ok, keys = _in_keys(conjunct, column, alias)
++        if ok:
++            return LookupPath(index=index, column=column, keys=keys), position
++        if index.kind == "hash" and _is_null_test(conjunct, column, alias):
++            return LookupPath(index=index, column=column, nulls=True), position
++    return None
++
++
++def _range_for(
++    index: Index, column: str, alias: str, conjuncts: Sequence[X.Expr]
++) -> Optional[tuple[RangePath, list[int]]]:
++    """The interval this sorted index can answer, and which conjuncts it uses."""
++
++    if index.kind != "sorted":
++        return None
++    bounds: list[tuple[str, Any]] = []
++    used: list[int] = []
++    for position, conjunct in enumerate(conjuncts):
++        bound = _range_bound(conjunct, column, alias)
++        if bound is not None:
++            bounds.append(bound)
++            used.append(position)
++    if not bounds:
++        return None
++    folded = _fold_bounds(bounds)
++    return RangePath(index=index, column=column, **folded), used
++
++
++def choose_access_path(
++    table: Table, scan: Scan, order: Optional[OrderRequest] = None
++) -> tuple[Optional[AccessPath], tuple[X.Expr, ...]]:
++    """Pick at most one index for ``scan`` and report what it cannot answer.
++
++    A key lookup is worth more than a range and a range more than an ordered
++    read, because a lookup usually touches fewest rows.  Within one rank the
++    table's own schema order decides, so the choice never depends on the order
++    predicates happen to be written in.
++    """
++
++    conjuncts = list(scan.pushed_filters)
++    columns = table.indexed_columns()
++    if not columns:
++        return None, tuple(conjuncts)
++
++    for column in columns:
++        index = table.index_for(column)
++        found = _lookup_for(index, column, scan.alias, conjuncts)
++        if found is not None:
++            path, position = found
++            residual = [c for i, c in enumerate(conjuncts) if i != position]
++            return path, tuple(residual)
++
++    for column in columns:
++        index = table.index_for(column)
++        found = _range_for(index, column, scan.alias, conjuncts)
++        if found is not None:
++            path, used = found
++            residual = [c for i, c in enumerate(conjuncts) if i not in set(used)]
++            return path, tuple(residual)
++
++    if order is not None:
++        index = table.index_for(order.column)
++        if index is not None and index.kind == "sorted":
++            path = OrderedPath(
++                index=index,
++                column=order.column,
++                descending=order.descending,
++                nulls_first=order.nulls_first,
++            )
++            return path, tuple(conjuncts)
++
++    return None, tuple(conjuncts)
+diff --git a/slateql/execution/operators/__init__.py b/slateql/execution/operators/__init__.py
+index 01a8042..18a92c4 100644
+--- a/slateql/execution/operators/__init__.py
++++ b/slateql/execution/operators/__init__.py
+@@ -5,6 +5,7 @@ from .base import BinaryOperator, LeafOperator, Operator, UnaryOperator
+ from .distinct import DistinctOperator
+ from .filter import FilterOperator
+ from .hash_join import HashJoinOperator
++from .index_scan import IndexScan
+ from .limit import LimitOperator
+ from .nested_loop_join import NestedLoopJoinOperator
+ from .project import ProjectOperator
+@@ -22,6 +23,7 @@ __all__ = [
+     "DistinctOperator",
+     "FilterOperator",
+     "HashJoinOperator",
++    "IndexScan",
+     "LimitOperator",
+     "NestedLoopJoinOperator",
+     "ProjectOperator",
+diff --git a/slateql/execution/operators/index_scan.py b/slateql/execution/operators/index_scan.py
+new file mode 100644
+index 0000000..a198ba3
+--- /dev/null
++++ b/slateql/execution/operators/index_scan.py
+@@ -0,0 +1,94 @@
++"""Reading a table through one of its indexes.
++
++The operator is the scan's other shape: instead of pulling every row from the
++source and throwing most away, it asks an index which rows can match, then
++fetches those and nothing else.  Everything downstream is unchanged, so the
++rows arrive in the same positions a full scan would have produced them in,
++and predicates the index could not answer are still applied here.
++
++Rows are fetched one at a time inside the generator, which is what lets a
++LIMIT above an ordered read stop the scan early instead of paying for rows
++nobody asked for.
++"""
++
++from __future__ import annotations
++
++from typing import Any, Iterator, Optional, Sequence
++
++from ...plan.expressions import Expr
++from ...storage.table import Table
++from ...types.schema import Schema
++from ..access_path import AccessPath
++from ..batch import RecordBatch
++from ..context import ExecutionContext
++from ..evaluator import ExpressionEvaluator
++from .base import LeafOperator
++
++__all__ = ["IndexScan"]
++
++
++class IndexScan(LeafOperator):
++    """Fetches the rows an index selects, in the order the path reports them."""
++
++    def __init__(
++        self,
++        table: Table,
++        path: AccessPath,
++        output_schema: Schema,
++        *,
++        projection: Optional[Sequence[int]] = None,
++        filters: Sequence[Expr] = (),
++    ) -> None:
++        self._table = table
++        self._path = path
++        self._schema = output_schema
++        self._projection = list(projection) if projection is not None else None
++        self._filters = tuple(filters)
++
++    @property
++    def schema(self) -> Schema:
++        return self._schema
++
++    @property
++    def table(self) -> Table:
++        return self._table
++
++    @property
++    def path(self) -> AccessPath:
++        return self._path
++
++    def describe(self) -> str:
++        text = f"IndexScan {self._table.name} {self._path.describe()}"
++        if self._projection is not None:
++            text += f" [{', '.join(self._schema.names)}]"
++        if self._filters:
++            text += " filter=" + " AND ".join(f.to_sql() for f in self._filters)
++        return text
++
++    def execute(self, context: ExecutionContext) -> Iterator[RecordBatch]:
++        evaluator = ExpressionEvaluator(
++            context.registry, strict_casts=context.strict_casts
++        )
++        predicates = [
++            evaluator.compile_predicate(expression, self._schema)
++            for expression in self._filters
++        ]
++        index = self._path.index
++        projection = self._projection
++        buffer: list[list[Any]] = []
++        size = context.batch_size
++        for offset in self._path.offsets():
++            (row,) = index.rows_at((offset,))
++            if projection is not None:
++                row = [row[position] for position in projection]
++            context.metrics.rows_scanned += 1
++            if predicates and not all(predicate(row) for predicate in predicates):
++                continue
++            buffer.append(row)
++            if len(buffer) >= size:
++                context.metrics.record_batch(len(buffer))
++                yield RecordBatch(schema=self._schema, rows=buffer)
++                buffer = []
++        if buffer:
++            context.metrics.record_batch(len(buffer))
++            yield RecordBatch(schema=self._schema, rows=buffer)
+diff --git a/slateql/execution/planner.py b/slateql/execution/planner.py
+index 712508e..d0c2cf9 100644
+--- a/slateql/execution/planner.py
++++ b/slateql/execution/planner.py
+@@ -1,8 +1,16 @@
+ """Lowers a logical plan into a tree of physical operators.
+ 
+-The planner makes exactly one interesting decision: which join algorithm to
+-use.  Everything else is a mechanical one-to-one mapping, which keeps the
+-optimizer -- not the planner -- responsible for plan quality.
++The planner makes two interesting decisions: which join algorithm to use, and
++which access path a scan gets.  Everything else is a mechanical one-to-one
++mapping, which keeps the optimizer -- not the planner -- responsible for plan
++quality.
++
++An access path is a choice of index, and it is made here rather than in a
++rewrite rule because it depends on the catalog rather than on the plan: the
++same logical plan runs one way against an indexed table and another way
++against the same table without indexes, and answers alike either way.  A sort
++whose single key is the column of a sorted index disappears entirely, since
++the scan below it can produce that order itself.
+ """
+ 
+ from __future__ import annotations
+@@ -28,12 +36,14 @@ from ..plan.logical import (
+ from ..sql.ast_nodes import JoinKind
+ from ..storage.catalog import Catalog
+ from ..types.schema import Schema
++from .access_path import OrderedPath, OrderRequest, choose_access_path
+ from .operators import (
+     AggregateOperator,
+     DistinctOperator,
+     EmptyScan,
+     FilterOperator,
+     HashJoinOperator,
++    IndexScan,
+     LimitOperator,
+     NestedLoopJoinOperator,
+     Operator,
+@@ -72,6 +82,9 @@ class PhysicalPlanner:
+                 self.build(plan.input), plan.group_by, plan.aggregates
+             )
+         if isinstance(plan, Sort):
++            ordered = self._build_ordered(plan)
++            if ordered is not None:
++                return ordered
+             return SortOperator(self.build(plan.input), plan.keys)
+         if isinstance(plan, Limit):
+             return LimitOperator(self.build(plan.input), plan.count, plan.offset)
+@@ -88,14 +101,74 @@ class PhysicalPlanner:
+             )
+         raise PlanningError(f"cannot lower plan node {type(plan).__name__}")
+ 
+-    def _build_scan(self, plan: Scan) -> Operator:
++    def _build_scan(self, plan: Scan, order: Optional[OrderRequest] = None) -> Operator:
+         table = self.catalog.get(plan.table)
+-        return TableScan(
++        path, residual = choose_access_path(table, plan, order=order)
++        if path is None:
++            return TableScan(
++                table,
++                plan.schema,
++                projection=plan.projection,
++                filters=plan.pushed_filters,
++            )
++        return IndexScan(
+             table,
++            path,
+             plan.schema,
+             projection=plan.projection,
+-            filters=plan.pushed_filters,
++            filters=residual,
++        )
++
++    def _build_ordered(self, plan: Sort) -> Optional[Operator]:
++        """Serve a sort from an index, or report that nothing can.
++
++        Only a single key on a plain column can be served, and only when the
++        scan underneath is reachable through projections that do no more than
++        rename columns: anything computed in between means the key is not the
++        indexed value any more.  The scan has the last word, because a lookup
++        it can do instead is worth more than the order, and then the sort has
++        to stay.
++        """
++
++        if len(plan.keys) != 1:
++            return None
++        key = plan.keys[0]
++        if not isinstance(key.expression, X.Column):
++            return None
++        name = key.expression.name
++        qualifier = key.expression.qualifier
++        projections: list[Project] = []
++        node: LogicalPlan = plan.input
++        while isinstance(node, Project):
++            mapped = None
++            for item in node.projections:
++                if not isinstance(item.expression, X.Column):
++                    return None
++                if item.name == name:
++                    mapped = item.expression
++            if mapped is None:
++                return None
++            projections.append(node)
++            name, qualifier = mapped.name, mapped.qualifier
++            node = node.input
++        if not isinstance(node, Scan):
++            return None
++        position = node.schema.try_index_of(name, qualifier)
++        if position is None:
++            return None
++        request = OrderRequest(
++            column=node.schema[position].name,
++            descending=key.descending,
++            nulls_first=key.nulls_first,
+         )
++        operator = self._build_scan(node, order=request)
++        if not isinstance(operator, IndexScan):
++            return None
++        if not isinstance(operator.path, OrderedPath):
++            return None
++        for project in reversed(projections):
++            operator = ProjectOperator(operator, project.projections)
++        return operator
+ 
+     def _build_join(self, plan: Join) -> Operator:
+         left = self.build(plan.left)
+diff --git a/slateql/session.py b/slateql/session.py
+index 9018dc7..179ed55 100644
+--- a/slateql/session.py
++++ b/slateql/session.py
+@@ -35,7 +35,7 @@ from .storage.catalog import Catalog
+ from .storage.sources.base import DataSource
+ from .storage.sources.csv_source import CsvSource
+ from .storage.sources.jsonl_source import JsonlSource
+-from .storage.table import Table
++from .storage.table import Index, Table
+ from .types.datatypes import INTEGER, STRING
+ from .types.schema import Field, Schema
+ 
+@@ -45,6 +45,14 @@ _TABLES_SCHEMA = Schema.of(("table_name", STRING), ("columns", INTEGER))
+ _COLUMNS_SCHEMA = Schema.of(
+     ("column_name", STRING), ("data_type", STRING), ("nullable", STRING)
+ )
++_INDEXES_SCHEMA = Schema.of(
++    ("table_name", STRING),
++    ("column_name", STRING),
++    ("kind", STRING),
++    ("entries", INTEGER),
++    ("distinct_keys", INTEGER),
++    ("has_nulls", STRING),
++)
+ 
+ 
+ class Session:
+@@ -140,6 +148,23 @@ class Session:
+ 
+         return self.catalog.analyze(name)
+ 
++    # -- indexes ---------------------------------------------------------
++
++    def create_index(self, table: str, column: str, kind: str = "hash") -> Index:
++        """Index ``column`` of ``table``, replacing any index already on it.
++
++        ``kind`` picks the shape: ``"hash"`` for point lookups, ``"sorted"``
++        for ranges and ordered reads.  Nothing about a query's answer changes;
++        only the work behind it does.
++        """
++
++        return self.catalog.get(table).create_index(column, kind=kind)
++
++    def drop_index(self, table: str, column: str) -> bool:
++        """Remove the index on a column, reporting whether one was there."""
++
++        return self.catalog.get(table).drop_index(column)
++
+     # -- planning --------------------------------------------------------
+ 
+     def logical_plan(self, statement: str) -> LogicalPlan:
+@@ -237,6 +262,19 @@ class Session:
+                 for name in self.catalog.table_names()
+             ]
+             operator = ValuesOperator(_TABLES_SCHEMA, rows)
++        elif statement.target == "indexes":
++            rows = [
++                [
++                    table_name,
++                    stats.column,
++                    stats.kind,
++                    stats.entries,
++                    stats.distinct_keys,
++                    "YES" if stats.has_nulls else "NO",
++                ]
++                for table_name, stats in self.catalog.index_stats(statement.table)
++            ]
++            operator = ValuesOperator(_INDEXES_SCHEMA, rows)
+         elif statement.target == "columns":
+             if not statement.table:
+                 raise SlateQLError("SHOW COLUMNS requires a table name")
+diff --git a/slateql/sql/keywords.py b/slateql/sql/keywords.py
+index 9f618cd..420a98c 100644
+--- a/slateql/sql/keywords.py
++++ b/slateql/sql/keywords.py
+@@ -72,6 +72,7 @@ NON_RESERVED = frozenset(
+         "SHOW",
+         "TABLES",
+         "COLUMNS",
++        "INDEXES",
+         "DESCRIBE",
+         "VALUES",
+         "USING",
+diff --git a/slateql/sql/parser.py b/slateql/sql/parser.py
+index 732666b..b1af71b 100644
+--- a/slateql/sql/parser.py
++++ b/slateql/sql/parser.py
+@@ -188,12 +188,16 @@ class Parser:
+             return ShowStatement(target="columns", table=name)
+         if self._match_keyword("TABLES"):
+             return ShowStatement(target="tables")
++        if self._match_keyword("INDEXES"):
++            if self._match_keyword("FROM"):
++                return ShowStatement(target="indexes", table=self._parse_object_name())
++            return ShowStatement(target="indexes")
+         if self._match_keyword("COLUMNS"):
+             self._expect_keyword("FROM")
+             return ShowStatement(target="columns", table=self._parse_object_name())
+         raise self._error(
+             f"unsupported SHOW target {self.current.describe()}",
+-            hint="try SHOW TABLES or SHOW COLUMNS FROM <table>",
++            hint="try SHOW TABLES, SHOW COLUMNS FROM <table> or SHOW INDEXES",
+         )
+ 
+     # -- query level -----------------------------------------------------
+diff --git a/slateql/sql/unparser.py b/slateql/sql/unparser.py
+index 111f10c..0ea436b 100644
+--- a/slateql/sql/unparser.py
++++ b/slateql/sql/unparser.py
+@@ -222,6 +222,10 @@ def unparse(node: Node) -> str:
+     if isinstance(node, ShowStatement):
+         if node.target == "tables":
+             return "SHOW TABLES"
++        if node.target == "indexes":
++            if not node.table:
++                return "SHOW INDEXES"
++            return f"SHOW INDEXES FROM {quote_identifier(node.table)}"
+         return f"SHOW COLUMNS FROM {quote_identifier(node.table or '')}"
+     if isinstance(node, Expression):
+         return unparse_expression(node)
+diff --git a/slateql/storage/__init__.py b/slateql/storage/__init__.py
+index 852af79..675399c 100644
+--- a/slateql/storage/__init__.py
++++ b/slateql/storage/__init__.py
+@@ -6,7 +6,7 @@ from .index import HashIndex, IndexStats, SortedIndex
+ from .schema_infer import infer_field_type, infer_schema_from_rows, parse_scalar
+ from .sources import CsvSource, DataSource, JsonlSource, MemorySource
+ from .stats import ColumnStatistics, TableStatistics, compute_statistics
+-from .table import Table
++from .table import Index, Table
+ 
+ __all__ = [
+     "Catalog",
+@@ -27,4 +27,5 @@ __all__ = [
+     "TableStatistics",
+     "compute_statistics",
+     "Table",
++    "Index",
+ ]
+diff --git a/slateql/storage/catalog.py b/slateql/storage/catalog.py
+index d028fe6..8043442 100644
+--- a/slateql/storage/catalog.py
++++ b/slateql/storage/catalog.py
+@@ -12,6 +12,7 @@ from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
+ from ..errors import UnknownTableError
+ from ..types.schema import Schema
+ from ..util.text import suggest
++from .index import IndexStats
+ from .sources.base import DataSource
+ from .sources.memory import MemorySource
+ from .table import Table
+@@ -114,6 +115,20 @@ class Catalog:
+         targets = [self.get(name)] if name else self.tables()
+         return {table.name: table.analyze().row_count for table in targets}
+ 
++    def index_stats(self, name: Optional[str] = None) -> list[tuple[str, IndexStats]]:
++        """Every index in the catalog, paired with the table that holds it.
++
++        Ordered by table name and then by column, so ``SHOW INDEXES`` reads
++        the same way twice over regardless of registration order.
++        """
++
++        targets = [self.get(name)] if name else self.tables()
++        rows: list[tuple[str, IndexStats]] = []
++        for table in sorted(targets, key=lambda item: item.name):
++            for stats in sorted(table.index_stats(), key=lambda item: item.column):
++                rows.append((table.name, stats))
++        return rows
++
+     def __contains__(self, name: object) -> bool:
+         return isinstance(name, str) and self.has(name)
+ 
+diff --git a/slateql/storage/index.py b/slateql/storage/index.py
+index a83c5dc..2865e2d 100644
+--- a/slateql/storage/index.py
++++ b/slateql/storage/index.py
+@@ -1,9 +1,15 @@
+ """Simple in-memory indexes.
+ 
+-Indexes are built explicitly and are currently consulted only by callers that
+-ask for them directly; the planner does not yet consider them when choosing an
+-access path.  They are useful today for repeated point lookups from embedding
+-code.
++An index is built explicitly, over the rows a table holds at the time, and it
++keeps those rows so that a later lookup can hand them back without reading the
++source again.  Two shapes ship in the box: a hash index, which answers
++equality, ``IN`` and ``IS NULL``, and a sorted index, which answers equality
++and ``IN``, scans ranges, and can walk its rows in key order.
++
++Both report *offsets* into the rows they were built from, and they report them
++in whatever order the index itself found them, which is not the order the
++table stores them in.  A caller that cares about row order sorts the offsets
++before fetching, which is cheap because an offset is an integer.
+ """
+ 
+ from __future__ import annotations
+@@ -26,12 +32,36 @@ class IndexStats:
+     entries: int
+     distinct_keys: int
+     has_nulls: bool
++    kind: str = "hash"
+ 
+ 
+-class HashIndex:
++class _RowStore:
++    """Row storage shared by both index shapes.
++
++    Rows are copied at build time.  An index is a snapshot: it answers from
++    what it saw, so a query it serves reads exactly the rows it fetches and
++    nothing else.
++    """
++
++    __slots__ = ()
++
++    def _store(self, rows: Iterable[Sequence[Any]]) -> list[list[Any]]:
++        return [list(row) for row in rows]
++
++    def rows_at(self, offsets: Iterable[int]) -> list[list[Any]]:
++        """The rows at ``offsets``, copied, in the order the offsets came."""
++
++        stored = self._rows  # type: ignore[attr-defined]
++        return [list(stored[offset]) for offset in offsets]
++
++
++class HashIndex(_RowStore):
+     """Maps each distinct key to the row offsets holding it."""
+ 
+-    __slots__ = ("_column", "_ordinal", "_buckets", "_null_rows", "_size")
++    __slots__ = ("_column", "_ordinal", "_buckets", "_null_rows", "_size", "_rows")
++
++    #: How ``SHOW INDEXES`` names this shape.
++    kind = "hash"
+ 
+     def __init__(self, schema: Schema, column: str) -> None:
+         self._column = column
+@@ -39,6 +69,7 @@ class HashIndex:
+         self._buckets: dict[Any, list[int]] = {}
+         self._null_rows: list[int] = []
+         self._size = 0
++        self._rows: list[list[Any]] = []
+ 
+     @property
+     def column(self) -> str:
+@@ -50,7 +81,8 @@ class HashIndex:
+         self._buckets.clear()
+         self._null_rows.clear()
+         self._size = 0
+-        for offset, row in enumerate(rows):
++        self._rows = self._store(rows)
++        for offset, row in enumerate(self._rows):
+             value = row[self._ordinal]
+             self._size += 1
+             if value is None:
+@@ -71,6 +103,22 @@ class HashIndex:
+             return []
+         return list(self._buckets.get(key, ()))
+ 
++    def lookup_any(self, keys: Iterable[Any]) -> list[int]:
++        """Row offsets matching any of ``keys``, each offset reported once.
++
++        Keys are looked up one at a time, so the offsets arrive grouped by key
++        and a repeated key would otherwise repeat its rows.
++        """
++
++        seen: set[int] = set()
++        out: list[int] = []
++        for key in keys:
++            for offset in self.lookup(key):
++                if offset not in seen:
++                    seen.add(offset)
++                    out.append(offset)
++        return out
++
+     def contains(self, key: Any) -> bool:
+         return key is not None and key in self._buckets
+ 
+@@ -83,6 +131,7 @@ class HashIndex:
+             entries=self._size,
+             distinct_keys=len(self._buckets),
+             has_nulls=bool(self._null_rows),
++            kind=self.kind,
+         )
+ 
+     def __len__(self) -> int:
+@@ -92,20 +141,37 @@ class HashIndex:
+         return iter(self._buckets)
+ 
+ 
+-class SortedIndex:
++class SortedIndex(_RowStore):
+     """Keeps row offsets ordered by key so that range scans are cheap."""
+ 
+-    __slots__ = ("_column", "_ordinal", "_entries")
++    __slots__ = ("_column", "_ordinal", "_entries", "_null_rows", "_size", "_rows")
++
++    #: How ``SHOW INDEXES`` names this shape.
++    kind = "sorted"
+ 
+     def __init__(self, schema: Schema, column: str) -> None:
+         self._column = column
+         self._ordinal = schema.index_of(column)
+         self._entries: list[tuple[Any, int]] = []
++        self._null_rows: list[int] = []
++        self._size = 0
++        self._rows: list[list[Any]] = []
++
++    @property
++    def column(self) -> str:
++        return self._column
+ 
+     def build(self, rows: Iterable[Sequence[Any]]) -> "SortedIndex":
++        self._rows = self._store(rows)
++        self._size = len(self._rows)
++        self._null_rows = [
++            offset
++            for offset, row in enumerate(self._rows)
++            if row[self._ordinal] is None
++        ]
+         entries = [
+             (row[self._ordinal], offset)
+-            for offset, row in enumerate(rows)
++            for offset, row in enumerate(self._rows)
+             if row[self._ordinal] is not None
+         ]
+         entries.sort(key=_SortableKey)
+@@ -135,6 +201,73 @@ class SortedIndex:
+             out.append(offset)
+         return out
+ 
++    def equal(self, key: Any) -> list[int]:
++        """Row offsets whose key equals ``key``.  NULL never matches."""
++
++        if key is None:
++            return []
++        return [
++            offset
++            for entry_key, offset in self._entries
++            if compare_values(entry_key, key) == 0
++        ]
++
++    def equal_any(self, keys: Iterable[Any]) -> list[int]:
++        """Row offsets matching any of ``keys``, each offset reported once."""
++
++        seen: set[int] = set()
++        out: list[int] = []
++        for key in keys:
++            for offset in self.equal(key):
++                if offset not in seen:
++                    seen.add(offset)
++                    out.append(offset)
++        return out
++
++    def in_key_order(
++        self, *, descending: bool = False, nulls_first: bool = False
++    ) -> list[int]:
++        """Every row offset, ordered by key.
++
++        Entries are held ascending by key and, within one key, by offset.
++        Descending reverses the *keys* only: rows sharing a key keep the order
++        the table gave them, which is what makes a sort on this column stable.
++        Rows whose key is null are not in the entry list at all, so they go
++        back in at whichever end the caller asks for.
++        """
++
++        ordered: list[int] = []
++        if descending:
++            groups: list[list[int]] = []
++            previous: Any = None
++            for key, offset in self._entries:
++                if not groups or compare_values(key, previous) != 0:
++                    groups.append([])
++                    previous = key
++                groups[-1].append(offset)
++            for group in reversed(groups):
++                ordered.extend(group)
++        else:
++            ordered = [offset for _, offset in self._entries]
++        nulls = list(self._null_rows)
++        return nulls + ordered if nulls_first else ordered + nulls
++
++    def null_offsets(self) -> list[int]:
++        return list(self._null_rows)
++
++    def stats(self) -> IndexStats:
++        keys: list[Any] = []
++        for key, _ in self._entries:
++            if not keys or compare_values(key, keys[-1]) != 0:
++                keys.append(key)
++        return IndexStats(
++            column=self._column,
++            entries=self._size,
++            distinct_keys=len(keys),
++            has_nulls=bool(self._null_rows),
++            kind=self.kind,
++        )
++
+     def __len__(self) -> int:
+         return len(self._entries)
+ 
+diff --git a/slateql/storage/table.py b/slateql/storage/table.py
+index 0a26660..eb782cb 100644
+--- a/slateql/storage/table.py
++++ b/slateql/storage/table.py
+@@ -1,14 +1,21 @@
+-"""A registered table: a name, a data source, and cached statistics."""
++"""A registered table: a name, a data source, cached statistics, and indexes."""
+ 
+ from __future__ import annotations
+ 
+-from typing import Any, Iterator, Optional, Sequence
++from typing import Any, Iterator, Optional, Sequence, Union
+ 
++from ..errors import ConfigurationError
+ from ..types.schema import Schema
++from .index import HashIndex, IndexStats, SortedIndex
+ from .sources.base import DataSource
+ from .stats import TableStatistics, compute_statistics
+ 
+-__all__ = ["Table"]
++__all__ = ["Table", "Index"]
++
++#: Either index shape a table may carry.
++Index = Union[HashIndex, SortedIndex]
++
++_INDEX_KINDS = {"hash": HashIndex, "sorted": SortedIndex}
+ 
+ _DEFAULT_ROW_ESTIMATE = 1_000
+ 
+@@ -16,13 +23,14 @@ _DEFAULT_ROW_ESTIMATE = 1_000
+ class Table:
+     """Couples a catalog name with the source that supplies its rows."""
+ 
+-    __slots__ = ("_name", "_source", "_statistics", "_estimated_rows")
++    __slots__ = ("_name", "_source", "_statistics", "_estimated_rows", "_indexes")
+ 
+     def __init__(self, name: str, source: DataSource) -> None:
+         self._name = name
+         self._source = source
+         self._statistics: Optional[TableStatistics] = None
+         self._estimated_rows: Optional[int] = None
++        self._indexes: dict[str, Index] = {}
+ 
+     @property
+     def name(self) -> str:
+@@ -64,6 +72,49 @@ class Table:
+         self._statistics = None
+         self._estimated_rows = None
+ 
++    # -- indexes ---------------------------------------------------------
++
++    def create_index(self, column: str, kind: str = "hash") -> Index:
++        """Build an index over ``column`` and keep it on this table.
++
++        The column is resolved against the table schema first, so an unknown
++        name fails the way a query naming it would.  Building a second index
++        over a column that already has one replaces it: two indexes on one
++        column would only ever disagree.
++        """
++
++        name = self.schema[self.schema.index_of(column)].name
++        factory = _INDEX_KINDS.get(kind)
++        if factory is None:
++            raise ConfigurationError(
++                f"unknown index kind: {kind!r}",
++                hint="index kinds are 'hash' and 'sorted'",
++            )
++        index = factory(self.schema, name).build(self._source.scan())
++        self._indexes[name] = index
++        return index
++
++    def drop_index(self, column: str) -> bool:
++        """Remove the index on ``column``, reporting whether one was there."""
++
++        name = self.schema[self.schema.index_of(column)].name
++        return self._indexes.pop(name, None) is not None
++
++    def index_for(self, column: str) -> Optional[Index]:
++        """The index on ``column``, or ``None`` when it has none."""
++
++        return self._indexes.get(column)
++
++    def indexed_columns(self) -> list[str]:
++        """Indexed column names, in the table's own schema order."""
++
++        return [field.name for field in self.schema if field.name in self._indexes]
++
++    def index_stats(self) -> list[IndexStats]:
++        """One :class:`IndexStats` per index, in schema order."""
++
++        return [self._indexes[name].stats() for name in self.indexed_columns()]
++
+     def estimated_row_count(self) -> int:
+         """Best available row-count estimate.
+ 

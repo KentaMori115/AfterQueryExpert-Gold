@@ -1,0 +1,1212 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1903963..24feb4c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,19 @@
+ # Changelog
+ 
++## Unreleased
++
++- `air` — the ventilation, which the library previously stopped short of:
++  the airway and Atkinson's resistance, whose cube of the area is the
++  whole of ventilation economics; the fan, which has no duty of its own
++  but a curve, and settles where that curve crosses the pit; natural
++  ventilation, which is a fan nobody bought and which reverses in
++  summer; the three things that ask for air — the men, the coal and the
++  gas — of which only the largest is answered and never their sum; the
++  split, the regulator that is always a loss and always cheaper than
++  another fan, and the depth at which a stated fan gives out.
++- `cli` — `sheave ventilation`, which reports where a fan settles against
++  a shaft and which of the three asks.
++
+ ## 0.1.0
+ 
+ The first of it: the rope, the machine that drives it, and the colliery
+diff --git a/README.md b/README.md
+index 2c88bf4..6ea0051 100644
+--- a/README.md
++++ b/README.md
+@@ -71,6 +71,7 @@ severity  part
+ | `capel`      | the termination, and the calendar it puts on a sound rope        |
+ | `shaft`      | what will and will not go down the hole                          |
+ | `guides`     | what keeps a conveyance from swinging                            |
++| `ventilation` | where the fan settles, and which of the men, the coal and the gas asks |
+ | `drum`       | the fleet angle, and the second layer that is worse in every way  |
+ | `koepe`      | the friction winder, and the ratio it has to live inside          |
+ | `conveyance` | the cage against the skip, which is an argument about tare        |
+@@ -105,8 +106,22 @@ rope.mostHanging(line, 942);     // 222 kN, once the rope's own weight is off
+ ```
+ 
+ The namespaces follow the order the load travels: `units`, `rope`,
+-`shaft`, `drum`, `cage`, `cycle`, `power`, `safety`, `winder`, `design`,
+-`costing`, `works`, `report`, `cli`.
++`shaft`, `air`, `drum`, `cage`, `cycle`, `power`, `safety`, `winder`,
++`design`, `costing`, `works`, `report`, `cli`.
++
++```ts
++import { air, shaft } from "sheave";
++
++const hole = shaft.shaft("the upcast", 7.3, 942);
++const road = air.shaftAirway(hole, 2.6);      // the depth, the free area, the whole lining
++const blower = air.fan("the fan", 3500, 400, 0.75);
++
++air.resistance(road);                          // 0.002437 Ns²/m⁸ — kCL/A³, and the cube is the whole of it
++air.operatingPoint(blower, 0.0324, air.naturalPressure(942));
++                                               // 270 m³/s at 2365 Pa, where the curve crosses RQ²
++air.wanted(400, 2000, 0.6);                    // 100 m³/s
++air.decidedBy(400, 2000, 0.6);                 // "coal"
++```
+ 
+ ## Four things it is opinionated about
+ 
+@@ -153,9 +168,12 @@ the link that works the fewest hours.
+ 
+ Rope dynamics of any kind — the longitudinal bounce that makes a deep
+ winder's rope a spring with a period of its own, and the torsional
+-unwinding that makes a single rope spin a conveyance. Shaft sinking.
+-Ventilation beyond the free area. And anything about what happens when a
+-wind goes wrong past the point where the safety gear acts.
++unwinding that makes a single rope spin a conveyance. Shaft sinking. The
++ventilation network as a network — the air here is a fan against a
++resistance and a split against a regulator, with no mesh solved, no
++leakage through stoppings and no recirculation. And anything about what
++happens when a wind goes wrong past the point where the safety gear
++acts.
+ 
+ ## Licence
+ 
+diff --git a/docs/where-the-numbers-come-from.md b/docs/where-the-numbers-come-from.md
+index f75f9d5..2b65dc7 100644
+--- a/docs/where-the-numbers-come-from.md
++++ b/docs/where-the-numbers-come-from.md
+@@ -22,6 +22,9 @@ These cannot be argued with and are not fitted to anything.
+ | a taut string's stiffness         | 4T/L               | statics                  |
+ | a pendulum's period               | 2π√(L/g)           | dynamics                 |
+ | a beam's deflection               | FL³/48EI           | statics                  |
++| the square law of an airway       | p = RQ²            | fluid mechanics          |
++| natural ventilating pressure      | Δρgh               | statics                  |
++| roads beside one another          | (Σ1/√R)⁻²          | the square law           |
+ 
+ ## Regulation
+ 
+@@ -40,6 +43,8 @@ amounts to the same thing.
+ | men wound at, at most                 | 12 m/s                   |
+ | and accelerated at                    | 0.8 m/s²                 |
+ | floor a man is allowed                | 0.2 m²                   |
++| air a man is entitled to              | 0.1 m³/s                 |
++| firedamp in a return, at most         | 1.25 %                   |
+ 
+ The shape of the first three is the important part. A rule with a single
+ number in it would either be too slack for a shallow shaft or would make
+@@ -64,6 +69,9 @@ with.
+ | checkerwork of a stove      | —                                       | not modelled here                             |
+ | out-of-square lateral load  | 2 % of the conveyance's weight          | practice                                      |
+ | conveyance shoe span        | 5 m                                     | practice                                      |
++| airway resistance           | Atkinson's kCL/A³                       | a century of shaft measurements               |
++| a fan's characteristic      | p₀(1−(Q/Q₀)²)                           | a fan maker's curve between its two ends      |
++| bunton drag                 | a twentieth of the section a set        | practice                                      |
+ 
+ ## Practice
+ 
+@@ -85,6 +93,11 @@ override.
+ | conveyance to lining                | 0.30 m                   |
+ | conveyance to its own guides        | 0.05 m                   |
+ | air brisk above                     | 12 m/s                   |
++| friction of a lined shaft, k        | 0.004 kg/m³              |
++| air a tonne a day wants             | 0.05 m³/s                |
++| a downcast column                   | 1.2 kg/m³                |
++| an upcast column                    | 1.15 kg/m³               |
++| fan efficiency                      | 75 %                     |
+ | arrestor gear retardation           | 9.81 m/s²                |
+ | emergency brake                     | 2.5 m/s²                 |
+ | working brake                       | 1.1 m/s²                 |
+@@ -105,8 +118,11 @@ the shape of the sheet can be seen, not so that anybody can quote them.
+ 
+ Rope dynamics of any kind — the longitudinal bounce that makes a deep
+ winder's rope a spring with a period of its own, and the torsional
+-unwinding that makes a single rope spin a conveyance. Shaft sinking.
+-Ventilation beyond the free area. The electrical side of the winder past
++unwinding that makes a single rope spin a conveyance. Shaft sinking. The
++ventilation network as a network: the air is modelled as a fan against a
++resistance and a split against a regulator, with no mesh solved, no
++leakage through stoppings and no recirculation. The electrical side of
++the winder past
+ its rating. And anything at all about what happens when a wind goes
+ wrong past the point where the safety gear acts, which is a subject with
+ its own literature and no arithmetic in it worth the name.
+diff --git a/src/air/airway.ts b/src/air/airway.ts
+new file mode 100644
+index 0000000..6ddad3c
+--- /dev/null
++++ b/src/air/airway.ts
+@@ -0,0 +1,203 @@
++/**
++ * The airway, and the resistance a road offers the air in it.
++ *
++ * Ventilation is the one duty on a colliery that never stops. The coal
++ * can stand at the bank and the men can wait at the shaft, but the air
++ * has to keep moving, and what decides how much of it moves is the
++ * resistance of the roads it moves through — which goes as the length
++ * and as the rubbing surface, and inversely as the cube of the area.
++ *
++ * The cube is the whole of it. Two metres taken off a roadway's height
++ * are not a fifth of the section lost, they are half the air, and no
++ * fan that was ever built recovers it. That is why a colliery driving a
++ * new district drives it large, and why a shaft with cages in it is a
++ * poor airway however big the hole was.
++ */
++
++import type { Shaft } from "../shaft/shaft.ts";
++import { freeArea } from "../shaft/shaft.ts";
++import { insist, positive, share } from "../errors.ts";
++import { round } from "../units/round.ts";
++
++/**
++ * The coefficient of friction of a lined shaft, in kg/m³.
++ *
++ * Atkinson's k, which is not dimensionless and is not the same for two
++ * roads that look alike. A concrete-lined shaft is about four
++ * thousandths; a shaft with buntons across it is two or three times
++ * that, and a timbered coal road worse again.
++ */
++export const FRICTION = 0.004;
++
++/** A road the air goes along. */
++export interface Airway {
++  /** What it is called. */
++  readonly name: string;
++  /** How far the air goes along it, in metres. */
++  readonly length: number;
++  /** The section it goes through, in square metres. */
++  readonly area: number;
++  /** The rubbing surface round that section, in metres. */
++  readonly perimeter: number;
++  /** Atkinson's coefficient of friction for what it is lined with, in kg/m³. */
++  readonly friction: number;
++}
++
++/** An airway, checked. */
++export function airway(
++  name: string,
++  length: number,
++  area: number,
++  perimeter: number,
++  friction = FRICTION,
++): Airway {
++  insist(name.trim().length > 0, "an airway has to be called something", "name");
++  positive(length, "length");
++  positive(area, "area");
++  positive(perimeter, "perimeter");
++  positive(friction, "friction");
++  return { name: name.trim(), length, area, perimeter, friction };
++}
++
++/**
++ * The resistance of an airway, in Ns²/m⁸.
++ *
++ * Atkinson: k C L over A cubed. The length and the rubbing surface are
++ * the honest part of it and the cube is where a colliery's money goes.
++ */
++export function resistance(one: Airway): number {
++  return round((one.friction * one.perimeter * one.length) / (one.area * one.area * one.area), 6);
++}
++
++/** The pressure a stated quantity wants through a stated resistance, in pascals. */
++export function pressureFor(resistance: number, quantity: number): number {
++  positive(resistance, "resistance");
++  positive(quantity, "quantity");
++  return round(resistance * quantity * quantity, 2);
++}
++
++/** The quantity a stated pressure drives through a stated resistance, in m³/s. */
++export function quantityFor(resistance: number, pressure: number): number {
++  positive(resistance, "resistance");
++  positive(pressure, "pressure");
++  return round(Math.sqrt(pressure / resistance), 3);
++}
++
++/** The air power a pressure and a quantity come to, in kilowatts. */
++export function airPower(pressure: number, quantity: number): number {
++  positive(pressure, "pressure");
++  positive(quantity, "quantity");
++  return round((pressure * quantity) / 1000, 3);
++}
++
++/** The resistances given, whether as a list or one after another. */
++function listed(given: readonly (number | readonly number[])[]): number[] {
++  const out: number[] = [];
++  for (const each of given) {
++    if (typeof each === "number") out.push(each);
++    else out.push(...each);
++  }
++  return out;
++}
++
++/** Roads one after another, whose resistances simply add. */
++export function inSeries(...given: readonly (number | readonly number[])[]): number {
++  const resistances = listed(given);
++  insist(resistances.length > 0, "a road with no lengths in it resists nothing", "resistances");
++  let sum = 0;
++  for (const each of resistances) sum += positive(each, "resistance");
++  return round(sum, 6);
++}
++
++/**
++ * Roads beside one another, which is the sum of the square roots
++ * inverted and squared.
++ *
++ * The reason a colliery splits its air. Two roads of the same
++ * resistance in parallel come to a quarter of one of them, not a half,
++ * and the fan that was straining on one takes the same air through both
++ * for a quarter of the pressure.
++ */
++export function inParallel(...given: readonly (number | readonly number[])[]): number {
++  const resistances = listed(given);
++  insist(resistances.length > 0, "a split with no roads in it passes nothing", "resistances");
++  let sum = 0;
++  for (const each of resistances) sum += 1 / Math.sqrt(positive(each, "resistance"));
++  return round(1 / (sum * sum), 6);
++}
++
++/**
++ * The shaft as an airway.
++ *
++ * The depth is the length, the free area is the section — and the
++ * perimeter is the whole of the lining, because the air rubs on the
++ * wall whatever is hanging in the middle of it. A shaft is therefore a
++ * worse airway than its free area alone suggests: the conveyances take
++ * the section away and give nothing back.
++ */
++export function shaftAirway(
++  one: Shaft,
++  width: number,
++  depthOf = 1.5,
++  pipes = 1.2,
++  friction = FRICTION,
++): Airway {
++  return airway(
++    one.name,
++    one.depth,
++    freeArea(one, width, depthOf, pipes),
++    round(Math.PI * one.diameter, 3),
++    friction,
++  );
++}
++
++/**
++ * A resistance with an obstruction's share of it added, in Ns²/m⁸.
++ *
++ * `shaft.buntonDrag` gives what the girders across a rigid-guided shaft
++ * cost the ventilation, as a share of the shaft's own resistance, and
++ * this is where that share is spent: a shaft resisting two and a half
++ * thousandths with a fifth of a share of buntons in it resists three.
++ * It is the argument for rope guides put as a pressure rather than as a
++ * preference.
++ */
++export function withDrag(resistance: number, drag: number): number {
++  positive(resistance, "resistance");
++  share(drag, "drag");
++  return round(resistance * (1 + drag), 6);
++}
++
++/**
++ * How a quantity divides between roads beside one another, in m³/s.
++ *
++ * Every road in a split has the same pressure across it — that is what
++ * makes it a split — so the air goes where the resistance is low, as
++ * the square root of it. Nobody has to arrange this and nobody can
++ * prevent it except with a regulator.
++ */
++export function splitBetween(quantity: number, resistances: readonly number[]): number[] {
++  positive(quantity, "quantity");
++  const together = inParallel(resistances);
++  const pressure = together * quantity * quantity;
++  return resistances.map((each) => round(Math.sqrt(pressure / each), 3));
++}
++
++/**
++ * The regulator a road wants, in Ns²/m⁸.
++ *
++ * A split gives a road the air its resistance asks for, which is rarely
++ * the air the district needs. The cure is a door with a hole in it: the
++ * resistance the road wants at the quantity wanted, less the resistance
++ * it already has. It is always a loss and it is always cheaper than the
++ * alternative, which is another fan.
++ *
++ * A road already resisting more than the pressure allows wants no
++ * regulator — nothing a regulator does can send more air, so the
++ * answer is nought rather than a negative resistance.
++ */
++export function regulatorFor(pressure: number, wanted: number, branch: number): number {
++  positive(pressure, "pressure");
++  positive(wanted, "wanted");
++  positive(branch, "branch");
++  return round(pressure / (wanted * wanted) - branch, 6);
++}
+diff --git a/src/air/duty.ts b/src/air/duty.ts
+new file mode 100644
+index 0000000..60694e3
+--- /dev/null
++++ b/src/air/duty.ts
+@@ -0,0 +1,71 @@
++/**
++ * What the pit asks for, which is three sums and the largest of them.
++ *
++ * A colliery's air is not decided by the fan and not by the shaft. It
++ * is decided by whichever of three things asks for most: the men, who
++ * want a hundred litres a second each and are entitled to it by
++ * statute; the coal, whose dust and whose engines want a twentieth of a
++ * cubic metre a second for every tonne raised in a day; and the gas,
++ * which wants whatever it takes to keep the return below its limit.
++ *
++ * Which of the three it is says what sort of colliery it is. A thin dry
++ * seam worked by many men is ventilated for the men, a heavily
++ * mechanised one for the coal, and a gassy one for the gas — and a
++ * gassy one is ventilated for the gas by a very long way, which is why
++ * a colliery that starts making firedamp has a ventilation problem and
++ * not merely a gas problem.
++ */
++
++import { count, nonNegative, positive, within } from "../errors.ts";
++import { round } from "../units/round.ts";
++
++/** The air a man is entitled to, in m³/s. */
++export const A_MAN = 0.1;
++
++/** The air a tonne a day of output wants, in m³/s. */
++export const A_TONNE = 0.05;
++
++/** The general body limit for firedamp in a return airway, as a percentage. */
++export const GAS_LIMIT = 0.0125;
++
++/**
++ * The air the colliery wants, in m³/s.
++ *
++ * The largest of the three, because they are not added: the same air
++ * that dilutes the gas sweeps the dust and breathes the men.
++ */
++export function wanted(men: number, tonnes: number, gas = 0, limit = GAS_LIMIT): number {
++  count(men, "men");
++  nonNegative(tonnes, "tonnes");
++  nonNegative(gas, "gas");
++  within(limit, 0.000001, 1, "limit");
++  positive(limit, "limit");
++  return round(Math.max(men * A_MAN, tonnes * A_TONNE, gas / limit), 2);
++}
++
++/** Which of the three the air is decided by. */
++export function decidedBy(men: number, tonnes: number, gas = 0, limit = GAS_LIMIT): "men" | "coal" | "gas" {
++  const whole = wanted(men, tonnes, gas, limit);
++  const each = everyDuty(men, tonnes, gas, limit);
++  if (each.men >= whole) return "men";
++  if (each.coal >= whole) return "coal";
++  return "gas";
++}
++
++/** What each of the three asks for, for a sheet that shows the working. */
++export function everyDuty(
++  men: number,
++  tonnes: number,
++  gas = 0,
++  limit = GAS_LIMIT,
++): Readonly<Record<"men" | "coal" | "gas", number>> {
++  count(men, "men");
++  nonNegative(tonnes, "tonnes");
++  nonNegative(gas, "gas");
++  within(limit, 0.000001, 1, "limit");
++  return {
++    men: round(men * A_MAN, 2),
++    coal: round(tonnes * A_TONNE, 2),
++    gas: round(gas / limit, 2),
++  };
++}
+diff --git a/src/air/fan.ts b/src/air/fan.ts
+new file mode 100644
+index 0000000..63ea50a
+--- /dev/null
++++ b/src/air/fan.ts
+@@ -0,0 +1,181 @@
++/**
++ * The fan, and where it settles against the pit.
++ *
++ * A fan has no duty of its own. It has a characteristic — a curve of
++ * pressure against quantity — and the pit has a resistance, and what
++ * the colliery actually gets is the one point where the two cross.
++ * Order a fan by its shut-off pressure and you have ordered a figure it
++ * never works at; order it by its free delivery and you have ordered
++ * another. Both are the ends of a line and the answer is in the middle.
++ *
++ * The other thing in here is natural ventilation, which is a fan
++ * nobody bought: warm air in the upcast weighs less than cold air in
++ * the downcast, and the difference over the depth of the shaft is a
++ * pressure. It works with the fan in winter and against it in summer,
++ * and a colliery that has stood its fan down in July has found out why.
++ */
++
++import { insist, nonNegative, positive, real, share } from "../errors.ts";
++import { GRAVITY } from "../units/measure.ts";
++import { round } from "../units/round.ts";
++import { FRICTION, airPower } from "./airway.ts";
++
++/** A fan, as bought. */
++export interface Fan {
++  /** What it is called. */
++  readonly name: string;
++  /** The pressure it makes against a closed door, in pascals. */
++  readonly shutoff: number;
++  /** The quantity it passes against no resistance at all, in m³/s. */
++  readonly delivery: number;
++  /** How much of the shaft power comes out as air power, as a share. */
++  readonly efficiency: number;
++}
++
++/** A fan, checked. */
++export function fan(name: string, shutoff = 3500, delivery = 400, efficiency = 0.75): Fan {
++  insist(name.trim().length > 0, "a fan has to be called something", "name");
++  positive(shutoff, "shutoff");
++  positive(delivery, "delivery");
++  share(efficiency, "efficiency");
++  insist(efficiency > 0, "a fan that turns nothing into air power ventilates nothing", "efficiency");
++  return { name: name.trim(), shutoff, delivery, efficiency };
++}
++
++/**
++ * The pressure a fan makes at a stated quantity, in pascals.
++ *
++ * A parabola from the shut-off pressure at no quantity to nothing at
++ * the free delivery, which is what a fan maker's curve looks like
++ * closely enough to size a pit on. Past the free delivery there is
++ * nothing: the fan is not driving the air, and asking it for more is
++ * asking the wrong question.
++ */
++export function characteristic(one: Fan, quantity: number): number {
++  nonNegative(quantity, "quantity");
++  if (quantity >= one.delivery) return 0;
++  const part = quantity / one.delivery;
++  return round(one.shutoff * (1 - part * part), 2);
++}
++
++/** The density of cool air going down a shaft, in kg/m³. */
++export const DOWNCAST_AIR = 1.2;
++
++/** And of the warmer, wetter air coming back up it. */
++export const UPCAST_AIR = 1.15;
++
++/**
++ * The natural ventilating pressure of a shaft pair, in pascals.
++ *
++ * The difference in density, by gravity, by the depth. Positive when
++ * the upcast is the lighter column, which is to say when nature is
++ * helping; negative when the pit has warmed the downcast instead, and
++ * then it is one more resistance for the fan to beat.
++ */
++export function naturalPressure(depth: number, downcast = DOWNCAST_AIR, upcast = UPCAST_AIR): number {
++  positive(depth, "depth");
++  positive(downcast, "downcast");
++  positive(upcast, "upcast");
++  return round((downcast - upcast) * GRAVITY * depth, 2);
++}
++
++/** Where a fan settles against a pit: the quantity it passes and the pressure it passes it at. */
++export interface Operating {
++  /** The quantity, in m³/s. */
++  readonly quantity: number;
++  /** The pressure across the resistance at that quantity, in pascals. */
++  readonly pressure: number;
++}
++
++/**
++ * Where the fan's curve crosses the pit's resistance.
++ *
++ * The fan gives p₀(1 − (Q/Q₀)²), the pit wants RQ², and nature adds or
++ * takes away a pressure of its own, so
++ *
++ *     Q = √((p₀ + natural) / (R + p₀/Q₀²))
++ *
++ * which is the whole of fan selection in one line. A fan whose shut-off
++ * pressure natural ventilation more than cancels is beaten and passes
++ * nothing; and if nature alone would drive more than the free delivery,
++ * the fan is out of the way of it and the air settles where RQ² meets
++ * the natural pressure by itself.
++ */
++export function operatingPoint(one: Fan, resistance: number, natural = 0): Operating {
++  positive(resistance, "resistance");
++  real(natural, "natural");
++  const driving = one.shutoff + natural;
++  if (driving <= 0) return { quantity: 0, pressure: 0 };
++  const steepness = one.shutoff / (one.delivery * one.delivery);
++  let quantity = Math.sqrt(driving / (resistance + steepness));
++  if (quantity > one.delivery) quantity = Math.sqrt(Math.max(0, natural) / resistance);
++  return { quantity: round(quantity, 3), pressure: round(resistance * quantity * quantity, 2) };
++}
++
++/**
++ * What the fan takes at the shaft, in kilowatts.
++ *
++ * The air power where it settles, over its efficiency. A big fan is a
++ * standing charge on a colliery for as long as the colliery exists —
++ * it runs when nothing else does, because a pit that stops ventilating
++ * stops being a pit.
++ */
++export function fanPower(one: Fan, resistance: number, natural = 0): number {
++  const found = operatingPoint(one, resistance, natural);
++  if (found.quantity <= 0) return 0;
++  const pressure = characteristic(one, found.quantity);
++  if (pressure <= 0) return 0;
++  return round(airPower(pressure, found.quantity) / one.efficiency, 3);
++}
++
++/** The deepest shaft this library will speak about, in metres. */
++export const DEEPEST_SHAFT = 4200;
++
++/**
++ * How deep a fan will still ventilate, in whole metres.
++ *
++ * The resistance of a shaft goes up with its depth and the quantity a
++ * fan passes goes down with the resistance, so somewhere there is a
++ * depth at which that fan no longer sends the air the workings want.
++ * It is the sinking engineer's question and it has one answer, found by
++ * walking the depth up until the fan gives out — never past the deepest
++ * shaft anybody has sunk, because past that the arithmetic is honest
++ * and the shaft is not.
++ */
++export function deepestVentilated(
++  one: Fan,
++  section: number,
++  perimeter: number,
++  wanted: number,
++  workings = 0,
++  friction = FRICTION,
++): number {
++  positive(section, "section");
++  positive(perimeter, "perimeter");
++  positive(wanted, "wanted");
++  nonNegative(workings, "workings");
++  positive(friction, "friction");
++  const passes = (depth: number): number => {
++    const shaft = (friction * perimeter * depth) / (section * section * section);
++    const total = shaft + workings;
++    return total <= 0 ? one.delivery : operatingPoint(one, total).quantity;
++  };
++  if (passes(0) < wanted) return 0;
++  if (passes(DEEPEST_SHAFT) >= wanted) return DEEPEST_SHAFT;
++  let low = 0;
++  let high = DEEPEST_SHAFT;
++  for (let i = 0; i < 60; i += 1) {
++    const middle = (low + high) / 2;
++    if (passes(middle) >= wanted) low = middle;
++    else high = middle;
++  }
++  return Math.floor(low);
++}
++
++/** The fan in a line, for the top of a report. */
++export function describeFan(one: Fan): string {
++  return (
++    `${one.name}: ${round(one.shutoff, 0)} Pa shut off, ` +
++    `${round(one.delivery, 0)} m³/s free, ${round(one.efficiency * 100, 0)}% efficient`
++  );
++}
+diff --git a/src/air/index.ts b/src/air/index.ts
+new file mode 100644
+index 0000000..a24524a
+--- /dev/null
++++ b/src/air/index.ts
+@@ -0,0 +1,5 @@
++/** The air, and the fan that has to be somewhere for the pit to be a pit. */
++
++export * from "./airway.ts";
++export * from "./fan.ts";
++export * from "./duty.ts";
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 2909b45..50fcf32 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -14,6 +14,7 @@ export * from "./rope.ts";
+ export * from "./safety.ts";
+ export * from "./shaft.ts";
+ export * from "./size.ts";
++export * from "./ventilation.ts";
+ export * from "./wear.ts";
+ export * from "./winder.ts";
+ export * from "./works.ts";
+diff --git a/src/cli/commands/ventilation.ts b/src/cli/commands/ventilation.ts
+new file mode 100644
+index 0000000..ad7dca3
+--- /dev/null
++++ b/src/cli/commands/ventilation.ts
+@@ -0,0 +1,196 @@
++/**
++ * `sheave ventilation` — where the fan settles, and which of the three
++ * things asks for the air.
++ *
++ * A fan has no duty of its own: it has a curve, the pit has a
++ * resistance, and the colliery gets the one point where the two cross.
++ * And what the colliery needs is not decided by the fan at all but by
++ * whichever of the men, the coal and the gas asks for most — which on a
++ * gassy pit is the gas, by a very long way.
++ */
++
++import type { Args } from "../args.ts";
++import { flag, number, onlyKnown, option, quantity } from "../args.ts";
++import {
++  A_MAN,
++  A_TONNE,
++  FRICTION,
++  GAS_LIMIT,
++  airPower,
++  airway,
++  characteristic,
++  decidedBy,
++  deepestVentilated,
++  describeFan,
++  everyDuty,
++  fan,
++  fanPower,
++  inParallel,
++  inSeries,
++  naturalPressure,
++  operatingPoint,
++  pressureFor,
++  regulatorFor,
++  resistance,
++  shaftAirway,
++  splitBetween,
++  wanted,
++} from "../../air/index.ts";
++import { airSpeed, shaft } from "../../shaft/shaft.ts";
++import { heading, line, metres, places, power, share, speed, verdict, wrapped } from "../../report/format.ts";
++import { blocks, left, right, table } from "../../report/table.ts";
++
++const KNOWN = [
++  "diameter",
++  "depth",
++  "width",
++  "across",
++  "pipes",
++  "men",
++  "tonnes",
++  "gas",
++  "limit",
++  "shutoff",
++  "delivery",
++  "efficiency",
++  "workings",
++  "sweep",
++];
++
++/** A pressure, said the way a fan maker says it. */
++function pascals(value: number): string {
++  return `${places(value, 0)} Pa`;
++}
++
++/** A resistance, which is a small number with a long unit. */
++function atkinson(value: number): string {
++  return `${places(value, 4)} Ns²/m⁸`;
++}
++
++/** A quantity of air. */
++function cubic(value: number): string {
++  return `${places(value, 1)} m³/s`;
++}
++
++/** Run it. */
++export function ventilationCommand(args: Args): string[] {
++  onlyKnown(args, KNOWN);
++  const hole = shaft(
++    "the upcast",
++    option(args, "diameter") === undefined ? 7.3 : quantity(args, "diameter"),
++    option(args, "depth") === undefined ? 942 : quantity(args, "depth"),
++  );
++  const width = option(args, "width") === undefined ? 2.6 : quantity(args, "width");
++  const across = option(args, "across") === undefined ? 1.5 : quantity(args, "across");
++  const pipes = number(args, "pipes", 1.2);
++  const men = number(args, "men", 400);
++  const tonnes = number(args, "tonnes", 2000);
++  const gas = number(args, "gas", 0.6);
++  const limit = number(args, "limit", GAS_LIMIT);
++  const workings = number(args, "workings", 0.03);
++
++  const road = shaftAirway(hole, width, across, pipes);
++  const shaftResistance = resistance(road);
++  const whole = inSeries([shaftResistance, workings]);
++  const blower = fan(
++    "the fan",
++    number(args, "shutoff", 3500),
++    number(args, "delivery", 400),
++    number(args, "efficiency", 0.75),
++  );
++  const natural = naturalPressure(hole.depth);
++  const point = operatingPoint(blower, whole);
++  const asked = wanted(men, tonnes, gas, limit);
++  const each = everyDuty(men, tonnes, gas, limit);
++
++  const deepest = deepestVentilated(blower, road.area, road.perimeter, asked, workings, FRICTION);
++
++  const out: string[] = [
++    ...heading(describeFan(blower)),
++    ...table(
++      [left("the shaft as an airway"), right("")],
++      [
++        ["diameter inside the lining", metres(hole.diameter, 2)],
++        ["depth, which is the length", metres(road.length)],
++        ["free area for the air", `${places(road.area, 1)} m²`],
++        ["rubbing surface round it", metres(road.perimeter, 2)],
++        ["friction of what it is lined with", places(road.friction, 4)],
++        ["its resistance", atkinson(shaftResistance)],
++        ["the workings beyond it", atkinson(workings)],
++        ["in series", atkinson(whole)],
++      ],
++    ),
++    "",
++    ...table(
++      [left("where the fan settles"), right("")],
++      [
++        ["shut-off pressure", pascals(blower.shutoff)],
++        ["free delivery", cubic(blower.delivery)],
++        ["natural ventilating pressure", pascals(natural)],
++        ["quantity it passes", cubic(point.quantity)],
++        ["at a pressure of", pascals(point.pressure)],
++        ["of which the fan itself makes", pascals(characteristic(blower, point.quantity))],
++        ["air speed in the shaft", speed(airSpeed(hole, point.quantity, width, across))],
++        ["air power in the pit", power(airPower(point.pressure, point.quantity))],
++        ["what the fan takes at the shaft", power(fanPower(blower, whole, natural))],
++      ],
++    ),
++    "",
++    ...table(
++      [left("what the pit asks for"), right("")],
++      [
++        [`${places(men, 0)} men at ${places(A_MAN, 2)} m³/s each`, cubic(each.men)],
++        [`${places(tonnes, 0)} tonnes a day at ${places(A_TONNE, 2)}`, cubic(each.coal)],
++        [`${places(gas, 2)} m³/s of gas held below ${places(limit, 2)}%`, cubic(each.gas)],
++        ["so the air is decided by", decidedBy(men, tonnes, gas, limit)],
++        ["which wants", cubic(asked)],
++        ["and the fan sends", cubic(point.quantity)],
++        ["enough", verdict(point.quantity >= asked)],
++      ],
++    ),
++    "",
++    line("the pressure the air wanted wants", pascals(pressureFor(whole, asked))),
++    line("the deepest it would ventilate", deepest === 0 ? "not at any depth at all" : metres(deepest)),
++  ];
++
++  if (flag(args, "sweep")) {
++    const districts = [
++      airway("the main district", 2000, 12, 14),
++      airway("the far district", 3500, 9, 12),
++    ];
++    const split = districts.map((one) => resistance(one));
++    const shares = splitBetween(point.quantity, split);
++    out.push(
++      "",
++      ...heading("the air split between two districts"),
++      ...table(
++        [left("district"), right("resistance"), right("gets"), right("share"), right("regulator to halve it")],
++        districts.map((one, at) => [
++          one.name,
++          atkinson(split[at] as number),
++          cubic(shares[at] as number),
++          share((shares[at] as number) / point.quantity),
++          atkinson(
++            regulatorFor(
++              pressureFor(inParallel(split), point.quantity),
++              Math.max(1, (shares[at] as number) / 2),
++              split[at] as number,
++            ),
++          ),
++        ]),
++      ),
++      "",
++      line("the two districts together resist", atkinson(inParallel(split))),
++    );
++  }
++
++  return blocks(
++    out,
++    wrapped(
++      "Resistance goes as the cube of the section, so the two metres taken off a roadway are not " +
++        "a fifth of the air but half of it, and no fan recovers it. And a fan bought on its " +
++        "shut-off pressure has been bought on a figure it never works at: the answer is where its " +
++        "curve crosses the pit, which is always somewhere in the middle of the line.",
++    ),
++  );
++}
+diff --git a/src/cli/main.ts b/src/cli/main.ts
+index 3abefd5..973d7cf 100644
+--- a/src/cli/main.ts
++++ b/src/cli/main.ts
+@@ -30,6 +30,7 @@ import { safetyCommand } from "./commands/safety.ts";
+ import { shaftCommand } from "./commands/shaft.ts";
+ import { sizeCommand } from "./commands/size.ts";
+ import { wearCommand } from "./commands/wear.ts";
++import { ventilationCommand } from "./commands/ventilation.ts";
+ import { winderCommand } from "./commands/winder.ts";
+ import { worksCommand } from "./commands/works.ts";
+ 
+@@ -49,6 +50,7 @@ const COMMANDS: readonly Command[] = [
+   { name: "capel", says: "the termination, and the calendar it puts on a sound rope", run: capelCommand },
+   { name: "shaft", says: "what will and will not go down the hole", run: shaftCommand },
+   { name: "guides", says: "what keeps a conveyance from swinging, and the span the formula wants", run: guidesCommand },
++  { name: "ventilation", says: "where the fan settles, and which of the men, the coal and the gas asks for the air", run: ventilationCommand },
+   { name: "drum", says: "the fleet angle, and the second layer that is worse in every way", run: drumCommand },
+   { name: "koepe", says: "the friction winder, and the ratio it has to live inside", run: koepeCommand },
+   { name: "conveyance", says: "the cage against the skip, which is an argument about tare", run: conveyanceCommand },
+diff --git a/src/index.ts b/src/index.ts
+index e976fb0..e582e60 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -7,16 +7,17 @@
+  *
+  * Each namespace is one part of the installation, in the order the load
+  * travels: the units it is all written in, the rope, the shaft it hangs
+- * in, the drum or wheel that drives it, the conveyance on the end of
+- * it, the cycle it works to, the engine that does the work, the gear
+- * that stops it going wrong, the whole installation, the design it is
+- * signed off against, what it costs, the colliery above it, and the
+- * report it is written up in.
++ * in, the air that goes down it beside the load, the drum or wheel that
++ * drives it, the conveyance on the end of it, the cycle it works to,
++ * the engine that does the work, the gear that stops it going wrong,
++ * the whole installation, the design it is signed off against, what it
++ * costs, the colliery above it, and the report it is written up in.
+  */
+ 
+ export * as units from "./units/index.ts";
+ export * as rope from "./rope/index.ts";
+ export * as shaft from "./shaft/index.ts";
++export * as air from "./air/index.ts";
+ export * as drum from "./drum/index.ts";
+ export * as cage from "./cage/index.ts";
+ export * as cycle from "./cycle/index.ts";
+diff --git a/test/air.test.ts b/test/air.test.ts
+new file mode 100644
+index 0000000..37204ee
+--- /dev/null
++++ b/test/air.test.ts
+@@ -0,0 +1,312 @@
++/**
++ * The air, the fan, and the three things that ask for it.
++ *
++ * The cube law is the whole of ventilation arithmetic: resistance goes
++ * as the length and the rubbing surface and inversely as the cube of
++ * the section, so what a fan sends is decided by a dimension nobody
++ * measures twice. And a fan has no duty of its own — it has a curve,
++ * the pit has a resistance, and the colliery gets the crossing.
++ */
++
++import { describe, expect, it } from "vitest";
++import {
++  A_MAN,
++  A_TONNE,
++  DEEPEST_SHAFT,
++  DOWNCAST_AIR,
++  FRICTION,
++  GAS_LIMIT,
++  UPCAST_AIR,
++  airPower,
++  airway,
++  characteristic,
++  decidedBy,
++  deepestVentilated,
++  describeFan,
++  everyDuty,
++  fan,
++  fanPower,
++  inParallel,
++  inSeries,
++  naturalPressure,
++  operatingPoint,
++  pressureFor,
++  quantityFor,
++  regulatorFor,
++  resistance,
++  shaftAirway,
++  withDrag,
++  splitBetween,
++  wanted,
++} from "../src/air/index.ts";
++import { shaft } from "../src/shaft/shaft.ts";
++import { buntonDrag, guides } from "../src/shaft/guides.ts";
++import { WindingError } from "../src/errors.ts";
++
++const road = airway("the main return", 2000, 12, 14);
++const blower = fan("the fan", 3500, 400, 0.75);
++
++describe("an airway", () => {
++  it("keeps what it was given", () => {
++    expect(road.name).toBe("the main return");
++    expect(road.length).toBe(2000);
++    expect(road.area).toBe(12);
++    expect(road.perimeter).toBe(14);
++    expect(road.friction).toBe(FRICTION);
++  });
++
++  it("resists as k C L over the cube of the area", () => {
++    expect(resistance(road)).toBeCloseTo((FRICTION * 14 * 2000) / 12 ** 3, 6);
++  });
++
++  it("loses half the air for a fifth off the section, which is the cube law", () => {
++    const smaller = airway("the same road, lowered", 2000, 12 * 0.8, 14);
++    expect(resistance(smaller) / resistance(road)).toBeCloseTo(1 / 0.8 ** 3, 3);
++  });
++
++  it("wants a pressure of RQ², and gives the quantity back again", () => {
++    const found = pressureFor(resistance(road), 40);
++    expect(found).toBeCloseTo(resistance(road) * 1600, 2);
++    expect(quantityFor(resistance(road), found)).toBeCloseTo(40, 2);
++  });
++
++  it("puts the air power in kilowatts", () => {
++    expect(airPower(2000, 100)).toBeCloseTo(200, 3);
++  });
++
++  it("adds in series and beats the sum in parallel", () => {
++    expect(inSeries([0.01, 0.02, 0.03])).toBeCloseTo(0.06, 6);
++    expect(inSeries(0.01, 0.02, 0.03)).toBeCloseTo(0.06, 6);
++    expect(inParallel(0.04, 0.04)).toBeCloseTo(0.01, 6);
++    expect(inParallel([0.04, 0.04])).toBeCloseTo(0.01, 6);
++    expect(inParallel([0.04, 0.04])).toBeLessThan(0.04);
++  });
++
++  it("refuses an airway with nothing to it", () => {
++    expect(() => airway("", 100, 10, 12)).toThrow(WindingError);
++    expect(() => airway("a road", 0, 10, 12)).toThrow(WindingError);
++    expect(() => airway("a road", 100, 0, 12)).toThrow(WindingError);
++    expect(() => airway("a road", 100, 10, -1)).toThrow(WindingError);
++    expect(() => airway("a road", 100, 10, 12, 0)).toThrow(WindingError);
++    expect(() => inSeries([])).toThrow(WindingError);
++    expect(() => inParallel([])).toThrow(WindingError);
++  });
++
++  it("names the argument that was wrong", () => {
++    try {
++      airway("a road", 100, 10, 12, -1);
++      expect.unreachable();
++    } catch (thrown) {
++      expect(thrown).toBeInstanceOf(WindingError);
++      expect((thrown as WindingError).quantity).toBe("friction");
++    }
++  });
++});
++
++describe("the shaft as an airway", () => {
++  const hole = shaft("the upcast", 7.3, 942);
++  const found = shaftAirway(hole, 2.6);
++
++  it("takes the depth for the length and the free area for the section", () => {
++    expect(found.length).toBe(942);
++    expect(found.area).toBeLessThan((Math.PI * 7.3 ** 2) / 4);
++  });
++
++  it("rubs on the whole lining whatever is hanging in it", () => {
++    expect(found.perimeter).toBeCloseTo(Math.PI * 7.3, 2);
++  });
++
++  it("spends the share the buntons cost on the resistance", () => {
++    expect(withDrag(resistance(found), buntonDrag(guides("rigid", 4, 6, 0), 942, 7.3))).toBeGreaterThan(
++      resistance(found),
++    );
++    expect(withDrag(0.002, 0.2)).toBeCloseTo(0.0024, 6);
++    expect(withDrag(0.002, 0)).toBeCloseTo(0.002, 6);
++    expect(() => withDrag(0.002, 1.5)).toThrow(WindingError);
++  });
++
++  it("is a worse airway with the conveyances in it than without", () => {
++    const empty = airway("an empty shaft", 942, (Math.PI * 7.3 ** 2) / 4, Math.PI * 7.3);
++    expect(resistance(found)).toBeGreaterThan(resistance(empty));
++  });
++});
++
++describe("the fan", () => {
++  it("keeps what it was given and says so in a line", () => {
++    expect(blower.shutoff).toBe(3500);
++    expect(blower.delivery).toBe(400);
++    expect(blower.efficiency).toBe(0.75);
++    expect(describeFan(blower)).toContain("3500");
++  });
++
++  it("makes its shut-off pressure at nothing and nothing at its free delivery", () => {
++    expect(characteristic(blower, 0)).toBeCloseTo(3500, 2);
++    expect(characteristic(blower, 400)).toBe(0);
++    expect(characteristic(blower, 200)).toBeCloseTo(3500 * 0.75, 2);
++  });
++
++  it("makes nothing at all past its free delivery", () => {
++    expect(characteristic(blower, 500)).toBe(0);
++  });
++
++  it("settles where its curve crosses the pit", () => {
++    const found = operatingPoint(blower, 0.02);
++    expect(found.pressure).toBeCloseTo(0.02 * found.quantity ** 2, 1);
++    expect(characteristic(blower, found.quantity)).toBeCloseTo(found.pressure, 0);
++    expect(found.quantity).toBeLessThan(blower.delivery);
++  });
++
++  it("passes less air the harder the pit is", () => {
++    expect(operatingPoint(blower, 0.05).quantity).toBeLessThan(operatingPoint(blower, 0.01).quantity);
++  });
++
++  it("counts natural ventilation on its own side, or against it", () => {
++    const helped = operatingPoint(blower, 0.02, 400);
++    const alone = operatingPoint(blower, 0.02);
++    const fought = operatingPoint(blower, 0.02, -400);
++    expect(helped.quantity).toBeGreaterThan(alone.quantity);
++    expect(fought.quantity).toBeLessThan(alone.quantity);
++  });
++
++  it("passes nothing when the natural pressure has beaten it", () => {
++    const found = operatingPoint(blower, 0.02, -3500);
++    expect(found.quantity).toBe(0);
++    expect(found.pressure).toBe(0);
++    expect(fanPower(blower, 0.02, -3500)).toBe(0);
++  });
++
++  it("takes the air power over its efficiency", () => {
++    const found = operatingPoint(blower, 0.02);
++    expect(fanPower(blower, 0.02)).toBeCloseTo(airPower(found.pressure, found.quantity) / 0.75, 1);
++    expect(fanPower(blower, 0.02)).toBeGreaterThan(airPower(found.pressure, found.quantity));
++  });
++
++  it("refuses a fan that is not one", () => {
++    expect(() => fan("", 3500, 400, 0.75)).toThrow(WindingError);
++    expect(() => fan("a fan", 0, 400, 0.75)).toThrow(WindingError);
++    expect(() => fan("a fan", 3500, 0, 0.75)).toThrow(WindingError);
++    expect(() => fan("a fan", 3500, 400, 0)).toThrow(WindingError);
++    expect(() => fan("a fan", 3500, 400, 1.4)).toThrow(WindingError);
++    expect(() => operatingPoint(blower, 0)).toThrow(WindingError);
++  });
++});
++
++describe("natural ventilation, which is a fan nobody bought", () => {
++  it("is the density difference by gravity by the depth", () => {
++    expect(naturalPressure(900, 1.2, 1.15)).toBeCloseTo(0.05 * 9.80665 * 900, 1);
++  });
++
++  it("grows with the depth and turns round with the columns", () => {
++    expect(naturalPressure(1800)).toBeCloseTo(2 * naturalPressure(900), 1);
++    expect(naturalPressure(900, UPCAST_AIR, DOWNCAST_AIR)).toBeLessThan(0);
++  });
++
++  it("refuses a depth that is not one", () => {
++    expect(() => naturalPressure(0)).toThrow(WindingError);
++  });
++});
++
++describe("what the pit asks for", () => {
++  it("is the largest of the three and not their sum", () => {
++    expect(wanted(400, 2000, 0.6)).toBeCloseTo(100, 2);
++    expect(wanted(400, 0, 0)).toBeCloseTo(400 * A_MAN, 2);
++    expect(wanted(0, 2000, 0)).toBeCloseTo(2000 * A_TONNE, 2);
++    expect(wanted(0, 0, 1)).toBeCloseTo(1 / (GAS_LIMIT / 100), 2);
++  });
++
++  it("says which of the three decided it", () => {
++    expect(decidedBy(600, 100, 0)).toBe("men");
++    expect(decidedBy(400, 2000, 0.1)).toBe("coal");
++    expect(decidedBy(400, 2000, 3)).toBe("gas");
++  });
++
++  it("takes a limit other than the general body one", () => {
++    expect(wanted(0, 0, 1, 2.5)).toBeCloseTo(40, 2);
++    expect(wanted(0, 0, 1, 0.5)).toBeCloseTo(200, 2);
++  });
++
++  it("shows the working", () => {
++    const each = everyDuty(400, 2000, 0.6);
++    expect(each.men).toBeCloseTo(40, 2);
++    expect(each.coal).toBeCloseTo(100, 2);
++    expect(each.gas).toBeCloseTo(48, 2);
++  });
++
++  it("refuses half a man and a negative tonnage", () => {
++    expect(() => wanted(400.5, 2000, 0)).toThrow(WindingError);
++    expect(() => wanted(400, -1, 0)).toThrow(WindingError);
++    expect(() => wanted(400, 2000, -1)).toThrow(WindingError);
++    expect(() => wanted(400, 2000, 1, 0)).toThrow(WindingError);
++  });
++});
++
++describe("splitting the air", () => {
++  const roads = [0.04, 0.09];
++
++  it("gives every road in the split the same pressure", () => {
++    const found = splitBetween(100, roads);
++    expect(pressureFor(roads[0] as number, found[0] as number)).toBeCloseTo(
++      pressureFor(roads[1] as number, found[1] as number),
++      0,
++    );
++  });
++
++  it("adds up to what was sent, and sends more down the easier road", () => {
++    const found = splitBetween(100, roads);
++    expect((found[0] as number) + (found[1] as number)).toBeCloseTo(100, 1);
++    expect(found[0] as number).toBeGreaterThan(found[1] as number);
++  });
++
++  it("makes a regulator the difference between what a road wants and what it has", () => {
++    expect(regulatorFor(400, 100, 0.02)).toBeCloseTo(400 / 10_000 - 0.02, 6);
++    expect(regulatorFor(pressureFor(0.04, 50), 50, 0.04)).toBe(0);
++  });
++
++  it("gives no regulator to a road that already resists too much", () => {
++    expect(regulatorFor(100, 100, 0.5)).toBe(0);
++  });
++
++  it("refuses a split of nothing", () => {
++    expect(() => splitBetween(0, roads)).toThrow(WindingError);
++    expect(() => splitBetween(100, [0.04, 0])).toThrow(WindingError);
++    expect(() => regulatorFor(400, 0, 0.02)).toThrow(WindingError);
++  });
++});
++
++describe("how deep a fan will ventilate", () => {
++  const hole = shaftAirway(shaft("the upcast", 7.3, 942), 2.6);
++
++  it("gives whole metres", () => {
++    const found = deepestVentilated(blower, hole.area, hole.perimeter, 250, 0.03);
++    expect(Number.isInteger(found)).toBe(true);
++    expect(found).toBeGreaterThan(0);
++  });
++
++  it("goes shallower the more air is asked for", () => {
++    const easy = deepestVentilated(blower, hole.area, hole.perimeter, 150, 0.03);
++    const hard = deepestVentilated(blower, hole.area, hole.perimeter, 250, 0.03);
++    expect(hard).toBeLessThan(easy);
++  });
++
++  it("sends the wanted air at that depth and not much past it", () => {
++    const found = deepestVentilated(blower, hole.area, hole.perimeter, 250, 0.03);
++    const at = (depth: number): number =>
++      operatingPoint(blower, (FRICTION * hole.perimeter * depth) / hole.area ** 3 + 0.03).quantity;
++    expect(at(found)).toBeGreaterThanOrEqual(250);
++    expect(at(found + 5)).toBeLessThan(250);
++  });
++
++  it("never goes past the deepest shaft this library takes", () => {
++    expect(deepestVentilated(blower, 40, 23, 20, 0)).toBe(DEEPEST_SHAFT);
++  });
++
++  it("gives nothing at all to a fan already beaten by the workings", () => {
++    expect(deepestVentilated(blower, 10, 12, 300, 0.5)).toBe(0);
++  });
++
++  it("refuses a section that is not one", () => {
++    expect(() => deepestVentilated(blower, 0, 23, 100)).toThrow(WindingError);
++    expect(() => deepestVentilated(blower, 30, 23, 0)).toThrow(WindingError);
++    expect(() => deepestVentilated(blower, 30, 23, 100, -1)).toThrow(WindingError);
++  });
++});
+diff --git a/test/cli.test.ts b/test/cli.test.ts
+index a56861e..a3c0228 100644
+--- a/test/cli.test.ts
++++ b/test/cli.test.ts
+@@ -134,6 +134,8 @@ describe("what each command says", () => {
+   it("runs the shaft and drive commands", () => {
+     expect(said(["shaft", "--sweep"])).toContain("free area");
+     expect(said(["guides", "--sweep"])).toContain("stiffness");
++    expect(said(["ventilation", "--sweep"])).toContain("where the fan settles");
++    expect(said(["ventilation", "--gas", "3"])).toContain("gas");
+     expect(said(["drum", "--sweep"])).toContain("fleet angle");
+     expect(said(["koepe", "--sweep"])).toContain("capstan");
+   });

@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/intersect-except"
+
+[metadata]
+task_id = "intersect-except"
+display_title = "Add INTERSECT and EXCEPT to the SQL surface"
+display_description = "Finish the set operations veldt records but refuses: INTERSECT and EXCEPT, each with ALL, pairing rows by value and type after both branches are unified. Fold a chain of them with INTERSECT binding tightest and the level operators reading left to right."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/DpaoWZCVgFZiQ30fKr8c"
+base_commit_hash = "1a71e331f0f9812886dd22c0c6aa274edb63a80e"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-veldt-dpaowz:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

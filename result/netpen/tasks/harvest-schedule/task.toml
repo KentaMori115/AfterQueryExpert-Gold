@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/harvest-schedule"
+
+[metadata]
+task_id = "harvest-schedule"
+display_title = "Plan the harvest a licence ceiling forces"
+display_description = "Netpen says when a site will pass its licensed biomass and stops there. Add planHarvest, which books whole pens onto weekly boat slots as late as growth, medicine withdrawal and boat tonnage allow, and reports the week it cannot cover."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/7YJ2UEmYfhls634lTF9B"
+base_commit_hash = "adc3a0734ce10ab43f410df405566ab3b665b6c8"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-netpen-7yj2ue:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

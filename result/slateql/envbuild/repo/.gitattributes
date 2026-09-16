@@ -1,0 +1,22 @@
+# Line endings -----------------------------------------------------------
+# Normalise to LF in the repository. The CSV and JSONL fixtures under data/
+# are compared byte for byte by the test suite, so a checkout that rewrote
+# them to CRLF would fail the suite on Windows for no good reason.
+* text=auto eol=lf
+
+# Language statistics ----------------------------------------------------
+# This project is Python. State that explicitly so GitHub's language
+# detection does not have to infer it, and keep the prose and the sample
+# data out of the language bar so it reflects first-party source.
+*.py            linguist-language=Python
+*.md            linguist-documentation
+docs/**         linguist-documentation
+data/**         linguist-data
+*.csv           linguist-data
+*.jsonl         linguist-data
+
+# The package, its tests and the runnable examples are all first-party
+# source and should be counted as such.
+slateql/**      linguist-detectable
+tests/**        linguist-detectable
+examples/**     linguist-detectable

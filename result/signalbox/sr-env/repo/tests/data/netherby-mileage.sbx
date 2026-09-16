@@ -1,0 +1,18 @@
+# A short stretch of the Netherby branch, dimensioned from the junction.
+
+scheme netherby {
+    area "Netherby branch"
+    prefix N
+}
+
+node W boundary
+node J plain
+node E boundary
+
+edge NE1 from W to J length 1610 speed 60 mileage "12m 0ch" direction down
+edge NE2 from J to E length 1610 speed 60 direction down
+
+section NA over NE1
+section NB over NE2
+
+signal N1 on NE1 at 1610 facing forward direction down aspects 3

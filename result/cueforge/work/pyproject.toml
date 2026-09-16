@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel>=0.41.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cueforge"
+version = "0.1.0"
+description = "A deterministic compiler and rehearsal simulator for live-performance cue sheets."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = []
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic==2.11.7",
+    "PyYAML==6.0.2",
+    "typer==0.16.0",
+    "click==8.1.8",
+    "lark==1.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.1",
+    "pytest-cov==6.2.1",
+    "hypothesis==6.136.9",
+    "mypy==1.17.0",
+    "ruff==0.12.7",
+    "types-PyYAML==6.0.12.20250516",
+    "build==1.2.2.post1",
+    "coverage==7.10.1",
+]
+
+[project.scripts]
+cueforge = "cueforge.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/redacted-owner/cueforge"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["cueforge"]
+exclude = ["tests", "build", "dist"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers -p no:cacheprovider"
+filterwarnings = [
+    "error",
+    "ignore::pytest.PytestCacheWarning",
+    "ignore:.*get_binary_stream.*:DeprecationWarning",
+]
+markers = [
+    "property: seeded Hypothesis property tests",
+]
+
+[tool.coverage.run]
+source = ["cueforge"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 0
+show_missing = true

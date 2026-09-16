@@ -1,0 +1,9 @@
+Rehearsals double-book equipment: a cue whose `uses` resource is still reserved starts anyway, and CF4001 or CF4002 lands afterwards. Make `rehearse` and `report` hold such a cue until the device frees. `compile` keeps flagging the plan as now.
+
+A cue is called at its planned instant: what the compiled plan, delays and GO give it. It starts there if every resource it uses has a free slot, meaning fewer than `capacity` started cues hold it. A holder releases at completion or failure, half-open, so a release at instant T frees a cue called at T. Otherwise the cue holds, holding nothing meanwhile, and starts at the first instant every one of its resources has a free slot; `requires` states are checked then. When several cues could take the last free slot at one instant, earlier planned instant wins, then smaller cue id.
+
+A held cue drags its `after` dependents along. Offset zero or more: called at the dependency's actual start plus offset plus its own delay, never before the dependency started; that call is its planned instant. A dependency failing before it starts calls them from the failure instant. Negative offsets keep the planned instant they already had.
+
+Every cue started later than called gets one CF7001 warning, subject kind `cue`, witness `planned_ms`, `start_ms`, `held_ms`, `resources` (used resource ids lacking a free slot at the planned instant, sorted, comma joined). Rehearsal result and its JSON carry `holds`, ordered by planned instant then cue id, entries `cue_id`, `planned_ms`, `start_ms`, `held_ms`, `resources` as a list. `eligible` stays at the planned instant, `started` at the actual one. Holds alone are no errors: exit 0. State the contract in docs/timing-contract.md and note it in CHANGELOG.md.
+
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

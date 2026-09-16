@@ -1,0 +1,2261 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 38d37e1..59f230d 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -22,6 +22,12 @@ schema is still moving and anything that parses it would have to move with it.
+ - noise at the nearest sensitive property
+ - viewing area capacity and clearance time
+ - net explosive quantity and hazard division against a store licence
++- the panel's own log of a dry run graded against the table it ran, cue by cue,
++  with a frame of slack before a cue reads late
++- the continuity walk taken after the show, which tells a misfire from a cue
++  that never had a circuit and finds a stray that burned
++- clearance times position by position, so one rack does not wait on another,
++  and refires only onto pins the after walk read open
+ 
+ ### the advice
+ 
+diff --git a/README.md b/README.md
+index a9fa000..1a84005 100644
+--- a/README.md
++++ b/README.md
+@@ -37,25 +37,25 @@ A worked example lives in `examples/autumn`.
+ 
+ ## the commands
+ 
+-| command                        | what it answers                                |
+-| ------------------------------ | ---------------------------------------------- |
+-| `check`                        | is anything wrong with this show               |
+-| `table`                        | what goes on the panel's memory card           |
+-| `sheet`                        | what the crew carries onto the field           |
+-| `layout`                       | how many racks and tubes, and where they stand |
+-| `plan`                         | where everything is, drawn                     |
+-| `preview`                      | what shape the show is                         |
+-| `explain`                      | why does this one cue fire when it does        |
+-| `diff`                         | what changed since the version we wired to     |
+-| `inventory`                    | what it consumes and what we are short of      |
+-| `hazard`                       | net explosive quantity and hazard division     |
+-| `permit`                       | the facts a licensing authority asks for       |
+-| `crowd`                        | how many people the viewing area holds         |
+-| `continuity`                   | does the field match the show                  |
+-| `rehearse`                     | what to watch during the dry run               |
+-| `pack`                         | all of the above, from one compile             |
+-| `lint`, `fmt`, `annotate`      | working on the script itself                   |
+-| `distance`, `codes`, `version` | reference                                      |
++| command                        | what it answers                                   |
++| ------------------------------ | ------------------------------------------------- |
++| `check`                        | is anything wrong with this show                  |
++| `table`                        | what goes on the panel's memory card              |
++| `sheet`                        | what the crew carries onto the field              |
++| `layout`                       | how many racks and tubes, and where they stand    |
++| `plan`                         | where everything is, drawn                        |
++| `preview`                      | what shape the show is                            |
++| `explain`                      | why does this one cue fire when it does           |
++| `diff`                         | what changed since the version we wired to        |
++| `inventory`                    | what it consumes and what we are short of         |
++| `hazard`                       | net explosive quantity and hazard division        |
++| `permit`                       | the facts a licensing authority asks for          |
++| `crowd`                        | how many people the viewing area holds            |
++| `continuity`                   | does the field match the show, before and after   |
++| `rehearse`                     | what to watch during the dry run, and how it went |
++| `pack`                         | all of the above, from one compile                |
++| `lint`, `fmt`, `annotate`      | working on the script itself                      |
++| `distance`, `codes`, `version` | reference                                         |
+ 
+ ## building it
+ 
+diff --git a/src/cli/commands/continuity.ts b/src/cli/commands/continuity.ts
+index c508565..5079a9d 100644
+--- a/src/cli/commands/continuity.ts
++++ b/src/cli/commands/continuity.ts
+@@ -1,18 +1,33 @@
+ import { SHOW_FLAGS, runShow } from "./common.js";
++import type { RunOutcome } from "./common.js";
+ import type { Command } from "../command.js";
+ import { EXIT_BAD_USAGE, EXIT_OK, EXIT_SHOW_PROBLEM } from "../command.js";
+-import { formatBag } from "../../core/diagnostic.js";
++import { DiagnosticBag, formatBag } from "../../core/diagnostic.js";
+ import { plural } from "../../core/text.js";
++import { formatShowTime } from "../../core/timecode.js";
+ import { ohms } from "../../core/units.js";
+ import {
++  checkAfterWalk,
+   checkReconciliation,
+   checkResistances,
+   parseContinuity,
+   reconcile,
++  reconcileAfter,
++  unfiredPins,
+   unwalkedPins,
++  usablePins,
+ } from "../../rig/continuity.js";
++import type { ContinuityRow } from "../../rig/continuity.js";
+ import { leadResistance } from "../../rig/circuit.js";
+ import { formatPin } from "../../rig/pin.js";
++import type { PinAddress } from "../../rig/pin.js";
++import {
++  checkMisfires,
++  clearanceLines,
++  clearancePlan,
++  misfiresIn,
++  planRefires,
++} from "../../timeline/misfire.js";
+ 
+ /**
+  * Reading the panel's own walk against the show.
+@@ -20,14 +35,25 @@ import { formatPin } from "../../rig/pin.js";
+  * This is run on the field, twice, once when the wiring is finished and once
+  * after the last person has been out among the mortars. The second run is the
+  * one that matters, and it is the one people skip.
++ *
++ * So it has its own flag. `--after` reads the walk taken once the show is over,
++ * where an open pin is a match that burned and a connected one is a live match
++ * still sitting in a mortar. Given both walks it can also tell a misfire from a
++ * cue that never had a circuit, which is the difference between a bad night and
++ * a wiring fault to find before the next one.
+  */
+ export const continuityCommand: Command = {
+   name: "continuity",
+   summary: "check a panel's continuity walk against the show",
+-  usage: "continuity <script> --walk <dump.csv> [options]",
++  usage: "continuity <script> [--walk <dump.csv>] [--after <dump.csv>]",
+   flags: [
+     ...SHOW_FLAGS,
+     { name: "walk", kind: "value", help: "the panel's continuity dump" },
++    {
++      name: "after",
++      kind: "value",
++      help: "the walk taken after the show, to find what did not go",
++    },
+     {
+       name: "resistance",
+       kind: "switch",
+@@ -41,15 +67,23 @@ export const continuityCommand: Command = {
+   ],
+   run(args, env) {
+     const walkPath = args.values.get("walk");
+-    if (walkPath === undefined) {
+-      env.err("continuity needs --walk, the panel's dump");
++    const afterPath = args.values.get("after");
++    if (walkPath === undefined && afterPath === undefined) {
++      env.err("continuity needs --walk or --after, a panel's dump");
+       return EXIT_BAD_USAGE;
+     }
+-    const walkText = env.readFile(walkPath);
+-    if (walkText === undefined) {
++    const walkText =
++      walkPath === undefined ? undefined : env.readFile(walkPath);
++    if (walkPath !== undefined && walkText === undefined) {
+       env.err(`cannot read the walk at ${walkPath}`);
+       return EXIT_BAD_USAGE;
+     }
++    const afterText =
++      afterPath === undefined ? undefined : env.readFile(afterPath);
++    if (afterPath !== undefined && afterText === undefined) {
++      env.err(`cannot read the walk at ${afterPath}`);
++      return EXIT_BAD_USAGE;
++    }
+     const outcome = runShow(args, env, { quiet: true });
+     if (outcome === undefined) {
+       return EXIT_BAD_USAGE;
+@@ -62,25 +96,40 @@ export const continuityCommand: Command = {
+       return EXIT_SHOW_PROBLEM;
+     }
+ 
+-    const walk = parseContinuity(walkText, walkPath);
+-    if (walk.diagnostics.size > 0) {
+-      env.err(formatBag(walk.diagnostics));
++    const reading = new DiagnosticBag();
++    let before: readonly ContinuityRow[] | undefined;
++    if (walkText !== undefined && walkPath !== undefined) {
++      const walk = parseContinuity(walkText, walkPath);
++      reading.addAll(walk.diagnostics.all());
++      before = walk.rows;
++    }
++    let after: readonly ContinuityRow[] | undefined;
++    if (afterText !== undefined && afterPath !== undefined) {
++      const walk = parseContinuity(afterText, afterPath);
++      reading.addAll(walk.diagnostics.all());
++      after = walk.rows;
+     }
+-    if (walk.diagnostics.hasErrors()) {
++    if (reading.size > 0) {
++      env.err(formatBag(reading));
++    }
++    if (reading.hasErrors()) {
+       return EXIT_SHOW_PROBLEM;
+     }
+ 
+     const expected = outcome.result.schedule.events.map(
+       (event) => event.address,
+     );
+-    const result = reconcile(expected, walk.rows);
+-    const diagnostics = checkReconciliation(result);
++    const report =
++      after === undefined
++        ? beforeReport(expected, before ?? [])
++        : afterReport(outcome, expected, before, after);
++    const diagnostics = new DiagnosticBag().addAll(report.diagnostics.all());
+ 
+     if (args.switches.has("resistance")) {
+       const settings = outcome.inputs.workspace.settings;
+       diagnostics.addAll(
+         checkResistances(
+-          walk.rows,
++          after ?? before ?? [],
+           settings.match,
+           leadResistance(settings.leadMetres),
+           settings.voltage,
+@@ -92,7 +141,10 @@ export const continuityCommand: Command = {
+       env.err(formatBag(diagnostics));
+     }
+     if (args.switches.has("unwalked")) {
+-      const missed = unwalkedPins(outcome.inputs.workspace.rig, walk.rows);
++      const missed = unwalkedPins(
++        outcome.inputs.workspace.rig,
++        after ?? before ?? [],
++      );
+       env.out(
+         missed.length === 0
+           ? "the walk covered every pin in the rig"
+@@ -100,17 +152,104 @@ export const continuityCommand: Command = {
+       );
+     }
+ 
+-    env.out(
++    env.out(report.lines.join("\n"));
++    return diagnostics.hasErrors() || report.unclear
++      ? EXIT_SHOW_PROBLEM
++      : EXIT_OK;
++  },
++};
++
++interface WalkReport {
++  readonly lines: readonly string[];
++  readonly diagnostics: DiagnosticBag;
++  /** The field cannot be signed off, which is a nonzero exit on its own. */
++  readonly unclear: boolean;
++}
++
++/** The walk taken while the field is still being wired. */
++function beforeReport(
++  expected: readonly PinAddress[],
++  rows: readonly ContinuityRow[],
++): WalkReport {
++  const result = reconcile(expected, rows);
++  return {
++    lines: [
+       [
+-        `${plural(walk.rows.length, "pin")} walked`,
++        `${plural(rows.length, "pin")} walked`,
+         `${plural(expected.length, "cue")} in the show`,
+         plural(result.dead.length, "dead cue"),
+         plural(result.stray.length, "stray lead"),
+       ].join(", "),
++    ],
++    diagnostics: checkReconciliation(result),
++    unclear: false,
++  };
++}
++
++/**
++ * The walk taken once the show is over, which says what did not go and how
++ * long the field has to be left alone before anybody finds out why.
++ */
++function afterReport(
++  outcome: RunOutcome,
++  expected: readonly PinAddress[],
++  before: readonly ContinuityRow[] | undefined,
++  after: readonly ContinuityRow[],
++): WalkReport {
++  const schedule = outcome.result.schedule;
++  const result = reconcileAfter(expected, before, after);
++  const diagnostics = new DiagnosticBag().addAll(checkAfterWalk(result).all());
++  const unfired = unfiredPins(result);
++  const misfires = misfiresIn(schedule, unfired);
++  diagnostics.addAll(checkMisfires(schedule, misfires).all());
++
++  const lines: string[] = [
++    [
++      `${plural(after.length, "pin")} read after the show`,
++      `${plural(expected.length, "cue")} in the show`,
++      `${result.fired.length} fired`,
++      plural(result.misfired.length, "misfire"),
++      plural(result.dead.length, "dead cue"),
++      plural(result.burnt.length, "burnt stray"),
++    ].join(", "),
++    unfired.length === 0
++      ? "every cue in the show fired, the field is clear"
++      : `unfired: ${unfired.map(formatPin).join(" ")}`,
++  ];
++  const plan = clearancePlan(schedule, misfires);
++  lines.push(...clearanceLines(plan));
++  if (misfires.length > 0) {
++    lines.push(
++      `field clear at ${formatShowTime(plan.fieldClearAt)} on the show clock`,
+     );
+-    return diagnostics.hasErrors() ? EXIT_SHOW_PROBLEM : EXIT_OK;
+-  },
+-};
++  }
++  // A refire may only land on a pin the after walk read open. Anything still
++  // connected has a live match on it, and a second cue wired onto that is how
++  // a crew fires the thing they walked out to make safe.
++  for (const refire of planRefires(
++    schedule,
++    misfires,
++    outcome.inputs.workspace.rig,
++    {
++      usable: usablePins(after),
++    },
++  )) {
++    lines.push(
++      refire.spare === undefined
++        ? `${formatPin(refire.misfire.address)} ${refire.misfire.event.effectId} no refire, ${refire.reason ?? "nothing free"}`
++        : `${formatPin(refire.misfire.address)} ${refire.misfire.event.effectId} refire on ${formatPin(refire.spare)}`,
++    );
++  }
++  if (result.burnt.length > 0) {
++    lines.push(`burnt: ${result.burnt.map(formatPin).join(" ")}`);
++  }
++
++  return {
++    lines,
++    diagnostics,
++    unclear: unfired.length > 0 || result.burnt.length > 0,
++  };
++}
+ 
+ /** The lead resistance the settings imply, for a caller other than the CLI. */
+ export function settingsLeadResistance(metresOfLead: number) {
+diff --git a/src/cli/commands/rehearse.ts b/src/cli/commands/rehearse.ts
+index 0510755..b029971 100644
+--- a/src/cli/commands/rehearse.ts
++++ b/src/cli/commands/rehearse.ts
+@@ -1,26 +1,39 @@
+ import { OUT_FLAG, SHOW_FLAGS, emit, outcomeCode, runShow } from "./common.js";
++import type { RunOutcome } from "./common.js";
+ import { requireNumber } from "../args.js";
++import type { ParsedArgs } from "../args.js";
++import type { CliEnv } from "../env.js";
+ import type { Command } from "../command.js";
+ import { EXIT_BAD_USAGE, EXIT_OK, EXIT_SHOW_PROBLEM } from "../command.js";
+ import { formatBag } from "../../core/diagnostic.js";
+ import { plural } from "../../core/text.js";
++import { ms } from "../../core/units.js";
+ import {
++  checkLog,
+   checkRehearsal,
++  describeGrade,
+   describeRehearsal,
++  gradeLog,
++  parsePanelLog,
+   rehearsalPlan,
+ } from "../../timeline/rehearsal.js";
+ 
+ /**
+- * The dry run, written down.
++ * The dry run, written down, and then read back.
+  *
+  * A rehearsal with no plan is a crew standing in a field agreeing that
+  * something happened. This prints what each watcher should see, so a light
+  * that does not appear is a finding rather than a maybe.
++ *
++ * Afterwards the panel has its own account of the run on its card, and until
++ * now nothing here read it. With `--log` the run is graded against the table it
++ * came from, which is the only check that says how late a cue was rather than
++ * whether somebody saw it.
+  */
+ export const rehearseCommand: Command = {
+   name: "rehearse",
+-  summary: "write the plan for a dry run with nothing on the wires",
+-  usage: "rehearse <script> [options]",
++  summary: "write the plan for a dry run, or grade the panel's log of one",
++  usage: "rehearse <script> [--log <log.csv>] [options]",
+   flags: [
+     ...SHOW_FLAGS,
+     {
+@@ -29,9 +42,21 @@ export const rehearseCommand: Command = {
+       help: "milliseconds within which lights read as one event",
+       fallback: "250",
+     },
++    { name: "log", kind: "value", help: "grade the panel's log of the run" },
++    {
++      name: "tolerance",
++      kind: "value",
++      help: "milliseconds of slip before a cue reads late, a frame by default",
++    },
+     OUT_FLAG,
+   ],
+   run(args, env) {
++    const logPath = args.values.get("log");
++    const logText = logPath === undefined ? undefined : env.readFile(logPath);
++    if (logPath !== undefined && logText === undefined) {
++      env.err(`cannot read the log at ${logPath}`);
++      return EXIT_BAD_USAGE;
++    }
+     const outcome = runShow(args, env, { quiet: true });
+     if (outcome === undefined) {
+       return EXIT_BAD_USAGE;
+@@ -41,6 +66,11 @@ export const rehearseCommand: Command = {
+       env.err("the show does not compile, so there is nothing to rehearse");
+       return EXIT_SHOW_PROBLEM;
+     }
++
++    if (logText !== undefined && logPath !== undefined) {
++      return gradeRun(logText, logPath, args, env, outcome);
++    }
++
+     const window = requireNumber(args, "window", { min: 0 });
+     if (!window.ok) {
+       env.err(window.reason);
+@@ -70,3 +100,45 @@ export const rehearseCommand: Command = {
+     return outcomeCode(outcome);
+   },
+ };
++
++/**
++ * Grade a log. The parse problems and the grade's own findings go to standard
++ * error together, so the grade itself stays a document somebody can redirect
++ * into the show file without collecting the complaints about it.
++ */
++function gradeRun(
++  text: string,
++  path: string,
++  args: ParsedArgs,
++  env: CliEnv,
++  outcome: RunOutcome,
++): number {
++  let tolerance: number | undefined;
++  if (args.values.get("tolerance") !== undefined) {
++    const given = requireNumber(args, "tolerance", { min: 0 });
++    if (!given.ok) {
++      env.err(given.reason);
++      return EXIT_BAD_USAGE;
++    }
++    tolerance = given.value;
++  }
++
++  const log = parsePanelLog(text, path);
++  const grade = gradeLog(
++    outcome.result.schedule,
++    log.rows,
++    tolerance === undefined ? {} : { tolerance: ms(tolerance) },
++  );
++
++  const wrote = emit(describeGrade(grade), args, env, "the graded log");
++  if (wrote !== EXIT_OK) {
++    return wrote;
++  }
++
++  const diagnostics = checkLog(grade);
++  diagnostics.addAll(log.diagnostics.all());
++  if (diagnostics.size > 0) {
++    env.err(formatBag(diagnostics));
++  }
++  return diagnostics.hasErrors() ? EXIT_SHOW_PROBLEM : outcomeCode(outcome);
++}
+diff --git a/src/core/codes.ts b/src/core/codes.ts
+index ef5c6dc..7867c9b 100644
+--- a/src/core/codes.ts
++++ b/src/core/codes.ts
+@@ -92,6 +92,18 @@ export const CODE_NOTES: ReadonlyMap<string, string> = new Map([
+     "PF1412",
+     "a lead is wired to a pin nothing fires, which nearly always means a real cue is on the wrong terminal and will not go",
+   ],
++  [
++    "PF1415",
++    "a pin read open before the show and connected after it, so it never had a circuit and the match on it is still live",
++  ],
++  [
++    "PF1416",
++    "a pin the show never fires was wired beforehand and has burned by the end, so something went up that the table never asked for",
++  ],
++  [
++    "PF3801",
++    "the panel logged a pin the firing table does not contain, so either the panel ran a different table or the log is of another show",
++  ],
+   [
+     "PF2200",
+     "a macro would produce more shots than the cap allows, usually because an interval was typed in the wrong unit",
+diff --git a/src/rig/continuity.ts b/src/rig/continuity.ts
+index aff2ece..450ffba 100644
+--- a/src/rig/continuity.ts
++++ b/src/rig/continuity.ts
+@@ -242,3 +242,161 @@ export function unwalkedPins(
+   const seen = new Set(rows.map((row) => pinKey(row.address)));
+   return rig.allPins().filter((address) => !seen.has(pinKey(address)));
+ }
++
++/**
++ * The walk after the show, which is the one that matters.
++ *
++ * Before the show, an open pin is a cue that will not go. After the show, it
++ * is the opposite: an open pin is a match that burned, which is the whole
++ * point. A pin still reading connected at the end has an e-match on it that
++ * never fired, and somewhere out on the field there is a mortar with a shell
++ * in it. That is not paperwork, it is where the crew goes next and how long
++ * they wait before going.
++ *
++ * Reading the after walk against the before walk is what separates a misfire
++ * from a cue that was never connected in the first place. Both read connected
++ * afterwards, and only one of them is a surprise.
++ */
++
++export interface AfterWalk {
++  /** Fired by the show and still connected, so a live match is out there. */
++  readonly misfired: readonly PinAddress[];
++  /** Still connected and open before the show, so it never had a circuit. */
++  readonly dead: readonly PinAddress[];
++  /** Fired by the show and never reported after, so nobody knows. */
++  readonly unknown: readonly PinAddress[];
++  /** Shorted after the show, which reads as neither fired nor connected. */
++  readonly shorted: readonly PinAddress[];
++  /** Fired by the show and reads open, which is what should happen. */
++  readonly fired: readonly PinAddress[];
++  /** Outside the show, connected before and open after, so something fired. */
++  readonly burnt: readonly PinAddress[];
++}
++
++function firstByPin(
++  rows: readonly ContinuityRow[],
++): Map<string, ContinuityRow> {
++  const found = new Map<string, ContinuityRow>();
++  for (const row of rows) {
++    const key = pinKey(row.address);
++    if (!found.has(key)) {
++      found.set(key, row);
++    }
++  }
++  return found;
++}
++
++/**
++ * Split the show's pins by what the after walk says about them, using the
++ * before walk where there is one. Without a before walk nothing can be called
++ * dead, so every still connected pin is treated as a misfire, which is the
++ * safe way round.
++ */
++export function reconcileAfter(
++  expected: Iterable<PinAddress>,
++  before: readonly ContinuityRow[] | undefined,
++  after: readonly ContinuityRow[],
++): AfterWalk {
++  const wanted = new Map(
++    [...expected].map((address) => [pinKey(address), address]),
++  );
++  const beforeRows = firstByPin(before ?? []);
++  const afterRows = firstByPin(after);
++  const walkedBefore = beforeRows.size > 0;
++
++  const misfired: PinAddress[] = [];
++  const dead: PinAddress[] = [];
++  const unknown: PinAddress[] = [];
++  const shorted: PinAddress[] = [];
++  const fired: PinAddress[] = [];
++  const burnt: PinAddress[] = [];
++
++  for (const [key, address] of wanted) {
++    const row = afterRows.get(key);
++    if (row === undefined) {
++      unknown.push(address);
++      continue;
++    }
++    if (row.reading === "short") {
++      shorted.push(address);
++      continue;
++    }
++    if (row.reading === "connected") {
++      const was = beforeRows.get(key)?.reading;
++      if (walkedBefore && was === "open") {
++        dead.push(address);
++      } else {
++        misfired.push(address);
++      }
++      continue;
++    }
++    fired.push(address);
++  }
++
++  for (const row of afterRows.values()) {
++    const key = pinKey(row.address);
++    if (wanted.has(key) || row.reading !== "open") {
++      continue;
++    }
++    if (beforeRows.get(key)?.reading === "connected") {
++      burnt.push(row.address);
++    }
++  }
++
++  return {
++    misfired: misfired.sort(comparePins),
++    dead: dead.sort(comparePins),
++    unknown: unknown.sort(comparePins),
++    shorted: shorted.sort(comparePins),
++    fired: fired.sort(comparePins),
++    burnt: burnt.sort(comparePins),
++  };
++}
++
++/**
++ * Every pin the show fired that the after walk cannot show as having gone.
++ * All of them are treated as misfires, including the ones nobody reported,
++ * because the waiting period is cheap and walking out to a live mortar is not.
++ */
++export function unfiredPins(result: AfterWalk): PinAddress[] {
++  return [
++    ...result.misfired,
++    ...result.dead,
++    ...result.unknown,
++    ...result.shorted,
++  ].sort(comparePins);
++}
++
++export function checkAfterWalk(result: AfterWalk): DiagnosticBag {
++  const diagnostics = new DiagnosticBag();
++  for (const address of result.dead) {
++    diagnostics.error({
++      code: "PF1415",
++      message: `${formatPin(address)} read open before the show and connected after, so it never had a circuit`,
++      help: "the match is still live, treat it as a misfire and find the break",
++    });
++  }
++  for (const address of result.burnt) {
++    diagnostics.error({
++      code: "PF1416",
++      message: `${formatPin(address)} was wired, the show never fired it, and it has burned`,
++      help: "something went up that the table did not ask for, stop and account for it",
++    });
++  }
++  for (const address of result.unknown) {
++    diagnostics.warning({
++      code: "PF1417",
++      message: `${formatPin(address)} is fired by the show and the after walk never reported it`,
++      help: "walk it again before anybody goes out, an unread pin counts as live",
++    });
++  }
++  return diagnostics;
++}
++
++/** Pins the after walk read open, which are the only ones safe to refire on. */
++export function usablePins(after: readonly ContinuityRow[]): PinAddress[] {
++  return after
++    .filter((row) => row.reading === "open")
++    .map((row) => row.address)
++    .sort(comparePins);
++}
+diff --git a/src/timeline/misfire.ts b/src/timeline/misfire.ts
+index 80b722a..676d783 100644
+--- a/src/timeline/misfire.ts
++++ b/src/timeline/misfire.ts
+@@ -3,6 +3,7 @@ import type { FiringEvent, Schedule } from "./schedule.js";
+ import { isGround } from "../catalog/effect.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+ import { compareIds } from "../core/ids.js";
++import { plural } from "../core/text.js";
+ import { formatShowTime } from "../core/timecode.js";
+ import type { Milliseconds } from "../core/units.js";
+ import { ms, raw } from "../core/units.js";
+@@ -86,6 +87,16 @@ export interface RefirePlan {
+   readonly reason?: string;
+ }
+ 
++export interface RefireOptions {
++  /**
++   * Pins a refire may land on, which after a show means the pins the after
++   * walk read open. A pin that still reads connected has a live match on it,
++   * and wiring a second cue onto it is how a crew fires the thing they walked
++   * out to make safe.
++   */
++  readonly usable?: Iterable<PinAddress>;
++}
++
+ /**
+  * Where each misfire could be moved to for a second attempt. A shell that did
+  * not go is normally not refired at all, so this exists for the rehearsal
+@@ -95,8 +106,20 @@ export function planRefires(
+   schedule: Schedule | QuantisedSchedule,
+   misfires: readonly Misfire[],
+   rig: Rig,
++  options: RefireOptions = {},
+ ): RefirePlan[] {
+   const taken = new Set(schedule.events.map((event) => pinKey(event.address)));
++  // A pin nothing in the walk vouches for is treated as taken, which is the
++  // only way to keep the search below from finding it.
++  const restricted = options.usable !== undefined;
++  if (options.usable !== undefined) {
++    const open = new Set([...options.usable].map(pinKey));
++    for (const address of rig.allPins()) {
++      if (!open.has(pinKey(address))) {
++        taken.add(pinKey(address));
++      }
++    }
++  }
+   const plans: RefirePlan[] = [];
+   for (const misfire of misfires) {
+     if (!isGround(misfire.event.effect)) {
+@@ -110,7 +133,9 @@ export function planRefires(
+     if (spare === undefined) {
+       plans.push({
+         misfire,
+-        reason: `no free pin left at ${misfire.event.position}`,
++        reason: restricted
++          ? `no pin the walk read open is left at ${misfire.event.position}`
++          : `no free pin left at ${misfire.event.position}`,
+       });
+       continue;
+     }
+@@ -120,6 +145,85 @@ export function planRefires(
+   return plans;
+ }
+ 
++/** The moment the last effect of the show stops burning. */
++export function lastLightOut(
++  schedule: Schedule | QuantisedSchedule,
++): Milliseconds {
++  let latest = 0;
++  for (const event of schedule.events) {
++    latest = Math.max(latest, raw(event.occupancy.end));
++  }
++  return ms(latest);
++}
++
++export interface PositionClearance {
++  readonly position: string;
++  readonly misfires: readonly Misfire[];
++  /** The longest wait any misfire at this position asks for. */
++  readonly wait: Milliseconds;
++  /** When somebody may walk to this position, on the show clock. */
++  readonly clearAt: Milliseconds;
++}
++
++export interface ClearancePlan {
++  /** Soonest first, because that is the order a crew works in. */
++  readonly positions: readonly PositionClearance[];
++  /** When the whole field is clear. Zero when nothing misfired. */
++  readonly fieldClearAt: Milliseconds;
++}
++
++/**
++ * What to do with the field, position by position.
++ *
++ * The single clearance time is the honest answer for the field as a whole, but
++ * it is not how a crew works. A rack of ground pieces at one end is
++ * approachable twenty five minutes before the mortar at the other, and a plan
++ * that gives one time for everything means either waiting for no reason or,
++ * worse, the crew deciding on the night which parts of it to believe.
++ */
++export function clearancePlan(
++  schedule: Schedule | QuantisedSchedule,
++  misfires: readonly Misfire[],
++): ClearancePlan {
++  const latest = raw(lastLightOut(schedule));
++  const byPosition = new Map<string, Misfire[]>();
++  for (const misfire of misfires) {
++    const at = misfire.event.position;
++    const found = byPosition.get(at);
++    if (found === undefined) {
++      byPosition.set(at, [misfire]);
++    } else {
++      found.push(misfire);
++    }
++  }
++  const positions: PositionClearance[] = [...byPosition.entries()]
++    .map(([position, found]) => {
++      const wait = found.reduce(
++        (longest, misfire) => Math.max(longest, raw(waitFor(misfire))),
++        0,
++      );
++      return {
++        position,
++        misfires: found,
++        wait: ms(wait),
++        clearAt: ms(latest + wait),
++      };
++    })
++    .sort(
++      (a, b) =>
++        raw(a.clearAt) - raw(b.clearAt) || compareIds(a.position, b.position),
++    );
++  return { positions, fieldClearAt: clearAt(schedule, misfires) };
++}
++
++/** The clearance plan as a crew would read it out. */
++export function clearanceLines(plan: ClearancePlan): string[] {
++  return plan.positions.map(
++    (position) =>
++      `${position.position}  ${plural(position.misfires.length, "misfire")}  wait ${(raw(position.wait) / 60000).toFixed(0)} minutes  clear at ${formatShowTime(position.clearAt)}`,
++  );
++}
++
+ export function checkMisfires(
+   schedule: Schedule | QuantisedSchedule,
+   misfires: readonly Misfire[],
+diff --git a/src/timeline/rehearsal.ts b/src/timeline/rehearsal.ts
+index 95d9ced..ac84561 100644
+--- a/src/timeline/rehearsal.ts
++++ b/src/timeline/rehearsal.ts
+@@ -1,12 +1,20 @@
+ import type { QuantisedSchedule } from "./quantise.js";
+ import type { FiringEvent, Schedule } from "./schedule.js";
+ import { countBy, sortedEntries } from "../core/collect.js";
++import { readTable } from "../core/csv.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+-import { renderTable } from "../core/text.js";
+-import { formatShowTime } from "../core/timecode.js";
++import { plural, renderTable } from "../core/text.js";
++import {
++  SMPTE_25,
++  formatShowTime,
++  frameDuration,
++  parseShowTime,
++} from "../core/timecode.js";
++import type { TimecodeFormat } from "../core/timecode.js";
+ import { ms, raw } from "../core/units.js";
+ import type { Milliseconds } from "../core/units.js";
+-import { formatPin } from "../rig/pin.js";
++import { formatPin, parsePin, pinKey } from "../rig/pin.js";
++import type { PinAddress } from "../rig/pin.js";
+ import type { Rig } from "../rig/rig.js";
+ 
+ /**
+@@ -176,3 +184,336 @@ export function checkRehearsal(plan: RehearsalPlan): DiagnosticBag {
+   }
+   return diagnostics;
+ }
++
++/**
++ * Reading the panel's own log back.
++ *
++ * The rehearsal plan above says what a crew should see. The panel, meanwhile,
++ * writes down what it actually did, cue by cue, to the millisecond, and that
++ * file is usually copied off the card and never opened. It is better evidence
++ * than four people watching lights, and it is the only evidence that says how
++ * late a cue was rather than whether it happened.
++ *
++ * Two things make reading it by hand unpleasant. The times are counted from
++ * when the panel started running, which is the show clock shifted by the pre
++ * roll, so every number is out by a constant that a person has to remember.
++ * And a slip of one frame is inside what the panel could ever have done, so a
++ * grade that flags it is a grade nobody reads twice.
++ */
++
++/** One line of a panel's log: a pin, and when the panel closed it. */
++export interface PanelLogRow {
++  readonly address: PinAddress;
++  /** On the panel's clock, which is the show clock plus the pre roll. */
++  readonly at: Milliseconds;
++  /** One based line in the log, so a bad row can be pointed at. */
++  readonly line: number;
++}
++
++export interface PanelLogReport {
++  readonly rows: readonly PanelLogRow[];
++  readonly diagnostics: DiagnosticBag;
++}
++
++/** The spellings panels use for the pin column, as the walk reader accepts. */
++const LOG_PIN_COLUMNS = ["pin", "address", "cue", "output"] as const;
++
++/**
++ * The spellings for the time column. `readTable` has already lowercased the
++ * headers and turned runs of whitespace into underscores, so `Fired At` and
++ * `CUE TIME` arrive here as `fired_at` and `cue_time`.
++ */
++const LOG_TIME_COLUMNS = [
++  "time",
++  "fired",
++  "at",
++  "fired_at",
++  "cue_time",
++] as const;
++
++/**
++ * Read a panel's log of a run. A row that cannot be read is an error and is
++ * skipped rather than guessed at, because a log with one mangled line is still
++ * worth grading and a guessed time reads as a cue that fired.
++ */
++export function parsePanelLog(text: string, source: string): PanelLogReport {
++  const diagnostics = new DiagnosticBag();
++  const table = readTable(text);
++  const rows: PanelLogRow[] = [];
++
++  const addressColumn = LOG_PIN_COLUMNS.find((name) =>
++    table.headers.includes(name),
++  );
++  const timeColumn = LOG_TIME_COLUMNS.find((name) =>
++    table.headers.includes(name),
++  );
++  if (addressColumn === undefined || timeColumn === undefined) {
++    diagnostics.error({
++      code: "PF1420",
++      message: `${source} does not have a pin column and a time column`,
++      help: "the pin column may be pin, address, cue or output, the time column time, fired, at, fired at or cue time",
++    });
++    return { rows, diagnostics };
++  }
++
++  for (const record of table.records) {
++    const where = `${source} line ${record.line}`;
++    const address = parsePin(record.values.get(addressColumn) ?? "");
++    if (address === undefined) {
++      diagnostics.error({
++        code: "PF1421",
++        message: `${where} has no readable pin address`,
++      });
++      continue;
++    }
++    const logged = (record.values.get(timeColumn) ?? "").trim();
++    const at = parseShowTime(logged);
++    if (at === undefined) {
++      diagnostics.error({
++        code: "PF1422",
++        message: `${where} has a time of ${logged.length === 0 ? "(blank)" : logged}`,
++        help: "a time reads as 12, 12.400, 1:23.450, 4m30s or 250ms",
++      });
++      continue;
++    }
++    rows.push({ address, at, line: record.line });
++  }
++  return { rows, diagnostics };
++}
++
++/** One cue of the show, and the line of the log that is it. */
++export interface LogMatch {
++  readonly event: FiringEvent;
++  readonly row: PanelLogRow;
++  /** Logged minus expected, so late is positive and early is negative. */
++  readonly offset: Milliseconds;
++}
++
++export interface LogGradeOptions {
++  /** Slip allowed before a cue reads late or early. A frame by default. */
++  readonly tolerance?: Milliseconds;
++  /** The panel's frame, for a schedule that does not carry one. */
++  readonly format?: TimecodeFormat;
++}
++
++export interface LogGrade {
++  /** Every cue the log accounts for, in table order. */
++  readonly fired: readonly LogMatch[];
++  /** Cues the log never mentions. */
++  readonly missed: readonly FiringEvent[];
++  /** Lines the show has no cue for, including a pin logged twice. */
++  readonly extra: readonly PanelLogRow[];
++  readonly late: readonly LogMatch[];
++  readonly early: readonly LogMatch[];
++  /** The furthest out of the two, gone when nothing slipped. */
++  readonly worst?: LogMatch;
++  readonly tolerance: Milliseconds;
++  /** What was added to each show time to get the panel's clock. */
++  readonly preRoll: Milliseconds;
++}
++
++function formatOf(
++  schedule: Schedule | QuantisedSchedule,
++): TimecodeFormat | undefined {
++  return "format" in schedule ? schedule.format : undefined;
++}
++
++function toleranceFor(
++  schedule: Schedule | QuantisedSchedule,
++  options: LogGradeOptions,
++): Milliseconds {
++  if (options.tolerance !== undefined) {
++    return ms(Math.abs(raw(options.tolerance)));
++  }
++  return frameDuration(options.format ?? formatOf(schedule) ?? SMPTE_25);
++}
++
++/**
++ * Grade a log against the table it was run from.
++ *
++ * A pin is matched to its earliest logged time, which is the one the panel
++ * meant, and a second line for the same pin is extra rather than a second
++ * chance at being on time. Everything the show does not fire is extra too,
++ * because a pin firing that the table never asked for is the finding that
++ * matters most and it has nothing to be graded against.
++ */
++export function gradeLog(
++  schedule: Schedule | QuantisedSchedule,
++  rows: readonly PanelLogRow[],
++  options: LogGradeOptions = {},
++): LogGrade {
++  const tolerance = toleranceFor(schedule, options);
++  const slack = raw(tolerance);
++  const shift = raw(schedule.preRoll);
++
++  const queues = new Map<string, PanelLogRow[]>();
++  for (const row of [...rows].sort(
++    (a, b) => raw(a.at) - raw(b.at) || a.line - b.line,
++  )) {
++    const key = pinKey(row.address);
++    const queue = queues.get(key);
++    if (queue === undefined) {
++      queues.set(key, [row]);
++    } else {
++      queue.push(row);
++    }
++  }
++
++  const fired: LogMatch[] = [];
++  const missed: FiringEvent[] = [];
++  for (const event of schedule.events) {
++    const queue = queues.get(pinKey(event.address));
++    const row = queue?.shift();
++    if (row === undefined) {
++      missed.push(event);
++      continue;
++    }
++    fired.push({
++      event,
++      row,
++      offset: ms(raw(row.at) - (raw(event.ignitionAt) + shift)),
++    });
++  }
++
++  const extra = [...queues.values()]
++    .flat()
++    .sort((a, b) => raw(a.at) - raw(b.at) || a.line - b.line);
++
++  const late = fired.filter((match) => raw(match.offset) > slack);
++  const early = fired.filter((match) => raw(match.offset) < -slack);
++  let worst: LogMatch | undefined;
++  for (const match of [...late, ...early]) {
++    if (
++      worst === undefined ||
++      Math.abs(raw(match.offset)) > Math.abs(raw(worst.offset))
++    ) {
++      worst = match;
++    }
++  }
++
++  return {
++    fired,
++    missed,
++    extra,
++    late,
++    early,
++    ...(worst === undefined ? {} : { worst }),
++    tolerance,
++    preRoll: schedule.preRoll,
++  };
++}
++
++/** A signed show time, so a reader can see which way a cue slipped. */
++export function formatOffset(offset: Milliseconds): string {
++  const value = raw(offset);
++  const sign = value < 0 ? "-" : "+";
++  return `${sign}${formatShowTime(ms(Math.abs(value)))}`;
++}
++
++function verdictOf(match: LogMatch, tolerance: Milliseconds): string {
++  const offset = raw(match.offset);
++  const slack = raw(tolerance);
++  if (offset > slack) {
++    return "late";
++  }
++  return offset < -slack ? "early" : "on time";
++}
++
++/** The one line a shooter reads first. */
++export function summariseGrade(grade: LogGrade): string {
++  return [
++    `${plural(grade.fired.length, "cue")} fired`,
++    `${grade.missed.length} missed`,
++    `${plural(grade.extra.length, "line")} the show never asked for`,
++    `${grade.late.length} late`,
++    `${grade.early.length} early`,
++  ].join(", ");
++}
++
++export function describeGrade(grade: LogGrade): string {
++  const parts: string[] = [summariseGrade(grade)];
++  if (grade.worst !== undefined) {
++    parts.push(
++      `worst ${formatPin(grade.worst.event.address)} ${formatOffset(grade.worst.offset)} against a tolerance of ${formatOffset(grade.tolerance)}`,
++    );
++  }
++  if (grade.fired.length > 0) {
++    parts.push(
++      "",
++      renderTable(
++        [
++          { header: "due", align: "right" },
++          { header: "pin" },
++          { header: "logged", align: "right" },
++          { header: "offset", align: "right" },
++          { header: "verdict" },
++        ],
++        grade.fired.map((match) => [
++          formatShowTime(match.event.ignitionAt),
++          formatPin(match.event.address),
++          formatShowTime(match.row.at),
++          formatOffset(match.offset),
++          verdictOf(match, grade.tolerance),
++        ]),
++      ),
++    );
++  }
++  if (grade.missed.length > 0) {
++    parts.push(
++      "",
++      "missed",
++      ...grade.missed.map(
++        (event) =>
++          `  ${formatShowTime(event.ignitionAt)}  ${formatPin(event.address)}  ${event.effectId} at ${event.position}`,
++      ),
++    );
++  }
++  if (grade.extra.length > 0) {
++    parts.push(
++      "",
++      "extra",
++      ...grade.extra.map(
++        (row) =>
++          `  line ${row.line}  ${formatPin(row.address)} at ${formatShowTime(row.at)}`,
++      ),
++    );
++  }
++  return parts.join("\n");
++}
++
++/**
++ * What the grade means. A cue the log does not account for and a pin the show
++ * never asked for are both errors, because either the panel did not run the
++ * table it was given or the log is not of this show. A frame or two of slip is
++ * a warning, since a panel that consistently runs a frame late is worth
++ * knowing about and is not a reason to stop.
++ */
++export function checkLog(grade: LogGrade): DiagnosticBag {
++  const diagnostics = new DiagnosticBag();
++  for (const event of grade.missed) {
++    diagnostics.error({
++      code: "PF3800",
++      message: `${formatPin(event.address)} ${event.effectId} due at ${formatShowTime(event.ignitionAt)} is not in the log`,
++      help: "either the cue did not fire or the log is of a different run",
++    });
++  }
++  for (const row of grade.extra) {
++    diagnostics.error({
++      code: "PF3801",
++      message: `line ${row.line} logs ${formatPin(row.address)} at ${formatShowTime(row.at)} and the show never fires it`,
++    });
++  }
++  for (const match of grade.late) {
++    diagnostics.warning({
++      code: "PF3802",
++      message: `${formatPin(match.event.address)} fired ${formatOffset(match.offset)} late`,
++    });
++  }
++  for (const match of grade.early) {
++    diagnostics.warning({
++      code: "PF3803",
++      message: `${formatPin(match.event.address)} fired ${formatOffset(match.offset)} early`,
++    });
++  }
++  return diagnostics;
++}
+diff --git a/tests/cli/permitContinuity.test.ts b/tests/cli/permitContinuity.test.ts
+index 0730731..3483b9e 100644
+--- a/tests/cli/permitContinuity.test.ts
++++ b/tests/cli/permitContinuity.test.ts
+@@ -258,3 +258,142 @@ describe("explain", () => {
+     ).toBe(EXIT_BAD_USAGE);
+   });
+ });
++
++/**
++ * The morning after.
++ *
++ * The show in this file is two shells on pins 01.01 and 01.02, so an after walk
++ * that still reads connected means there is a mortar out there with a shell in
++ * it. Every case below is one of the things a crew finds at that point.
++ */
++describe("continuity --after", () => {
++  const CLEAR = ["pin,state", "01.01,open", "01.02,open"].join("\n");
++  const MISFIRE = ["pin,state", "01.01,open", "01.02,connected"].join("\n");
++
++  it("signs off a field where everything fired", () => {
++    const env = envWith({ "after.csv": CLEAR });
++    expect(
++      main(["continuity", "autumn.pf", "--after", "after.csv", ...base], env),
++    ).toBe(EXIT_OK);
++    expect(env.stdout).toContain("2 pins read after the show");
++    expect(env.stdout).toContain("the field is clear");
++  });
++
++  it("takes the after walk on its own, with no before walk", () => {
++    const env = envWith({ "after.csv": MISFIRE });
++    expect(
++      main(["continuity", "autumn.pf", "--after", "after.csv", ...base], env),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stdout).toContain("1 misfire");
++    expect(env.stdout).toContain("unfired: 01.02");
++  });
++
++  it("says when the field is approachable, position by position", () => {
++    const env = envWith({ "after.csv": MISFIRE });
++    main(["continuity", "autumn.pf", "--after", "after.csv", ...base], env);
++    expect(env.stdout).toContain("pad.a");
++    expect(env.stdout).toContain("wait 30 minutes");
++    expect(env.stdout).toContain("field clear at");
++    expect(env.stdout).toContain("not refired");
++  });
++
++  it("tells a dead cue from a misfire when it has both walks", () => {
++    const env = envWith({
++      "before.csv": ["pin,state", "01.01,ok", "01.02,open"].join("\n"),
++      "after.csv": MISFIRE,
++    });
++    expect(
++      main(
++        [
++          "continuity",
++          "autumn.pf",
++          "--walk",
++          "before.csv",
++          "--after",
++          "after.csv",
++          ...base,
++        ],
++        env,
++      ),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stdout).toContain("1 dead cue");
++    expect(env.stdout).toContain("0 misfires");
++    expect(env.stderr).toContain("PF1415");
++  });
++
++  it("stops on a pin outside the show that has burned", () => {
++    const env = envWith({
++      "before.csv": ["pin,state", "01.01,ok", "01.02,ok", "01.09,ok"].join(
++        "\n",
++      ),
++      "after.csv": ["pin,state", "01.01,open", "01.02,open", "01.09,open"].join(
++        "\n",
++      ),
++    });
++    expect(
++      main(
++        [
++          "continuity",
++          "autumn.pf",
++          "--walk",
++          "before.csv",
++          "--after",
++          "after.csv",
++          ...base,
++        ],
++        env,
++      ),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stdout).toContain("burnt: 01.09");
++    expect(env.stderr).toContain("PF1416");
++  });
++
++  it("warns about a cue the after walk never reported", () => {
++    const env = envWith({
++      "after.csv": ["pin,state", "01.01,open"].join("\n"),
++    });
++    expect(
++      main(["continuity", "autumn.pf", "--after", "after.csv", ...base], env),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stderr).toContain("PF1417");
++    expect(env.stdout).toContain("unfired: 01.02");
++  });
++
++  it("reports an after walk it cannot read", () => {
++    const env = envWith();
++    expect(
++      main(["continuity", "autumn.pf", "--after", "gone.csv", ...base], env),
++    ).toBe(EXIT_BAD_USAGE);
++    expect(env.stderr).toContain("cannot read the walk");
++  });
++
++  it("stops on an after walk that will not parse", () => {
++    const env = envWith({ "after.csv": "a,b\n1,2" });
++    expect(
++      main(["continuity", "autumn.pf", "--after", "after.csv", ...base], env),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stderr).toContain("PF1400");
++  });
++
++  it("still checks resistances and lists unwalked pins", () => {
++    const env = envWith({
++      "after.csv": ["pin,state,ohms", "01.01,open,4.7", "01.02,ok,40"].join(
++        "\n",
++      ),
++    });
++    main(
++      [
++        "continuity",
++        "autumn.pf",
++        "--after",
++        "after.csv",
++        "--resistance",
++        "--unwalked",
++        ...base,
++      ],
++      env,
++    );
++    expect(env.stderr).toContain("PF1414");
++    expect(env.stdout).toContain("never walked:");
++  });
++});
+diff --git a/tests/cli/planLayout.test.ts b/tests/cli/planLayout.test.ts
+index dd696ef..67a8bb9 100644
+--- a/tests/cli/planLayout.test.ts
++++ b/tests/cli/planLayout.test.ts
+@@ -223,3 +223,149 @@ describe("annotate", () => {
+     ).toBe(EXIT_BAD_USAGE);
+   });
+ });
++
++/**
++ * Grading the panel's log of the dry run.
++ *
++ * The logs here are built from the firing table the same command line writes,
++ * so a change to the lift table moves both together and the test keeps saying
++ * what it means rather than carrying a copy of the times.
++ */
++describe("rehearse --log", () => {
++  /** The firing table this show compiles to, as the panel would load it. */
++  function tableRows(): string[][] {
++    const out = envWith();
++    main(["table", "autumn.pf", ...base], out);
++    return out.stdout
++      .split("\n")
++      .slice(1)
++      .map((line) => line.split(","));
++  }
++
++  /** A log of that table, optionally with the first cue late and cues dropped. */
++  function logOf(shift = 0, drop = 0): string {
++    const rows = tableRows()
++      .slice(0, drop === 0 ? undefined : -drop)
++      .map((row, index) => {
++        const time = row[1] ?? "";
++        const millis =
++          Number(time.split(":")[0]) * 60000 +
++          Number(time.split(":")[1]) * 1000 +
++          (index === 0 ? shift : 0);
++        return `${row[2]},${Math.floor(millis / 60000)}:${((millis % 60000) / 1000).toFixed(3).padStart(6, "0")}`;
++      });
++    return ["pin,fired at", ...rows].join("\n");
++  }
++
++  it("passes a run that did what the table said", () => {
++    const env = envWith({ "log.csv": logOf() });
++    expect(
++      main(["rehearse", "autumn.pf", "--log", "log.csv", ...base], env),
++    ).toBe(EXIT_OK);
++    expect(env.stdout).toContain("verdict");
++    expect(env.stdout).toContain("on time");
++    expect(env.stdout).toContain("0 late");
++    expect(env.stderr).toBe("");
++  });
++
++  it("fails a log missing a cue and names it", () => {
++    const env = envWith({ "log.csv": logOf(0, 1) });
++    expect(
++      main(["rehearse", "autumn.pf", "--log", "log.csv", ...base], env),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stdout).toContain("1 missed");
++    expect(env.stderr).toContain("PF3800");
++  });
++
++  it("warns about a cue that fired late without failing the run", () => {
++    const env = envWith({ "log.csv": logOf(400) });
++    expect(
++      main(["rehearse", "autumn.pf", "--log", "log.csv", ...base], env),
++    ).toBe(EXIT_OK);
++    expect(env.stdout).toContain("1 late");
++    expect(env.stdout).toContain("worst");
++    expect(env.stderr).toContain("PF3802");
++  });
++
++  it("takes a tolerance wide enough to forgive it", () => {
++    const env = envWith({ "log.csv": logOf(400) });
++    main(
++      [
++        "rehearse",
++        "autumn.pf",
++        "--log",
++        "log.csv",
++        "--tolerance",
++        "500",
++        ...base,
++      ],
++      env,
++    );
++    expect(env.stdout).toContain("0 late");
++    expect(env.stderr).toBe("");
++  });
++
++  it("refuses a nonsense tolerance", () => {
++    const env = envWith({ "log.csv": logOf() });
++    expect(
++      main(
++        [
++          "rehearse",
++          "autumn.pf",
++          "--log",
++          "log.csv",
++          "--tolerance",
++          "soon",
++          ...base,
++        ],
++        env,
++      ),
++    ).toBe(EXIT_BAD_USAGE);
++  });
++
++  it("fails a log of a pin the show never fires", () => {
++    const env = envWith({
++      "log.csv": ["pin,fired", "02.31,0:20.000"].join("\n"),
++    });
++    expect(
++      main(["rehearse", "autumn.pf", "--log", "log.csv", ...base], env),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stderr).toContain("PF3801");
++  });
++
++  it("reports a log it cannot read at all", () => {
++    const env = envWith();
++    expect(
++      main(["rehearse", "autumn.pf", "--log", "gone.csv", ...base], env),
++    ).toBe(EXIT_BAD_USAGE);
++    expect(env.stderr).toContain("cannot read the log");
++  });
++
++  it("says what is wrong with a log that has no time column", () => {
++    const env = envWith({ "log.csv": "pin,ohms\n01.01,4.7" });
++    expect(
++      main(["rehearse", "autumn.pf", "--log", "log.csv", ...base], env),
++    ).toBe(EXIT_SHOW_PROBLEM);
++    expect(env.stderr).toContain("PF1420");
++  });
++
++  it("writes the grade to a file and the findings to standard error", () => {
++    const env = envWith({ "log.csv": logOf(400) });
++    main(
++      [
++        "rehearse",
++        "autumn.pf",
++        "--log",
++        "log.csv",
++        "--out",
++        "grade.txt",
++        ...base,
++      ],
++      env,
++    );
++    expect(env.written.get("grade.txt")).toContain("verdict");
++    expect(env.stdout).toContain("to grade.txt");
++    expect(env.stdout).not.toContain("PF3802");
++    expect(env.stderr).toContain("PF3802");
++  });
++});
+diff --git a/tests/rig/continuity.test.ts b/tests/rig/continuity.test.ts
+index 8f1fd73..47f7c03 100644
+--- a/tests/rig/continuity.test.ts
++++ b/tests/rig/continuity.test.ts
+@@ -1,12 +1,16 @@
+ import { describe, expect, it } from "vitest";
+ import { matchNamed } from "../../src/rig/circuit.js";
+ import {
++  checkAfterWalk,
+   checkReconciliation,
+   checkResistances,
+   parseContinuity,
+   reconcile,
++  reconcileAfter,
+   resistanceLooksRight,
++  unfiredPins,
+   unwalkedPins,
++  usablePins,
+ } from "../../src/rig/continuity.js";
+ import { firingModule, modelNamed } from "../../src/rig/module.js";
+ import { pinAddress } from "../../src/rig/pin.js";
+@@ -241,3 +245,274 @@ describe("unwalkedPins", () => {
+     expect(unwalkedPins(rig, rows)).toHaveLength(15);
+   });
+ });
++
++/**
++ * The walk after the show.
++ *
++ * The readings mean the opposite of what they mean beforehand, which is the
++ * whole reason this is its own function, so every case here is written as what
++ * the crew would find rather than as a table of inputs.
++ */
++
++const show = [pinAddress(1, 1), pinAddress(1, 2), pinAddress(1, 3)];
++
++function walk(rows: readonly (readonly [number, string])[]) {
++  return parseContinuity(
++    ["pin,state", ...rows.map(([pin, state]) => `01.0${pin},${state}`)].join(
++      "\n",
++    ),
++    "walk.csv",
++  ).rows;
++}
++
++describe("reconcileAfter", () => {
++  it("calls an open pin fired, which is what should happen", () => {
++    const result = reconcileAfter(
++      show,
++      walk([
++        [1, "ok"],
++        [2, "ok"],
++        [3, "ok"],
++      ]),
++      walk([
++        [1, "open"],
++        [2, "open"],
++        [3, "open"],
++      ]),
++    );
++    expect(result.fired).toHaveLength(3);
++    expect(unfiredPins(result)).toHaveLength(0);
++  });
++
++  it("calls a pin still connected a misfire", () => {
++    const result = reconcileAfter(
++      show,
++      walk([
++        [1, "ok"],
++        [2, "ok"],
++        [3, "ok"],
++      ]),
++      walk([
++        [1, "open"],
++        [2, "connected"],
++        [3, "open"],
++      ]),
++    );
++    expect(result.misfired).toEqual([pinAddress(1, 2)]);
++    expect(result.dead).toHaveLength(0);
++  });
++
++  it("calls it dead when the before walk had it open all along", () => {
++    const result = reconcileAfter(
++      show,
++      walk([
++        [1, "ok"],
++        [2, "open"],
++        [3, "ok"],
++      ]),
++      walk([
++        [1, "open"],
++        [2, "connected"],
++        [3, "open"],
++      ]),
++    );
++    expect(result.dead).toEqual([pinAddress(1, 2)]);
++    expect(result.misfired).toHaveLength(0);
++  });
++
++  it("treats a still connected pin as a misfire without a before walk", () => {
++    const result = reconcileAfter(
++      show,
++      undefined,
++      walk([
++        [1, "open"],
++        [2, "connected"],
++        [3, "open"],
++      ]),
++    );
++    expect(result.misfired).toEqual([pinAddress(1, 2)]);
++    expect(result.dead).toHaveLength(0);
++  });
++
++  it("takes an empty before walk as no before walk", () => {
++    const result = reconcileAfter(
++      show,
++      [],
++      walk([
++        [1, "open"],
++        [2, "connected"],
++        [3, "open"],
++      ]),
++    );
++    expect(result.misfired).toEqual([pinAddress(1, 2)]);
++  });
++
++  it("calls a pin the after walk never reported unknown", () => {
++    const result = reconcileAfter(
++      show,
++      undefined,
++      walk([
++        [1, "open"],
++        [2, "open"],
++      ]),
++    );
++    expect(result.unknown).toEqual([pinAddress(1, 3)]);
++    expect(unfiredPins(result)).toEqual([pinAddress(1, 3)]);
++  });
++
++  it("keeps a short apart from the rest", () => {
++    const result = reconcileAfter(
++      show,
++      undefined,
++      walk([
++        [1, "open"],
++        [2, "short"],
++        [3, "open"],
++      ]),
++    );
++    expect(result.shorted).toEqual([pinAddress(1, 2)]);
++    expect(unfiredPins(result)).toEqual([pinAddress(1, 2)]);
++  });
++
++  it("calls a pin outside the show that was wired and has burned burnt", () => {
++    const result = reconcileAfter(
++      show,
++      walk([
++        [1, "ok"],
++        [2, "ok"],
++        [3, "ok"],
++        [9, "ok"],
++      ]),
++      walk([
++        [1, "open"],
++        [2, "open"],
++        [3, "open"],
++        [9, "open"],
++      ]),
++    );
++    expect(result.burnt).toEqual([pinAddress(1, 9)]);
++  });
++
++  it("says nothing about a stray that never had a circuit", () => {
++    const result = reconcileAfter(
++      show,
++      walk([[9, "open"]]),
++      walk([
++        [1, "open"],
++        [2, "open"],
++        [3, "open"],
++        [9, "open"],
++      ]),
++    );
++    expect(result.burnt).toHaveLength(0);
++  });
++
++  it("says nothing about a stray nobody walked beforehand", () => {
++    const result = reconcileAfter(
++      show,
++      undefined,
++      walk([
++        [1, "open"],
++        [2, "open"],
++        [3, "open"],
++        [9, "open"],
++      ]),
++    );
++    expect(result.burnt).toHaveLength(0);
++  });
++
++  it("reads the first row for a pin the walk reported twice", () => {
++    const rows = parseContinuity(
++      ["pin,state", "01.01,connected", "01.01,open"].join("\n"),
++      "walk.csv",
++    ).rows;
++    const result = reconcileAfter([pinAddress(1, 1)], undefined, rows);
++    expect(result.misfired).toEqual([pinAddress(1, 1)]);
++  });
++
++  it("sorts every list by pin", () => {
++    const result = reconcileAfter(
++      [pinAddress(2, 1), pinAddress(1, 4), pinAddress(1, 2)],
++      undefined,
++      parseContinuity(
++        ["pin,state", "02.01,connected", "01.04,connected", "01.02,c"].join(
++          "\n",
++        ),
++        "walk.csv",
++      ).rows,
++    );
++    expect(result.misfired).toEqual([
++      pinAddress(1, 2),
++      pinAddress(1, 4),
++      pinAddress(2, 1),
++    ]);
++  });
++
++  it("grades an empty show without complaint", () => {
++    const result = reconcileAfter([], undefined, []);
++    expect(unfiredPins(result)).toHaveLength(0);
++    expect(result.burnt).toHaveLength(0);
++  });
++});
++
++describe("checkAfterWalk", () => {
++  it("says nothing when everything went", () => {
++    const result = reconcileAfter(
++      [pinAddress(1, 1)],
++      undefined,
++      walk([[1, "open"]]),
++    );
++    expect(checkAfterWalk(result).size).toBe(0);
++  });
++
++  it("raises a dead cue as an error", () => {
++    const result = reconcileAfter(
++      [pinAddress(1, 1)],
++      walk([[1, "open"]]),
++      walk([[1, "connected"]]),
++    );
++    const problems = checkAfterWalk(result);
++    expect(problems.hasErrors()).toBe(true);
++    expect(problems.all()[0]?.code).toBe("PF1415");
++  });
++
++  it("raises a burnt stray as an error", () => {
++    const result = reconcileAfter([], walk([[9, "ok"]]), walk([[9, "open"]]));
++    const problems = checkAfterWalk(result);
++    expect(problems.hasErrors()).toBe(true);
++    expect(problems.all()[0]?.code).toBe("PF1416");
++  });
++
++  it("raises a pin nobody read as a warning", () => {
++    const result = reconcileAfter([pinAddress(1, 1)], undefined, []);
++    const problems = checkAfterWalk(result);
++    expect(problems.hasErrors()).toBe(false);
++    expect(problems.warningCount).toBe(1);
++    expect(problems.all()[0]?.code).toBe("PF1417");
++  });
++
++  it("leaves a plain misfire to the misfire report", () => {
++    const result = reconcileAfter(
++      [pinAddress(1, 1)],
++      walk([[1, "ok"]]),
++      walk([[1, "connected"]]),
++    );
++    expect(checkAfterWalk(result).size).toBe(0);
++    expect(unfiredPins(result)).toEqual([pinAddress(1, 1)]);
++  });
++});
++
++describe("usablePins", () => {
++  it("keeps only the pins that read open", () => {
++    expect(
++      usablePins(
++        walk([
++          [1, "open"],
++          [2, "connected"],
++          [3, "short"],
++          [4, "open"],
++        ]),
++      ),
++    ).toEqual([pinAddress(1, 1), pinAddress(1, 4)]);
++  });
++});
+diff --git a/tests/surface.test.ts b/tests/surface.test.ts
+index 123fc54..a6768f7 100644
+--- a/tests/surface.test.ts
++++ b/tests/surface.test.ts
+@@ -44,6 +44,23 @@ describe("the public surface", () => {
+     }
+   });
+ 
++  it("exports what reads the field back afterwards", () => {
++    for (const name of [
++      "parsePanelLog",
++      "gradeLog",
++      "checkLog",
++      "reconcileAfter",
++      "checkAfterWalk",
++      "unfiredPins",
++      "usablePins",
++      "clearancePlan",
++      "clearanceLines",
++      "lastLightOut",
++    ]) {
++      expect(name in api).toBe(true);
++    }
++  });
++
+   it("exports the outputs", () => {
+     for (const name of [
+       "firingTableCsv",
+diff --git a/tests/timeline/log.test.ts b/tests/timeline/log.test.ts
+new file mode 100644
+index 0000000..9c31dbb
+--- /dev/null
++++ b/tests/timeline/log.test.ts
+@@ -0,0 +1,321 @@
++import { describe, expect, it } from "vitest";
++import { calibre } from "../../src/catalog/calibre.js";
++import { shell } from "../../src/catalog/effect.js";
++import { Catalog } from "../../src/catalog/registry.js";
++import {
++  checkLog,
++  describeGrade,
++  formatOffset,
++  gradeLog,
++  parsePanelLog,
++  summariseGrade,
++} from "../../src/timeline/rehearsal.js";
++import { allocatePins } from "../../src/rig/allocate.js";
++import { firingModule, modelNamed } from "../../src/rig/module.js";
++import { pinAddress } from "../../src/rig/pin.js";
++import { Rig, firingPosition } from "../../src/rig/rig.js";
++import { expandScript } from "../../src/script/expand.js";
++import { parseScript } from "../../src/script/parser.js";
++import { resolveShots } from "../../src/script/resolve.js";
++import { buildSchedule } from "../../src/timeline/schedule.js";
++import { quantiseSchedule } from "../../src/timeline/quantise.js";
++import { effectId, positionId } from "../../src/core/ids.js";
++import { SourceFile } from "../../src/core/span.js";
++import { SMPTE_24, SMPTE_25 } from "../../src/core/timecode.js";
++import { mm, ms, raw } from "../../src/core/units.js";
++import type { Milliseconds } from "../../src/core/units.js";
++import type { PanelLogRow } from "../../src/timeline/rehearsal.js";
++
++/**
++ * Grading the panel's own account of a run.
++ *
++ * The times in here are worked out from the schedule rather than typed in, so
++ * a change to the lift table moves the log with it and the test still says
++ * what it means to be a frame late.
++ */
++
++const catalog = Catalog.from([
++  shell({ id: effectId("s"), name: "s", calibre: calibre(mm(75)) }),
++]);
++
++const rig = Rig.from(
++  [firingPosition(positionId("pad.a"), 0, 0)],
++  [firingModule(1, modelNamed("slat-50")!, positionId("pad.a"))],
++);
++
++function scheduleOf(source: string) {
++  const parsed = parseScript(new SourceFile("show.pf", source));
++  const expanded = expandScript(parsed.script.statements, { seed: "t" });
++  const resolved = resolveShots(expanded.shots, catalog, rig);
++  expect(resolved.diagnostics.errorCount).toBe(0);
++  return buildSchedule(
++    allocatePins(resolved.shots, rig, { packTight: true }).assignments,
++  );
++}
++
++const built = scheduleOf(
++  ["at 20 fire s from pad.a", "at 30 fire s from pad.a"].join("\n"),
++);
++
++/** A log that says every cue went exactly when the table asked. */
++function perfectLog(
++  schedule = built,
++  slip: readonly number[] = [],
++): PanelLogRow[] {
++  return schedule.events.map((event, index) => ({
++    address: event.address,
++    at: ms(raw(event.ignitionAt) + raw(schedule.preRoll) + (slip[index] ?? 0)),
++    line: index + 2,
++  }));
++}
++
++describe("parsePanelLog", () => {
++  it("reads the log the panel writes", () => {
++    const log = parsePanelLog(
++      ["pin,fired", "01.01,0.000", "01.02,11.990"].join("\n"),
++      "log.csv",
++    );
++    expect(log.diagnostics.size).toBe(0);
++    expect(log.rows).toHaveLength(2);
++    expect(log.rows[0]?.address).toEqual(pinAddress(1, 1));
++    expect(raw(log.rows[1]?.at as Milliseconds)).toBe(11990);
++    expect(log.rows[1]?.line).toBe(3);
++  });
++
++  it("takes any of the pin column spellings the walk takes", () => {
++    for (const header of ["pin", "address", "cue", "output"]) {
++      const log = parsePanelLog(`${header},time\n01.01,4.0`, "log.csv");
++      expect(log.rows).toHaveLength(1);
++    }
++  });
++
++  it("takes any of the time column spellings", () => {
++    for (const header of ["time", "fired", "at", "fired at", "cue time"]) {
++      const log = parsePanelLog(`pin,${header}\n01.01,4.0`, "log.csv");
++      expect(log.diagnostics.size).toBe(0);
++      expect(log.rows).toHaveLength(1);
++    }
++  });
++
++  it("refuses a log with no time column at all", () => {
++    const log = parsePanelLog("pin,ohms\n01.01,4.7", "log.csv");
++    expect(log.rows).toHaveLength(0);
++    expect(log.diagnostics.hasErrors()).toBe(true);
++    expect(log.diagnostics.all()[0]?.code).toBe("PF1420");
++  });
++
++  it("skips a row with no readable pin and says which line", () => {
++    const log = parsePanelLog(
++      ["pin,time", "01.01,4.0", "nonsense,5.0"].join("\n"),
++      "log.csv",
++    );
++    expect(log.rows).toHaveLength(1);
++    expect(log.diagnostics.all()[0]?.code).toBe("PF1421");
++    expect(log.diagnostics.all()[0]?.message).toContain("line 3");
++  });
++
++  it("skips a row with no readable time", () => {
++    const log = parsePanelLog(
++      ["pin,time", "01.01,soon", "01.02,"].join("\n"),
++      "log.csv",
++    );
++    expect(log.rows).toHaveLength(0);
++    expect(log.diagnostics.errorCount).toBe(2);
++    expect(log.diagnostics.all()[0]?.message).toContain("soon");
++    expect(log.diagnostics.all()[1]?.message).toContain("(blank)");
++  });
++});
++
++describe("gradeLog", () => {
++  it("passes a run that did what the table said", () => {
++    const grade = gradeLog(built, perfectLog());
++    expect(grade.fired).toHaveLength(2);
++    expect(grade.missed).toHaveLength(0);
++    expect(grade.extra).toHaveLength(0);
++    expect(grade.late).toHaveLength(0);
++    expect(grade.early).toHaveLength(0);
++    expect(grade.worst).toBeUndefined();
++  });
++
++  it("keeps the fired list in table order", () => {
++    const rows = [...perfectLog()].reverse();
++    const grade = gradeLog(built, rows);
++    expect(grade.fired.map((match) => match.event.address)).toEqual(
++      built.events.map((event) => event.address),
++    );
++  });
++
++  it("counts the log time as a show time plus the pre roll", () => {
++    const early = scheduleOf("at 1 fire s from pad.a");
++    expect(raw(early.preRoll)).toBeGreaterThan(0);
++    const grade = gradeLog(early, perfectLog(early));
++    expect(raw(grade.fired[0]?.offset as Milliseconds)).toBe(0);
++    expect(raw(grade.preRoll)).toBe(raw(early.preRoll));
++    // The same log read without the shift would be a whole pre roll early.
++    const naive = gradeLog(early, [
++      {
++        ...(perfectLog(early)[0] as PanelLogRow),
++        at: early.events[0]!.ignitionAt,
++      },
++    ]);
++    expect(raw(naive.fired[0]?.offset as Milliseconds)).toBe(
++      -raw(early.preRoll),
++    );
++  });
++
++  it("calls a slip past the tolerance late, with a positive offset", () => {
++    const grade = gradeLog(built, perfectLog(built, [0, 300]));
++    expect(grade.late).toHaveLength(1);
++    expect(grade.early).toHaveLength(0);
++    expect(raw(grade.late[0]?.offset as Milliseconds)).toBe(300);
++    expect(grade.worst?.row.address).toEqual(pinAddress(1, 2));
++  });
++
++  it("calls a cue that came up before its time early", () => {
++    const grade = gradeLog(built, perfectLog(built, [-300, 0]));
++    expect(grade.early).toHaveLength(1);
++    expect(raw(grade.early[0]?.offset as Milliseconds)).toBeLessThan(0);
++    expect(grade.worst?.row.address).toEqual(pinAddress(1, 1));
++  });
++
++  it("keeps the furthest out as the worst either way", () => {
++    const grade = gradeLog(built, perfectLog(built, [-500, 300]));
++    expect(grade.late).toHaveLength(1);
++    expect(grade.early).toHaveLength(1);
++    expect(raw(grade.worst?.offset as Milliseconds)).toBe(-500);
++  });
++
++  it("lets a frame of slip pass on a schedule that carries a frame", () => {
++    const quantised = quantiseSchedule(built, SMPTE_25);
++    const grade = gradeLog(quantised, perfectLog(quantised, [40, -40]));
++    expect(raw(grade.tolerance)).toBe(40);
++    expect(grade.late).toHaveLength(0);
++    expect(grade.early).toHaveLength(0);
++  });
++
++  it("takes the frame from the options for a schedule without one", () => {
++    const grade = gradeLog(built, perfectLog(), { format: SMPTE_24 });
++    expect(Math.round(raw(grade.tolerance))).toBe(42);
++  });
++
++  it("falls back to twenty five frames when nothing says otherwise", () => {
++    expect(raw(gradeLog(built, perfectLog()).tolerance)).toBe(40);
++  });
++
++  it("takes a tolerance of its own, in either sign", () => {
++    const rows = perfectLog(built, [0, 300]);
++    expect(gradeLog(built, rows, { tolerance: ms(500) }).late).toHaveLength(0);
++    expect(gradeLog(built, rows, { tolerance: ms(-500) }).late).toHaveLength(0);
++    expect(gradeLog(built, rows, { tolerance: ms(0) }).late).toHaveLength(1);
++  });
++
++  it("misses a cue the log never mentions", () => {
++    const grade = gradeLog(built, perfectLog().slice(0, 1));
++    expect(grade.missed).toHaveLength(1);
++    expect(grade.missed[0]?.address).toEqual(pinAddress(1, 2));
++  });
++
++  it("calls a pin the show never fires extra", () => {
++    const rows = [
++      ...perfectLog(),
++      { address: pinAddress(1, 9), at: ms(1000), line: 9 },
++    ];
++    const grade = gradeLog(built, rows);
++    expect(grade.extra).toHaveLength(1);
++    expect(grade.extra[0]?.line).toBe(9);
++  });
++
++  it("matches a pin to its earliest time and calls the second extra", () => {
++    const rows = perfectLog();
++    const first = rows[0] as PanelLogRow;
++    const grade = gradeLog(built, [
++      { ...first, at: ms(raw(first.at) + 5000), line: 8 },
++      first,
++      ...rows.slice(1),
++    ]);
++    expect(raw(grade.fired[0]?.offset as Milliseconds)).toBe(0);
++    expect(grade.extra).toHaveLength(1);
++    expect(grade.extra[0]?.line).toBe(8);
++  });
++
++  it("grades an empty log as every cue missed", () => {
++    const grade = gradeLog(built, []);
++    expect(grade.missed).toHaveLength(built.events.length);
++    expect(grade.fired).toHaveLength(0);
++  });
++});
++
++describe("checkLog", () => {
++  it("says nothing about a clean run", () => {
++    expect(checkLog(gradeLog(built, perfectLog())).size).toBe(0);
++  });
++
++  it("makes a missed cue an error", () => {
++    const problems = checkLog(gradeLog(built, perfectLog().slice(0, 1)));
++    expect(problems.hasErrors()).toBe(true);
++    expect(problems.all()[0]?.code).toBe("PF3800");
++  });
++
++  it("makes a pin the show never fires an error", () => {
++    const problems = checkLog(
++      gradeLog(built, [
++        ...perfectLog(),
++        { address: pinAddress(1, 9), at: ms(1000), line: 9 },
++      ]),
++    );
++    expect(problems.all()[0]?.code).toBe("PF3801");
++    expect(problems.hasErrors()).toBe(true);
++  });
++
++  it("makes late and early warnings rather than errors", () => {
++    const problems = checkLog(gradeLog(built, perfectLog(built, [-300, 300])));
++    expect(problems.hasErrors()).toBe(false);
++    expect(problems.warningCount).toBe(2);
++    expect(problems.all().map((problem) => problem.code)).toContain("PF3802");
++    expect(problems.all().map((problem) => problem.code)).toContain("PF3803");
++  });
++});
++
++describe("describeGrade", () => {
++  it("writes a line per cue with the offset signed", () => {
++    const text = describeGrade(gradeLog(built, perfectLog(built, [0, 300])));
++    expect(text).toContain("verdict");
++    expect(text).toContain("on time");
++    expect(text).toContain("late");
++    expect(text).toContain("+0:00.300");
++    expect(text).toContain("worst 01.02");
++  });
++
++  it("names what was missed and what was extra", () => {
++    const text = describeGrade(
++      gradeLog(built, [
++        ...perfectLog().slice(0, 1),
++        { address: pinAddress(1, 9), at: ms(1000), line: 9 },
++      ]),
++    );
++    expect(text).toContain("missed");
++    expect(text).toContain("01.02");
++    expect(text).toContain("extra");
++    expect(text).toContain("line 9");
++  });
++
++  it("says something for a log with nothing in it", () => {
++    const text = describeGrade(gradeLog(built, []));
++    expect(text).toContain("0 cues fired");
++    expect(text).not.toContain("verdict");
++  });
++
++  it("counts the run in one line", () => {
++    expect(summariseGrade(gradeLog(built, perfectLog()))).toBe(
++      "2 cues fired, 0 missed, 0 lines the show never asked for, 0 late, 0 early",
++    );
++  });
++});
++
++describe("formatOffset", () => {
++  it("signs both directions and never shows a bare zero", () => {
++    expect(formatOffset(ms(0))).toBe("+0:00.000");
++    expect(formatOffset(ms(120))).toBe("+0:00.120");
++    expect(formatOffset(ms(-120))).toBe("-0:00.120");
++  });
++});
+diff --git a/tests/timeline/misfire.test.ts b/tests/timeline/misfire.test.ts
+index 9369abb..9f87ce3 100644
+--- a/tests/timeline/misfire.test.ts
++++ b/tests/timeline/misfire.test.ts
+@@ -8,6 +8,9 @@ import {
+   MORTAR_WAIT,
+   checkMisfires,
+   clearAt,
++  clearanceLines,
++  clearancePlan,
++  lastLightOut,
+   incidentLines,
+   misfireRate,
+   misfiresIn,
+@@ -213,3 +216,136 @@ describe("the incident book", () => {
+     expect(misfireRate(scheduleOf(""), [])).toBe(0);
+   });
+ });
++
++/**
++ * Clearing the field position by position.
++ *
++ * The single clearance time is already tested above. What matters here is that
++ * a rack of ground pieces at one end of the site does not have to wait on a
++ * mortar at the other, and that the field time still comes from the longest
++ * wait anywhere.
++ */
++
++const wide = Rig.from(
++  [
++    firingPosition(positionId("pad.a"), 0, 0),
++    firingPosition(positionId("pad.b"), 60, 0),
++  ],
++  [
++    firingModule(1, modelNamed("fc-32")!, positionId("pad.a")),
++    firingModule(2, modelNamed("fc-32")!, positionId("pad.b")),
++  ],
++);
++
++const spread = scheduleOf(
++  [
++    "at 20 fire shell.150 from pad.a",
++    "at 25 fire gerb.silver from pad.b",
++    "at 30 fire shell.150 from pad.a",
++  ].join("\n"),
++  wide,
++);
++
++describe("lastLightOut", () => {
++  it("is the end of the last thing burning", () => {
++    expect(raw(lastLightOut(spread))).toBeGreaterThan(30000);
++  });
++
++  it("is nothing for a show with no events", () => {
++    expect(raw(lastLightOut({ ...spread, events: [] }))).toBe(0);
++  });
++});
++
++describe("clearancePlan", () => {
++  it("is empty and clears at nothing when everything fired", () => {
++    const plan = clearancePlan(spread, []);
++    expect(plan.positions).toEqual([]);
++    expect(raw(plan.fieldClearAt)).toBe(0);
++  });
++
++  it("gives a position its own wait and time", () => {
++    const misfires = misfiresIn(spread, [pinAddress(2, 1)]);
++    const plan = clearancePlan(spread, misfires);
++    expect(plan.positions).toHaveLength(1);
++    expect(plan.positions[0]?.position).toBe("pad.b");
++    expect(raw(plan.positions[0]!.wait)).toBe(raw(GROUND_WAIT));
++    expect(raw(plan.positions[0]!.clearAt)).toBe(
++      raw(lastLightOut(spread)) + raw(GROUND_WAIT),
++    );
++  });
++
++  it("lists the position that clears soonest first", () => {
++    const misfires = misfiresIn(spread, [pinAddress(1, 1), pinAddress(2, 1)]);
++    const plan = clearancePlan(spread, misfires);
++    expect(plan.positions.map((at) => at.position)).toEqual(["pad.b", "pad.a"]);
++    expect(raw(plan.positions[0]!.clearAt)).toBeLessThan(
++      raw(plan.positions[1]!.clearAt),
++    );
++  });
++
++  it("takes the longest wait at a position with a mixture", () => {
++    const both = scheduleOf(
++      [
++        "at 20 fire shell.150 from pad.a",
++        "at 25 fire gerb.silver from pad.a",
++      ].join("\n"),
++    );
++    const plan = clearancePlan(
++      both,
++      misfiresIn(both, [pinAddress(1, 1), pinAddress(1, 2)]),
++    );
++    expect(plan.positions).toHaveLength(1);
++    expect(raw(plan.positions[0]!.wait)).toBe(raw(MORTAR_WAIT));
++    expect(plan.positions[0]?.misfires).toHaveLength(2);
++  });
++
++  it("clears the field when the last position does", () => {
++    const misfires = misfiresIn(spread, [pinAddress(1, 1), pinAddress(2, 1)]);
++    const plan = clearancePlan(spread, misfires);
++    expect(raw(plan.fieldClearAt)).toBe(raw(clearAt(spread, misfires)));
++    expect(raw(plan.fieldClearAt)).toBe(
++      raw(plan.positions[plan.positions.length - 1]!.clearAt),
++    );
++  });
++
++  it("reads out one line per position", () => {
++    const lines = clearanceLines(
++      clearancePlan(spread, misfiresIn(spread, [pinAddress(2, 1)])),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("pad.b");
++    expect(lines[0]).toContain("1 misfire");
++    expect(lines[0]).toContain("wait 5 minutes");
++    expect(lines[0]).toContain("clear at");
++  });
++});
++
++describe("refires onto what the walk allows", () => {
++  it("only uses a pin the walk read open", () => {
++    const misfires = misfiresIn(built, [pinAddress(1, 2)]);
++    const plans = planRefires(built, misfires, rigOf(), {
++      usable: [pinAddress(1, 9)],
++    });
++    expect(plans[0]?.spare).toEqual(pinAddress(1, 9));
++  });
++
++  it("says so when the walk left it nowhere to go", () => {
++    const misfires = misfiresIn(built, [pinAddress(1, 2)]);
++    const plans = planRefires(built, misfires, rigOf(), { usable: [] });
++    expect(plans[0]?.spare).toBeUndefined();
++    expect(plans[0]?.reason).toContain("read open");
++  });
++
++  it("will not reuse a pin the show already fires, open or not", () => {
++    const misfires = misfiresIn(built, [pinAddress(1, 2)]);
++    const plans = planRefires(built, misfires, rigOf(), {
++      usable: [pinAddress(1, 1), pinAddress(1, 9)],
++    });
++    expect(plans[0]?.spare).toEqual(pinAddress(1, 9));
++  });
++
++  it("uses the whole rig when nothing says otherwise", () => {
++    const misfires = misfiresIn(built, [pinAddress(1, 2)]);
++    expect(planRefires(built, misfires, rigOf(), {})[0]?.spare).toBeDefined();
++  });
++});

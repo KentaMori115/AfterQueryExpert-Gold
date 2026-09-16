@@ -1,0 +1,56 @@
+version: 1
+production: revolve_late
+time_unit: ms
+
+# The revolve is busy when the scene change is called, so the scene change
+# holds. While it waits, a safety cue unlocks the revolve, and the scene
+# change fails its `requires` check at the instant it actually starts. A
+# second automation cue then finds the revolve free again.
+
+resources:
+  revolve:
+    kind: stage_automation
+    capacity: 1
+    states: [locked, unlocked, scene_two]
+    initial_state: locked
+  winch:
+    kind: stage_automation
+    capacity: 1
+
+cues:
+  - id: fly_in
+    department: automation
+    trigger: {at: 0}
+    duration: 6000
+    uses: [winch]
+
+  - id: scene_change
+    department: automation
+    trigger: {at: 1000}
+    duration: 2000
+    uses: [winch, revolve]
+    requires:
+      - resource: revolve
+        state: locked
+    action:
+      resource: revolve
+      transition_to: scene_two
+
+  - id: safety_unlock
+    department: automation
+    trigger: {at: 3000}
+    duration: 100
+    action:
+      resource: revolve
+      transition_to: unlocked
+
+  - id: cleanup
+    department: automation
+    trigger: {after: scene_change, offset: 500}
+    duration: 800
+    uses: [revolve]
+
+  - id: intro_vo
+    department: sound
+    trigger: {after: scene_change, offset: -300}
+    duration: 1200

@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/staged-activation"
+
+[metadata]
+task_id = "staged-activation"
+display_title = "Stage a firmware image now, boot it in the maintenance window"
+display_description = "Split the one-shot update into a stage step that loads and verifies an image without rebooting, and an activate step that boots it later from a journal record."
+category = "feature_request"
+language = "rust"
+repository_url = "platform://gold/repos/KH2YDwwGzHQfrFdZLzFu"
+base_commit_hash = "b016ef6d36eed524c4906e364f23808861da5f86"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-fwctl-kh2ydw:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

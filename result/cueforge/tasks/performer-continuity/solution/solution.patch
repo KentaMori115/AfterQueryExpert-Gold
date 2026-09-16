@@ -1,0 +1,1060 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1bbc530..1d04efd 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,17 @@
+ # Changelog
+ 
++## Unreleased
++
++- Follow performers from mark to mark: `from` on a move is optional and
++  travel is computed from where the performer stands, in start order; a
++  stated `from` that disagrees, or a move starting while an earlier move of
++  the same performer still runs, is `CF5004`; an `initial_mark` naming no
++  location is `CF5002`; a position that cannot be known before a GO makes
++  `from` required (`CF3005`).
++- Rehearsals follow actual starts and ends, report `CF5004` when a performer
++  stands elsewhere at a move's actual start, and carry `performer_marks`.
++- Assertions may name a mark: `mira.mark == center at video_12.visible`.
++
+ ## 0.1.0 — Paper Tech
+ 
+ - Load YAML and JSON productions, including multi-file workspaces.
+diff --git a/README.md b/README.md
+index 5eaada3..1627a25 100644
+--- a/README.md
++++ b/README.md
+@@ -39,6 +39,7 @@ cueforge rehearse examples/glass_harbor.yaml
+ cueforge rehearse examples/concert_two_looks.yaml --delay snd_hit=250ms
+ cueforge sheet examples/glass_harbor.yaml --department lighting
+ cueforge report examples/harbor_rehearsal.yaml --format json
++cueforge rehearse examples/blocking_rehearsal.yaml --delay mira_cross=8000ms
+ ```
+ 
+ Exit codes: `0` success, `1` production or rehearsal errors, `2` usage, `3` store I/O.
+@@ -47,8 +48,9 @@ Exit codes: `0` success, `1` production or rehearsal errors, `2` usage, `3` stor
+ 
+ This baseline is the Paper Tech release. It supports absolute and single
+ dependency triggers, cycle witnesses, exclusive reservations, basic resource
+-state, delay and fail injection, master and departmental sheets, and
+-canonical JSON. Compound triggers, timing-window solvers, recovery branches,
++state, performer positions followed from mark to mark, delay and fail
++injection, master and departmental sheets, and canonical JSON. Compound triggers, timing-window solvers, recovery branches,
+ and live operator protocols are intentionally absent.
+ 
+-See `docs/determinism.md`, `docs/production-format.md`, and `docs/timing-contract.md`.
++See `docs/determinism.md`, `docs/production-format.md`, `docs/timing-contract.md`,
++and `docs/performers.md`.
+diff --git a/docs/performers.md b/docs/performers.md
+new file mode 100644
+index 0000000..d8ffe1c
+--- /dev/null
++++ b/docs/performers.md
+@@ -0,0 +1,71 @@
++# Performers and marks
++
++A production may name performers and the marks they stand on. Paper Tech
++uses them for one thing: the travel time of a move, which decides the move's
++duration when none is authored and rejects one that is too short (`CF5001`).
++
++## Where a performer stands
++
++- At `initial_mark` until their first move finishes. `initial_mark` must
++  name an entry of `locations`, or the production fails with `CF5002`.
++- At the `to` of each move they finish. When several moves of one performer
++  overlap, the one that finished last decides.
++- Nowhere while one of their moves is running. Running is half-open, like a
++  reservation: a move that ends at `t` has finished at `t`.
++- A failed move leaves the performer where it was, whether it failed before
++  it started or while it was running.
++
++## How a move departs
++
++`from` on a move is optional. Travel is always computed from where the
++performer stands when the move starts, and the compiled cue's `action`
++carries that mark as `from`, so a production that omits `from` and one that
++states the right mark compile to the same plan and the same digest.
++
++The compiler follows each performer's moves in start order, ties by cue id,
++which is the order the rehearsal gives simultaneous events. Along the way it
++reports:
++
++| Situation | Finding |
++|---|---|
++| `from` is stated and names another mark than the performer stands on | `CF5004` (error); travel still comes from the real position |
++| the move starts while an earlier move of the same performer still runs | `CF5004` (error); the move departs from that earlier move's `to` |
++| a move of the performer has no start yet (a manual cue before its GO) | every move of theirs must state `from`; one without it is `CF3005` (error) |
++
++When the position is unknown the stated `from` is used as authored and no
++disagreement can be reported at compile time; the rehearsal checks it once
++the GO is known.
++
++## In a rehearsal
++
++Delays, fails and GO interventions change when moves actually start and end,
++and can change their order. A rehearsal keeps the compiled durations and
++follows the actual instants. A move whose performer does not stand on its
++compiled `from` when it actually starts is reported as `CF5004` (error) in
++the rehearsal findings; the move runs regardless and leaves the performer at
++its `to`.
++
++The rehearsal result carries `performer_marks`, each performer's mark once
++every cue has finished, next to `resource_states`, in the library and in the
++JSON report.
++
++## Asserting a mark
++
++```yaml
++assertions:
++  - expression: "mira.mark == center at video_12.visible"
++```
++
++holds when `mira` stands on `center` at the instant `video_12` becomes
++visible. While one of her moves is running she stands nowhere, so the
++assertion fails then. A performer or location the production does not
++declare is `CF6003`.
++
++## Example
++
++`examples/blocking_rehearsal.yaml` moves `mira` twice on independent
++triggers. The second move omits `from` and departs from the first move's
++`to`. Delaying the first move past the second (`cueforge rehearse
++examples/blocking_rehearsal.yaml --delay mira_cross=8000ms`) reports both
++moves with `CF5004`: the second finds her still on `stage_left`, the first
++then starts while the second is running.
+diff --git a/docs/production-format.md b/docs/production-format.md
+index 615f332..6e58190 100644
+--- a/docs/production-format.md
++++ b/docs/production-format.md
+@@ -40,6 +40,27 @@ revolve:
+ Reservations use the half-open interval `[start, start + duration)`.
+ Intervals that only touch at a boundary do not conflict.
+ 
++## Performers and moves
++
++```yaml
++performers:
++  mira:
++    initial_mark: stage_left
++```
++
++`initial_mark` must name a location (`CF5002` otherwise). A move action names
++the performer, the destination and a speed; `from` is optional:
++
++```yaml
++action: {move: mira, to: center, maximum_speed: 1.4}
++```
++
++A performer stands at `initial_mark`, then at the `to` of each move they
++finish. Travel is computed from where the performer stands when the move
++starts, so the compiled cue's `action` always carries the resolved `from`.
++A stated `from` that disagrees is `CF5004`. See `docs/timing-contract.md`
++for how positions are followed.
++
+ ## Multi-file workspaces
+ 
+ A directory may contain `cueforge.yaml` with a `sources` list of root-relative
+diff --git a/docs/timing-contract.md b/docs/timing-contract.md
+index e74894f..ed983e7 100644
+--- a/docs/timing-contract.md
++++ b/docs/timing-contract.md
+@@ -22,6 +22,36 @@ most three fractional decimal places, stored as milli-units per second.
+ Distance is the nearest integer square root of `dx² + dy²`. An exact tie
+ rounds upward. Travel time is `ceil(distance * 1_000_000 / speed_milli)`.
+ 
++### Where a move departs from
++
++A performer stands at `initial_mark`, then at the `to` of each move they
++finish. Moves of one performer are followed in start order, ties by cue id,
++the order simultaneous events already use. Travel, and so the compiled
++duration, is computed from where the performer stands at the move's start;
++a stated `from` that disagrees is `CF5004` and does not change the travel.
++
++A move that starts while an earlier move of the same performer is still
++running (half-open, like a reservation) is `CF5004`; it departs from that
++earlier move's `to`. When any move of a performer has no start at compile
++time (a manual cue with no GO), no position of theirs can be known: every
++move of theirs must state `from`, which is then used as authored, and a move
++without one is `CF3005`.
++
++### Positions in a rehearsal
++
++A rehearsal follows the actual starts and ends, so delays, fails and GO can
++change the order in which moves happen. Compiled durations are kept. A move
++whose performer stands elsewhere when it actually starts is `CF5004` in the
++rehearsal findings; it runs regardless and leaves the performer at its `to`.
++A failed move leaves its performer where it was. The result carries
++`performer_marks`, each performer's mark once every cue has finished, next to
++`resource_states`.
++
++An assertion may name a mark: `mira.mark == center at video_12.visible`. It
++holds when the performer stands at that mark at that instant. While one of
++their moves is running they stand nowhere. An unknown performer or location
++is `CF6003`.
++
+ ## Overflow
+ 
+ Values outside signed 64-bit range produce `CF2004`. Scientific notation
+diff --git a/examples/blocking_rehearsal.yaml b/examples/blocking_rehearsal.yaml
+new file mode 100644
+index 0000000..663217f
+--- /dev/null
++++ b/examples/blocking_rehearsal.yaml
+@@ -0,0 +1,67 @@
++version: 1
++production: blocking_rehearsal
++time_unit: ms
++
++events:
++  line_17: 60000
++
++resources:
++  main_projector:
++    kind: video_output
++    capacity: 1
++
++performers:
++  mira:
++    initial_mark: stage_left
++  tomas:
++    initial_mark: stage_right
++
++locations:
++  stage_left: {x: 0, y: 5}
++  center: {x: 8, y: 5}
++  stage_right: {x: 20, y: 5}
++  apron: {x: 8, y: 0}
++
++cues:
++  - id: lx_21
++    department: lighting
++    trigger: {on: line_17, offset: -800}
++    duration: 1500
++    action: {preset: moonrise}
++
++  - id: mira_cross
++    department: stage
++    trigger: {after: lx_21}
++    action:
++      move: mira
++      to: center
++      maximum_speed: 1.4
++
++  - id: mira_down
++    department: stage
++    trigger: {on: line_17, offset: 6200}
++    action:
++      move: mira
++      to: apron
++      maximum_speed: 1.4
++
++  - id: tomas_enter
++    department: stage
++    trigger: {after: lx_21, offset: 200}
++    action:
++      move: tomas
++      from: stage_right
++      to: center
++      maximum_speed: 2
++
++  - id: video_12
++    department: video
++    trigger: {after: mira_down, offset: 4000}
++    duration: 9000
++    uses: [main_projector]
++    action: {play: harbor_loop.mov}
++
++assertions:
++  - expression: "mira.mark == center at tomas_enter.completed"
++  - expression: "mira.mark == apron at video_12.visible"
++  - expression: "tomas.mark == center at video_12.visible"
+diff --git a/src/cueforge/assertions/__init__.py b/src/cueforge/assertions/__init__.py
+index b3d7a83..1f43106 100644
+--- a/src/cueforge/assertions/__init__.py
++++ b/src/cueforge/assertions/__init__.py
+@@ -1,6 +1,6 @@
+ """Assertion grammar and evaluation."""
+ 
+-from cueforge.assertions.evaluate import evaluate_assertions
++from cueforge.assertions.evaluate import MarkSource, evaluate_assertions
+ from cueforge.assertions.grammar import AssertionExpr, parse_assertion
+ 
+-__all__ = ["AssertionExpr", "evaluate_assertions", "parse_assertion"]
++__all__ = ["AssertionExpr", "MarkSource", "evaluate_assertions", "parse_assertion"]
+diff --git a/src/cueforge/assertions/evaluate.py b/src/cueforge/assertions/evaluate.py
+index 6b70b6e..a6624c2 100644
+--- a/src/cueforge/assertions/evaluate.py
++++ b/src/cueforge/assertions/evaluate.py
+@@ -2,11 +2,30 @@
+ 
+ from __future__ import annotations
+ 
+-from cueforge.assertions.grammar import AfterExpr, AssertionExpr, BeforeExpr, StateAtExpr, parse_assertion
++from typing import Protocol
++
++from cueforge.assertions.grammar import (
++    AfterExpr,
++    AssertionExpr,
++    BeforeExpr,
++    MarkAtExpr,
++    StateAtExpr,
++    parse_assertion,
++)
+ from cueforge.codes import CF6001_ASSERTION_FAILED, CF6003_ASSERTION_SUBJECT
+ from cueforge.findings import Finding, Severity
+ 
+ 
++class MarkSource(Protocol):
++    """Where performers stand: what a rehearsal knows after it has run."""
++
++    def knows_performer(self, performer: str) -> bool: ...
++
++    def knows_location(self, mark: str) -> bool: ...
++
++    def mark_at(self, performer: str, time_ms: int) -> str | None: ...
++
++
+ def _attr_time(
+     instants: dict[str, dict[str, int | None]],
+     cue_id: str,
+@@ -54,12 +73,67 @@ def evaluate_one(
+     final_states: dict[str, str],
+     timeline: list[tuple[int, int, object, object]],
+     initials: dict[str, str] | None = None,
++    marks: MarkSource | None = None,
+ ) -> list[Finding]:
+     expr, parse_finding = parse_assertion(expression)
+     if parse_finding is not None:
+         return [parse_finding]
+     assert expr is not None
+-    return _eval_expr(expression, expr, instants, final_states, timeline, initials or final_states)
++    return _eval_expr(
++        expression, expr, instants, final_states, timeline, initials or final_states, marks
++    )
++
++
++def _unknown_subject(kind: str, subject: str) -> Finding:
++    return Finding(
++        code=CF6003_ASSERTION_SUBJECT,
++        severity=Severity.ERROR,
++        message=f"assertion refers to unknown {kind} {subject!r}",
++        subject_kind="assertion",
++        subject_id=subject,
++    )
++
++
++def _eval_mark(
++    expression: str,
++    expr: MarkAtExpr,
++    instants: dict[str, dict[str, int | None]],
++    marks: MarkSource | None,
++) -> list[Finding]:
++    at_t, at_f = _attr_time(instants, expr.at.cue_id, expr.at.attr)
++    if at_f is not None:
++        return [at_f]
++    if marks is None or not marks.knows_performer(expr.performer):
++        return [_unknown_subject("performer", expr.performer)]
++    if not marks.knows_location(expr.expected):
++        return [_unknown_subject("location", expr.expected)]
++    if at_t is None:
++        return [
++            Finding(
++                code=CF6001_ASSERTION_FAILED,
++                severity=Severity.ERROR,
++                message=f"assertion could not bind time: {expression}",
++                subject_kind="assertion",
++                subject_id=expression,
++            )
++        ]
++    actual = marks.mark_at(expr.performer, at_t)
++    if actual != expr.expected:
++        return [
++            Finding(
++                code=CF6001_ASSERTION_FAILED,
++                severity=Severity.ERROR,
++                message=f"assertion failed: {expression}",
++                subject_kind="assertion",
++                subject_id=expression,
++                witness={
++                    "actual": "" if actual is None else actual,
++                    "expected": expr.expected,
++                    "at_ms": at_t,
++                },
++            )
++        ]
++    return []
+ 
+ 
+ def _eval_expr(
+@@ -69,7 +143,10 @@ def _eval_expr(
+     final_states: dict[str, str],
+     timeline: list[tuple[int, int, object, object]],
+     initials: dict[str, str],
++    marks: MarkSource | None = None,
+ ) -> list[Finding]:
++    if isinstance(expr, MarkAtExpr):
++        return _eval_mark(expression, expr, instants, marks)
+     if isinstance(expr, (BeforeExpr, AfterExpr)):
+         left_t, left_f = _attr_time(instants, expr.left.cue_id, expr.left.attr)
+         right_t, right_f = _attr_time(instants, expr.right.cue_id, expr.right.attr)
+@@ -147,8 +224,11 @@ def evaluate_assertions(
+     final_states: dict[str, str],
+     timeline: list[tuple[int, int, object, object]],
+     initials: dict[str, str] | None = None,
++    marks: MarkSource | None = None,
+ ) -> list[Finding]:
+     findings: list[Finding] = []
+     for expression in expressions:
+-        findings.extend(evaluate_one(expression, instants, final_states, timeline, initials))
++        findings.extend(
++            evaluate_one(expression, instants, final_states, timeline, initials, marks)
++        )
+     return findings
+diff --git a/src/cueforge/assertions/grammar.py b/src/cueforge/assertions/grammar.py
+index 102a7d8..245c817 100644
+--- a/src/cueforge/assertions/grammar.py
++++ b/src/cueforge/assertions/grammar.py
+@@ -15,6 +15,7 @@ start: statement
+ statement: cue_attr "before" cue_attr        -> before
+          | cue_attr "after" cue_attr         -> after
+          | ident ".state" "==" ident "at" cue_attr -> state_at
++         | ident ".mark" "==" ident "at" cue_attr -> mark_at
+ cue_attr: ident "." ident
+ ident: CNAME | IDENTIFIER
+ IDENTIFIER: /[A-Za-z_][A-Za-z0-9_\-]*/
+@@ -54,7 +55,17 @@ class StateAtExpr:
+     kind: str = "state_at"
+ 
+ 
+-AssertionExpr = BeforeExpr | AfterExpr | StateAtExpr
++@dataclass(frozen=True, slots=True)
++class MarkAtExpr:
++    """``performer.mark == location at cue.attr``: where a performer stands."""
++
++    performer: str
++    expected: str
++    at: CueAttr
++    kind: str = "mark_at"
++
++
++AssertionExpr = BeforeExpr | AfterExpr | StateAtExpr | MarkAtExpr
+ 
+ 
+ class _Transformer(Transformer[Token, AssertionExpr]):
+@@ -80,6 +91,12 @@ class _Transformer(Transformer[Token, AssertionExpr]):
+         assert isinstance(at, CueAttr)
+         return StateAtExpr(resource_id=resource_id, expected=expected, at=at)
+ 
++    def mark_at(self, items: list[object]) -> MarkAtExpr:
++        performer, expected, at = items
++        assert isinstance(performer, str) and isinstance(expected, str)
++        assert isinstance(at, CueAttr)
++        return MarkAtExpr(performer=performer, expected=expected, at=at)
++
+     def start(self, items: list[AssertionExpr]) -> AssertionExpr:
+         return items[0]
+ 
+diff --git a/src/cueforge/compiler/plan.py b/src/cueforge/compiler/plan.py
+index e1fd2eb..702e94a 100644
+--- a/src/cueforge/compiler/plan.py
++++ b/src/cueforge/compiler/plan.py
+@@ -11,6 +11,7 @@ from cueforge.compiler.ordering import topological_order
+ from cueforge.compiler.triggers import NormalizedTrigger, normalize_trigger
+ from cueforge.compiler.validate import validate_production_shell
+ from cueforge.findings import Finding, Severity, sort_findings
++from cueforge.movement.continuity import MoveRequest, ResolvedMove, resolve_moves
+ from cueforge.movement.geometry import Point
+ from cueforge.movement.travel import travel_time_ms
+ from cueforge.production.models import CueDef, Production
+@@ -132,7 +133,8 @@ def _compiled_cue_dict(cue: CompiledCue) -> dict[str, Any]:
+     }
+ 
+ 
+-def _action_map(cue: CueDef) -> dict[str, str | int]:
++def _action_map(cue: CueDef, move: ResolvedMove | None = None) -> dict[str, str | int]:
++    """The authored action, with ``from`` replaced by where the move really departs."""
+     if cue.action is None:
+         return {}
+     payload: dict[str, str | int] = {}
+@@ -142,22 +144,27 @@ def _action_map(cue: CueDef) -> dict[str, str | int]:
+             payload[str(key)] = value
+         else:
+             payload[str(key)] = str(value)
++    if move is not None and move.from_mark is not None:
++        payload["from"] = move.from_mark
+     return payload
+ 
+ 
+-def _move_duration(cue: CueDef, numbers: NormalizedNumbers) -> tuple[int | None, list[Finding]]:
++def _move_duration(
++    cue: CueDef, numbers: NormalizedNumbers, from_mark: str | None = None
++) -> tuple[int | None, list[Finding]]:
++    """Travel time of a move departing from ``from_mark``, or None without one."""
+     findings: list[Finding] = []
+     action = cue.action
+     if action is None or action.move is None:
+         return None, findings
+-    if action.from_mark is None or action.to is None:
++    if action.to is None:
+         from cueforge.codes import CF5004_BAD_MOVE
+ 
+         findings.append(
+             Finding(
+                 code=CF5004_BAD_MOVE,
+                 severity=Severity.ERROR,
+-                message=f"cue {cue.id!r} move requires from and to",
++                message=f"cue {cue.id!r} move requires to",
+                 subject_kind="cue",
+                 subject_id=cue.id,
+             )
+@@ -176,7 +183,9 @@ def _move_duration(cue: CueDef, numbers: NormalizedNumbers) -> tuple[int | None,
+             )
+         )
+         return None, findings
+-    start_xy = numbers.location_xy.get(action.from_mark)
++    if from_mark is None:
++        return None, findings
++    start_xy = numbers.location_xy.get(from_mark)
+     end_xy = numbers.location_xy.get(action.to)
+     if start_xy is None or end_xy is None:
+         return None, findings
+@@ -188,6 +197,49 @@ def _move_duration(cue: CueDef, numbers: NormalizedNumbers) -> tuple[int | None,
+     return travel, findings
+ 
+ 
++def _move_requests(production: Production, starts: Mapping[str, int | None]) -> list[MoveRequest]:
++    """Every move cue with the start the schedule resolved for it."""
++    requests: list[MoveRequest] = []
++    for cue in production.cues:
++        action = cue.action
++        if action is None or action.move is None or action.to is None:
++            continue
++        requests.append(
++            MoveRequest(
++                cue_id=cue.id,
++                performer=action.move,
++                to=action.to,
++                stated_from=action.from_mark,
++                start_ms=starts.get(cue.id),
++            )
++        )
++    return requests
++
++
++def _placed_duration(authored: int, travel: int | None) -> int:
++    """The compiled duration of a move: travel when nothing was authored."""
++    if travel is not None and authored == 0:
++        return travel
++    return authored
++
++
++def _resolve_movement(
++    production: Production,
++    numbers: NormalizedNumbers,
++    starts: Mapping[str, int | None],
++) -> tuple[dict[str, ResolvedMove], list[Finding]]:
++    """Where every move departs from, following each performer in start order."""
++    cue_by_id = {cue.id: cue for cue in production.cues}
++
++    def duration_for(move: MoveRequest, from_mark: str | None) -> tuple[int, list[Finding]]:
++        cue = cue_by_id[move.cue_id]
++        travel, _ = _move_duration(cue, numbers, from_mark)
++        return _placed_duration(numbers.durations.get(cue.id, 0), travel), []
++
++    initial_marks = {name: perf.initial_mark for name, perf in production.performers.items()}
++    return resolve_moves(_move_requests(production, starts), initial_marks, duration_for)
++
++
+ def compile_production_document(
+     production: Production,
+ ) -> tuple[CompiledShow | None, tuple[Finding, ...]]:
+@@ -223,11 +275,16 @@ def compile_production_document(
+     compiled_cues: list[CompiledCue] = []
+     reservations: list[Reservation] = []
+     cue_by_id = {cue.id: cue for cue in production.cues}
++    moves, movement_findings = _resolve_movement(production, numbers, schedule.starts)
++    findings.extend(movement_findings)
+ 
+     for cue_id in order:
+         cue = cue_by_id[cue_id]
+         trigger = triggers[cue_id]
+-        travel, move_findings = _move_duration(cue, numbers)
++        move = moves.get(cue_id)
++        travel, move_findings = _move_duration(
++            cue, numbers, None if move is None else move.from_mark
++        )
+         findings.extend(move_findings)
+         authored = numbers.durations.get(cue_id, 0)
+         duration = authored
+@@ -272,7 +329,7 @@ def compile_production_document(
+             uses=uses,
+             requires_state=requires_state,
+             transition=transition,
+-            action=_action_map(cue),
++            action=_action_map(cue, move),
+             notes=cue.notes,
+             source_path=production.source_path,
+         )
+diff --git a/src/cueforge/compiler/validate.py b/src/cueforge/compiler/validate.py
+index b40544c..cd443de 100644
+--- a/src/cueforge/compiler/validate.py
++++ b/src/cueforge/compiler/validate.py
+@@ -7,6 +7,7 @@ from cueforge.codes import (
+     CF2005_BAD_UNIT,
+     CF3006_EMPTY_CUE_LIST,
+     CF4005_UNKNOWN_STATE,
++    CF5002_UNKNOWN_LOCATION,
+ )
+ from cueforge.findings import Finding, Severity
+ from cueforge.production.models import Production, SUPPORTED_SCHEMA_VERSIONS, SUPPORTED_TIME_UNITS
+@@ -58,6 +59,21 @@ def validate_production_shell(production: Production) -> list[Finding]:
+                     witness={"state": resource.initial_state},
+                 )
+             )
++    for name, performer in sorted(production.performers.items()):
++        if performer.initial_mark not in production.locations:
++            findings.append(
++                Finding(
++                    code=CF5002_UNKNOWN_LOCATION,
++                    severity=Severity.ERROR,
++                    message=(
++                        f"performer {name!r} initial_mark {performer.initial_mark!r} "
++                        f"names no location"
++                    ),
++                    subject_kind="performer",
++                    subject_id=name,
++                    witness={"location": performer.initial_mark},
++                )
++            )
+     for event_id, raw in production.events.items():
+         _, finding = parse_int64(raw, field=f"events.{event_id}")
+         if finding is not None:
+diff --git a/src/cueforge/movement/__init__.py b/src/cueforge/movement/__init__.py
+index eee98ca..dbaff22 100644
+--- a/src/cueforge/movement/__init__.py
++++ b/src/cueforge/movement/__init__.py
+@@ -1,6 +1,27 @@
+-"""Integer stage geometry and travel-time calculation."""
++"""Integer stage geometry, travel-time calculation and performer positions."""
+ 
++from cueforge.movement.continuity import (
++    MarkOracle,
++    MoveRequest,
++    MoveRun,
++    ResolvedMove,
++    follow_moves,
++    position_at,
++    resolve_moves,
++)
+ from cueforge.movement.geometry import Point, distance_units, squared_distance
+ from cueforge.movement.travel import travel_time_ms
+ 
+-__all__ = ["Point", "distance_units", "squared_distance", "travel_time_ms"]
++__all__ = [
++    "MarkOracle",
++    "MoveRequest",
++    "MoveRun",
++    "Point",
++    "ResolvedMove",
++    "distance_units",
++    "follow_moves",
++    "position_at",
++    "resolve_moves",
++    "squared_distance",
++    "travel_time_ms",
++]
+diff --git a/src/cueforge/movement/continuity.py b/src/cueforge/movement/continuity.py
+new file mode 100644
+index 0000000..05a5470
+--- /dev/null
++++ b/src/cueforge/movement/continuity.py
+@@ -0,0 +1,285 @@
++"""Follow performers from mark to mark across the moves of a production.
++
++Paper Tech compiles each move's travel from the mark it names. This module
++answers the question the compiler and the rehearsal both need instead: where
++does the performer actually stand when a move starts? A performer stands at
++their ``initial_mark`` until their first move finishes, then at the ``to`` of
++each move they finish, and nowhere at all while one of their moves runs.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Callable, Mapping
++
++from cueforge.codes import CF3005_MANUAL_UNRESOLVED, CF5004_BAD_MOVE
++from cueforge.findings import Finding, Severity
++
++__all__ = [
++    "MarkOracle",
++    "MoveRequest",
++    "MoveRun",
++    "ResolvedMove",
++    "follow_moves",
++    "move_order",
++    "position_at",
++    "resolve_moves",
++]
++
++# Far enough in the future for every move to have ended.
++END_OF_SHOW = 2**63 - 1
++
++
++@dataclass(frozen=True, slots=True)
++class MoveRequest:
++    """A move as authored, with the start the compiler resolved for it."""
++
++    cue_id: str
++    performer: str
++    to: str
++    stated_from: str | None
++    start_ms: int | None
++
++
++@dataclass(frozen=True, slots=True)
++class ResolvedMove:
++    """A move with the mark it really departs from and the duration that gives."""
++
++    cue_id: str
++    performer: str
++    from_mark: str | None
++    to: str
++    start_ms: int | None
++    duration_ms: int
++    known: bool
++
++    def end_ms(self) -> int | None:
++        if self.start_ms is None:
++            return None
++        return self.start_ms + self.duration_ms
++
++
++@dataclass(frozen=True, slots=True)
++class MoveRun:
++    """A move as a rehearsal ran it: compiled departure mark, actual instants."""
++
++    cue_id: str
++    performer: str
++    from_mark: str | None
++    to: str
++    start_ms: int | None
++    end_ms: int | None
++    completed: bool
++
++
++DurationRule = Callable[[MoveRequest, str | None], tuple[int, list[Finding]]]
++
++
++def move_order(start_ms: int | None, cue_id: str) -> tuple[int, str]:
++    """Moves are followed in start order, ties by cue id, like simultaneous events."""
++    return (END_OF_SHOW if start_ms is None else start_ms, cue_id)
++
++
++def _group(items: list, key: Callable) -> dict[str, list]:
++    grouped: dict[str, list] = {}
++    for item in items:
++        grouped.setdefault(key(item), []).append(item)
++    return grouped
++
++
++def _running_finding(move: MoveRequest, running: str, until: int) -> Finding:
++    return Finding(
++        code=CF5004_BAD_MOVE,
++        severity=Severity.ERROR,
++        message=(
++            f"cue {move.cue_id!r} moves {move.performer!r} while cue {running!r} "
++            f"still moves them until {until}ms"
++        ),
++        subject_kind="cue",
++        subject_id=move.cue_id,
++        witness={"performer": move.performer, "running": running, "until_ms": until},
++    )
++
++
++def _disagree_finding(move: MoveRequest, actual: str) -> Finding:
++    return Finding(
++        code=CF5004_BAD_MOVE,
++        severity=Severity.ERROR,
++        message=(
++            f"cue {move.cue_id!r} moves {move.performer!r} from {move.stated_from!r} "
++            f"but they stand at {actual!r}"
++        ),
++        subject_kind="cue",
++        subject_id=move.cue_id,
++        witness={"performer": move.performer, "stated": str(move.stated_from), "actual": actual},
++    )
++
++
++def _unresolved_finding(move: MoveRequest) -> Finding:
++    return Finding(
++        code=CF3005_MANUAL_UNRESOLVED,
++        severity=Severity.ERROR,
++        message=(
++            f"cue {move.cue_id!r} moves {move.performer!r} from an unknown position; "
++            f"a move of theirs has no start until a GO, so state from"
++        ),
++        subject_kind="cue",
++        subject_id=move.cue_id,
++        witness={"performer": move.performer},
++    )
++
++
++def resolve_moves(
++    moves: list[MoveRequest],
++    initial_marks: Mapping[str, str],
++    duration_for: DurationRule,
++) -> tuple[dict[str, ResolvedMove], list[Finding]]:
++    """Resolve where every move departs from, in start order per performer.
++
++    ``duration_for`` turns a move and its departure mark into the compiled
++    duration (travel, or the authored figure, under the compiler's rules) and
++    any finding that raises. When a performer has a move without a start, no
++    position of theirs can be known at compile time: every move of theirs
++    must state ``from``, which is then used as authored.
++    """
++    resolved: dict[str, ResolvedMove] = {}
++    findings: list[Finding] = []
++    for performer, group in sorted(_group(moves, lambda m: m.performer).items()):
++        known = all(move.start_ms is not None for move in group)
++        if not known:
++            for move in group:
++                if move.stated_from is None:
++                    findings.append(_unresolved_finding(move))
++                duration, duration_findings = duration_for(move, move.stated_from)
++                findings.extend(duration_findings)
++                resolved[move.cue_id] = ResolvedMove(
++                    move.cue_id, performer, move.stated_from, move.to,
++                    move.start_ms, duration, False,
++                )
++            continue
++        position = initial_marks.get(performer)
++        running_until: int | None = None
++        running_to: str | None = None
++        running_id: str | None = None
++        for move in sorted(group, key=lambda m: move_order(m.start_ms, m.cue_id)):
++            assert move.start_ms is not None
++            if running_until is not None and move.start_ms >= running_until:
++                position = running_to
++                running_until = None
++            if running_until is not None and running_id is not None:
++                findings.append(_running_finding(move, running_id, running_until))
++                departs = running_to
++            else:
++                departs = position
++            if move.stated_from is not None and departs is not None and move.stated_from != departs:
++                findings.append(_disagree_finding(move, departs))
++            duration, duration_findings = duration_for(move, departs)
++            findings.extend(duration_findings)
++            resolved[move.cue_id] = ResolvedMove(
++                move.cue_id, performer, departs, move.to, move.start_ms, duration, True
++            )
++            running_until = move.start_ms + duration
++            running_to = move.to
++            running_id = move.cue_id
++    return resolved, findings
++
++
++def position_at(
++    runs: list[MoveRun],
++    initial: str | None,
++    time_ms: int,
++    exclude: str | None = None,
++) -> str | None:
++    """Where a performer stands at ``time_ms`` given their runs in start order.
++
++    ``None`` means nowhere: one of their moves is running at that instant. A
++    move that ended exactly at ``time_ms`` has finished (half-open, like a
++    reservation). A failed move leaves the performer where it was.
++    """
++    position = initial
++    arrived: tuple[int, str] | None = None
++    for run in runs:
++        if run.cue_id == exclude or run.start_ms is None:
++            continue
++        if run.start_ms > time_ms:
++            break
++        if run.end_ms is not None and time_ms < run.end_ms:
++            return None
++        if run.completed and run.end_ms is not None:
++            # The move that finished last decides, whatever order they started in.
++            key = (run.end_ms, run.cue_id)
++            if arrived is None or key > arrived:
++                arrived = key
++                position = run.to
++    return position
++
++
++class MarkOracle:
++    """Answers where each performer stands at any instant of a rehearsal."""
++
++    def __init__(
++        self,
++        runs: list[MoveRun],
++        initial_marks: Mapping[str, str],
++        locations: Mapping[str, object],
++    ) -> None:
++        self._initial = dict(initial_marks)
++        self._locations = set(locations)
++        self._runs = {
++            performer: sorted(group, key=lambda r: move_order(r.start_ms, r.cue_id))
++            for performer, group in _group(runs, lambda r: r.performer).items()
++        }
++
++    def knows_performer(self, performer: str) -> bool:
++        return performer in self._initial
++
++    def knows_location(self, mark: str) -> bool:
++        return mark in self._locations
++
++    def mark_at(self, performer: str, time_ms: int, exclude: str | None = None) -> str | None:
++        return position_at(
++            self._runs.get(performer, []), self._initial.get(performer), time_ms, exclude
++        )
++
++    def final_marks(self) -> dict[str, str]:
++        marks: dict[str, str] = {}
++        for performer in sorted(self._initial):
++            mark = self.mark_at(performer, END_OF_SHOW)
++            marks[performer] = mark if mark is not None else self._initial[performer]
++        return marks
++
++
++def follow_moves(
++    runs: list[MoveRun],
++    initial_marks: Mapping[str, str],
++    locations: Mapping[str, object],
++) -> tuple[MarkOracle, list[Finding]]:
++    """Check every run against where its performer stood when it started."""
++    oracle = MarkOracle(runs, initial_marks, locations)
++    findings: list[Finding] = []
++    for run in sorted(runs, key=lambda r: move_order(r.start_ms, r.cue_id)):
++        if run.start_ms is None or run.from_mark is None:
++            continue
++        actual = oracle.mark_at(run.performer, run.start_ms, exclude=run.cue_id)
++        if actual == run.from_mark:
++            continue
++        findings.append(
++            Finding(
++                code=CF5004_BAD_MOVE,
++                severity=Severity.ERROR,
++                message=(
++                    f"cue {run.cue_id!r} moves {run.performer!r} from {run.from_mark!r} "
++                    f"but at {run.start_ms}ms they stand "
++                    + ("nowhere" if actual is None else f"at {actual!r}")
++                ),
++                subject_kind="cue",
++                subject_id=run.cue_id,
++                witness={
++                    "performer": run.performer,
++                    "expected": run.from_mark,
++                    "actual": "" if actual is None else actual,
++                    "time_ms": run.start_ms,
++                },
++            )
++        )
++    return oracle, findings
+diff --git a/src/cueforge/simulation/scheduler.py b/src/cueforge/simulation/scheduler.py
+index aada9ea..8de8f24 100644
+--- a/src/cueforge/simulation/scheduler.py
++++ b/src/cueforge/simulation/scheduler.py
+@@ -16,6 +16,7 @@ from cueforge.codes import (
+ from cueforge.compiler.plan import CompiledCue, CompiledShow
+ from cueforge.compiler.triggers import NormalizedTrigger
+ from cueforge.findings import Finding, Severity, sort_findings
++from cueforge.movement.continuity import MoveRun, follow_moves
+ from cueforge.resources.capacity import detect_capacity_conflicts
+ from cueforge.resources.reservations import Interval, Reservation
+ from cueforge.resources.state import ResourceState, apply_transition
+@@ -44,6 +45,7 @@ class RehearsalResult:
+     resource_states: dict[str, str]
+     interventions: tuple[str, ...]
+     digest: str
++    performer_marks: dict[str, str]
+ 
+     def semantic_dict(self) -> dict[str, Any]:
+         return {
+@@ -52,6 +54,9 @@ class RehearsalResult:
+             "events": [event.as_dict() for event in self.events],
+             "findings": [_finding_dict(item) for item in self.findings],
+             "interventions": list(self.interventions),
++            "performer_marks": {
++                key: self.performer_marks[key] for key in sorted(self.performer_marks)
++            },
+             "production_id": self.compiled.production_id,
+             "reservations": [
+                 {
+@@ -323,6 +328,9 @@ def run_rehearsal(
+     capacities = {item.id: item.capacity for item in show.resources}
+     findings.extend(detect_capacity_conflicts(tuple(live_reservations), capacities))
+ 
++    marks, mark_findings = _follow_performers(show, statuses)
++    findings.extend(mark_findings)
++
+     instants = {
+         cue_id: {
+             "started": statuses[cue_id].start_ms,
+@@ -344,6 +352,7 @@ def run_rehearsal(
+             {key: states[key].current for key in states},
+             state_timeline,
+             initials,
++            marks,
+         )
+     )
+ 
+@@ -352,6 +361,7 @@ def run_rehearsal(
+     reservations_t = tuple(sorted(live_reservations, key=lambda item: item.sort_key()))
+     findings_t = sort_findings(findings)
+     resource_states = {key: states[key].current for key in sorted(states)}
++    performer_marks = marks.final_marks()
+ 
+     from cueforge.reports.canonical_json import canonical_dumps, sha256_text
+ 
+@@ -360,6 +370,7 @@ def run_rehearsal(
+         "events": [event.as_dict() for event in events_t],
+         "findings": [_finding_dict(item) for item in findings_t],
+         "interventions": intervention_labels,
++        "performer_marks": performer_marks,
+         "production_id": show.production_id,
+         "resource_states": resource_states,
+         "statuses": [
+@@ -383,9 +394,39 @@ def run_rehearsal(
+         resource_states=resource_states,
+         interventions=tuple(intervention_labels),
+         digest=digest,
++        performer_marks=performer_marks,
+     )
+ 
+ 
++def _follow_performers(show: CompiledShow, statuses: dict[str, CueStatus]):
++    """Where every performer stood when each of their moves actually started.
++
++    Rehearsal follows the actual starts and ends; durations are the compiled
++    ones. A move that failed before starting has no start and moves nobody; a
++    move that failed while running leaves its performer where it was.
++    """
++    runs: list[MoveRun] = []
++    for cue in show.cues:
++        performer = cue.action.get("move")
++        target = cue.action.get("to")
++        if not isinstance(performer, str) or not isinstance(target, str):
++            continue
++        status = statuses[cue.id]
++        departs = cue.action.get("from")
++        runs.append(
++            MoveRun(
++                cue_id=cue.id,
++                performer=performer,
++                from_mark=departs if isinstance(departs, str) else None,
++                to=target,
++                start_ms=status.start_ms,
++                end_ms=status.end_ms,
++                completed=status.status == "completed",
++            )
++        )
++    return follow_moves(runs, show.performers, show.locations)
++
++
+ def _unknown(cue_id: str) -> Finding:
+     return Finding(
+         code=CF7003_UNKNOWN_INTERVENTION,

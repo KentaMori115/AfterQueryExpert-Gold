@@ -1,0 +1,53 @@
+{% extends 'admin_base.html' %}
+{% load static %}
+
+{% block content %}
+    <style>
+        .form-container {
+            max-width: 600px; /* Limit the maximum width of the form */
+            width: 100%; /* Ensure it takes up full width on smaller devices */
+        }
+    </style>
+    <div class="container">
+        <div>
+            <h2 class="text-center">User Allow Table</h2>
+        </div>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>User ID</th>
+                    <th>User Name</th>
+                    <th>Description</th>
+                    <th></th>
+                    <th>Allow Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in user_allow_records %}
+                    <tr>
+                        <td>{{record.user_id}}</td>
+                        <td>{{record.user_name}}</td>
+                        <td>
+                            <textarea class="form-control" placeholder="Please write down special reason for the current user. Otherwise, default text will be shown to the user." id="description-{{record.user_id}}" rows="2">{{record.description}}</textarea>
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-success" onclick="changeAllowDescription('{{record.user_id}}','description-{{record.user_id}}')">Apply</button>
+                        </td>
+                        <td>
+                            <input type="checkbox" {% if record.status %} checked {% endif %} data-toggle="toggle" data-on="Enabled" data-off="Disabled"
+                                onchange = 'changeAllowStatus("{{record.user_id}}", this.checked)'>
+                        </td>
+                    </tr>      
+                {% endfor %}
+            </tbody>
+        </table>      
+    </div>
+  
+
+{% endblock %}
+
+{% block script %} 
+    {{ block.super }}
+    <script src="{% static 'js/config_3.13.js' %}"></script>
+    <script src="{% static 'js/admin_3.13.js' %}"></script>
+{% endblock %}

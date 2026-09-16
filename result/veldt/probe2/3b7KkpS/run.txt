@@ -1,0 +1,148 @@
++ pytest -> /verify/reports/base.xml (19 files)
+[runner] pytest resolved from /usr/local/lib/python3.12/site-packages/pytest/__init__.py
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+__________________________________ test_fails __________________________________
+
+    def test_fails():
+>       assert [1] == [2]
+E       assert [1] == [2]
+E         
+E         At index 0 diff: 1 != 2
+E         Use -v to get more diff
+
+/tmp/calib-amnccm7t/test_calibration.py:6: AssertionError
+=========================== short test summary info ============================
+FAILED ../tmp/calib-amnccm7t/test_calibration.py::test_fails - assert [1] == [2]
+1 failed, 1 passed in 0.09s
+[runner] framework guard: 3491 decision points, 10 self-changes allowed
+........................................................................ [  7%]
+........................................................................ [ 15%]
+........................................................................ [ 23%]
+........................................................................ [ 30%]
+........................................................................ [ 38%]
+........................................................................ [ 46%]
+........................................................................ [ 53%]
+........................................................................ [ 61%]
+........................................................................ [ 69%]
+........................................................................ [ 76%]
+........................................................................ [ 84%]
+........................................................................ [ 92%]
+........................................................................ [ 99%]
+..                                                                       [100%]
+938 passed in 14.99s
+[publish] wrote /verify/reports/base.xml: 938 cases (0 declared ids added as failed), child rc 0
++ suite exit 0
++ pytest -> /verify/reports/new.xml (2 files)
+[runner] pytest resolved from /usr/local/lib/python3.12/site-packages/pytest/__init__.py
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+__________________________________ test_fails __________________________________
+
+    def test_fails():
+>       assert [1] == [2]
+E       assert [1] == [2]
+E         
+E         At index 0 diff: 1 != 2
+E         Use -v to get more diff
+
+/tmp/calib-qj0vi8lk/test_calibration.py:6: AssertionError
+=========================== short test summary info ============================
+FAILED ../tmp/calib-qj0vi8lk/test_calibration.py::test_fails - assert [1] == [2]
+1 failed, 1 passed in 0.05s
+[runner] framework guard: 3491 decision points, 10 self-changes allowed
+........................................................................ [ 61%]
+..............................FF...FF.F.F....                            [100%]
+=================================== FAILURES ===================================
+__ TestRowCountEstimates.test_a_counted_difference_subtracts_the_right_branch __
+
+self = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46a7d9a0>
+counted = Engine(4 tables, batch_size=1024)
+
+    def test_a_counted_difference_subtracts_the_right_branch(self, counted):
+        query = "SELECT x FROM four EXCEPT ALL SELECT x FROM three"
+>       assert self.rows_of(counted, query) == 1
+E       AssertionError: assert 4 == 1
+E        +  where 4 = rows_of(Engine(4 tables, batch_size=1024), 'SELECT x FROM four EXCEPT ALL SELECT x FROM three')
+E        +    where rows_of = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46a7d9a0>.rows_of
+
+tests/test_chain_folding.py:350: AssertionError
+________ TestRowCountEstimates.test_a_counted_difference_floors_at_zero ________
+
+self = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af41d0>
+counted = Engine(4 tables, batch_size=1024)
+
+    def test_a_counted_difference_floors_at_zero(self, counted):
+        query = "SELECT x FROM three EXCEPT ALL SELECT x FROM four"
+>       assert self.rows_of(counted, query) == 0
+E       AssertionError: assert 3 == 0
+E        +  where 3 = rows_of(Engine(4 tables, batch_size=1024), 'SELECT x FROM three EXCEPT ALL SELECT x FROM four')
+E        +    where rows_of = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af41d0>.rows_of
+
+tests/test_chain_folding.py:354: AssertionError
+_____ TestRowCountEstimates.test_a_plain_difference_scales_the_bound_down ______
+
+self = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af55b0>
+counted = Engine(4 tables, batch_size=1024)
+
+    def test_a_plain_difference_scales_the_bound_down(self, counted):
+        # The bound is one row, and the plain spelling scales that away.
+        query = "SELECT x FROM four EXCEPT SELECT x FROM three"
+>       assert self.rows_of(counted, query) == 0
+E       AssertionError: assert 2 == 0
+E        +  where 2 = rows_of(Engine(4 tables, batch_size=1024), 'SELECT x FROM four EXCEPT SELECT x FROM three')
+E        +    where rows_of = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af55b0>.rows_of
+
+tests/test_chain_folding.py:378: AssertionError
+__ TestRowCountEstimates.test_a_plain_difference_reaches_zero_rather_than_one __
+
+self = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af5880>
+counted = Engine(4 tables, batch_size=1024)
+
+    def test_a_plain_difference_reaches_zero_rather_than_one(self, counted):
+        query = "SELECT x FROM three EXCEPT SELECT x FROM four"
+>       assert self.rows_of(counted, query) == 0
+E       AssertionError: assert 2 == 0
+E        +  where 2 = rows_of(Engine(4 tables, batch_size=1024), 'SELECT x FROM three EXCEPT SELECT x FROM four')
+E        +    where rows_of = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af5880>.rows_of
+
+tests/test_chain_folding.py:382: AssertionError
+__ TestRowCountEstimates.test_a_counted_difference_over_a_plain_intersection ___
+
+self = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af5e20>
+counted = Engine(4 tables, batch_size=1024)
+
+    def test_a_counted_difference_over_a_plain_intersection(self, counted):
+        query = (
+            "SELECT x FROM four EXCEPT ALL SELECT x FROM three "
+            "INTERSECT SELECT x FROM four"
+        )
+>       assert self.rows_of(counted, query) == 2
+E       AssertionError: assert 4 == 2
+E        +  where 4 = rows_of(Engine(4 tables, batch_size=1024), 'SELECT x FROM four EXCEPT ALL SELECT x FROM three INTERSECT SELECT x FROM four')
+E        +    where rows_of = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af5e20>.rows_of
+
+tests/test_chain_folding.py:397: AssertionError
+_ TestRowCountEstimates.test_a_plain_difference_gives_the_scaled_bound_no_rounding _
+
+self = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af63c0>
+counted = Engine(4 tables, batch_size=1024)
+
+    def test_a_plain_difference_gives_the_scaled_bound_no_rounding(self, counted):
+        query = "SELECT x FROM five EXCEPT SELECT x FROM single"
+>       assert self.rows_of(counted, query) == 2
+E       AssertionError: assert 3 == 2
+E        +  where 3 = rows_of(Engine(4 tables, batch_size=1024), 'SELECT x FROM five EXCEPT SELECT x FROM single')
+E        +    where rows_of = <test_chain_folding.TestRowCountEstimates object at 0x7d1c46af63c0>.rows_of
+
+tests/test_chain_folding.py:406: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_chain_folding.py::TestRowCountEstimates::test_a_counted_difference_subtracts_the_right_branch
+FAILED tests/test_chain_folding.py::TestRowCountEstimates::test_a_counted_difference_floors_at_zero
+FAILED tests/test_chain_folding.py::TestRowCountEstimates::test_a_plain_difference_scales_the_bound_down
+FAILED tests/test_chain_folding.py::TestRowCountEstimates::test_a_plain_difference_reaches_zero_rather_than_one
+FAILED tests/test_chain_folding.py::TestRowCountEstimates::test_a_counted_difference_over_a_plain_intersection
+FAILED tests/test_chain_folding.py::TestRowCountEstimates::test_a_plain_difference_gives_the_scaled_bound_no_rounding
+6 failed, 111 passed in 1.75s
+[publish] wrote /verify/reports/new.xml: 117 cases (0 declared ids added as failed), child rc 1
++ suite exit 0

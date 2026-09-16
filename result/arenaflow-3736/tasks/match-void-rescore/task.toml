@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/match-void-rescore"
+
+[metadata]
+task_id = "match-void-rescore"
+display_title = "Withdraw a match and rebuild every score it fed"
+display_description = "ArenaFlow can mark a match voided in its domain layer, but no service path reaches that, so a result recorded wrong keeps its points forever. Add a withdrawal that voids a completed match of an active tournament and rebuilds each affected player's score from the matches that still stand, scoring them again through the tournament's config so streaks, records and the reasons behind them describe what is left. The event it writes has to replay to the same numbers, and the withdrawal has to reach the HTTP, CLI and SDK surfaces."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/PENDING_REPO_ID"
+base_commit_hash = "PENDING_BASE_COMMIT"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "PENDING_IMAGE"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

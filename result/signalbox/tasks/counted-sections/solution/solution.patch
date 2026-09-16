@@ -1,0 +1,1136 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ff216eb..5f9fb61 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -27,7 +27,7 @@ The release that made the thing usable by somebody who did not write it.
+ 
+ ### Checking it
+ 
+-- Fifty four rules, each with a written explanation, generated into
++- Fifty five rules, each with a written explanation, generated into
+   `docs/rules.md` so it cannot go stale.
+ - Waivers, `--strict`, `--since` and JSON findings, which is everything a build
+   needs to say what is new.
+diff --git a/README.md b/README.md
+index 30de905..6aa6ef9 100644
+--- a/README.md
++++ b/README.md
+@@ -56,6 +56,7 @@ signalbox graph kingsmoor.sbx run.sbs      # a train graph of the run
+ signalbox pack kingsmoor.sbx --out pack    # everything, for a handover
+ signalbox diff old.sbx new.sbx             # what changed
+ signalbox where kingsmoor.sbx TB           # what uses this section
++signalbox heads kingsmoor.sbx              # where the counting heads go
+ signalbox distance kingsmoor.sbx K1 K3     # how far it is along the rails
+ signalbox chainage kingsmoor.sbx           # where everything is in miles and chains
+ signalbox export kingsmoor.sbx             # the interchange file
+diff --git a/docs/rules.md b/docs/rules.md
+index 9b3f069..1ed0408 100644
+--- a/docs/rules.md
++++ b/docs/rules.md
+@@ -20,6 +20,7 @@ it fires. This file is generated from the rules themselves by
+ | `detection-gap` | error | every piece of track is detected |
+ | `detection-joint` | advice | signals stand at a section joint |
+ | `detection-long` | warning | sections are short enough to release usefully |
++| `detection-zone` | warning | reset zones are no wider than they need to be |
+ | `flank-open` | error | every flank is protected by something |
+ | `flank-shared` | error | flank points wanted two ways at once |
+ | `flank-signal` | warning | flank protection by held signal only |
+@@ -173,6 +174,14 @@ A very long section releases a long way behind the train, which costs capacity.
+ 
+ **What to do:** Split it, if the traffic is worth the equipment.
+ 
++## detection-zone
++
++*warning: reset zones are no wider than they need to be*
++
++Counted sections a train runs directly between are reset together, so a wide reset zone takes the whole of it out of use at once.
++
++**What to do:** Break the run with a track circuit, or accept that resetting any of it means proving all of it clear.
++
+ ## flank-open
+ 
+ *error: every flank is protected by something*
+diff --git a/src/signalbox/cli/commands/heads.py b/src/signalbox/cli/commands/heads.py
+new file mode 100644
+index 0000000..b657611
+--- /dev/null
++++ b/src/signalbox/cli/commands/heads.py
+@@ -0,0 +1,50 @@
++"""The heads command: where the counting heads go and what resets together."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import typer
++
++from ...tables.heads_table import HEAD_COLUMNS, ZONE_COLUMNS, build_head_schedule
++from ..common import console, grid, load
++
++
++def heads(
++    plan: Path = typer.Argument(..., help="the scheme plan to read"),
++    zones: bool = typer.Option(False, "--zones", help="the reset zones instead"),
++    shared: bool = typer.Option(False, "--shared", help="only what resets with something else"),
++) -> None:
++    """Print the head schedule for a scheme's axle counter sections."""
++    schedule = build_head_schedule(load(plan))
++    if schedule.is_empty:
++        console.print("no counted sections in this scheme")
++        return
++    if zones:
++        zone_rows = schedule.wide() if shared else schedule.zones
++        if not zone_rows:
++            console.print("every reset zone is a single section")
++            return
++        console.print(
++            grid(
++                f"reset zones in {plan.name}",
++                list(ZONE_COLUMNS),
++                [[row.cell(column) for column in ZONE_COLUMNS] for row in zone_rows],
++            )
++        )
++        return
++    head_rows = [row for row in schedule if row.is_shared] if shared else list(schedule)
++    if not head_rows:
++        console.print("no head resets with another section")
++        return
++    console.print(
++        grid(
++            f"counting heads in {plan.name}",
++            list(HEAD_COLUMNS),
++            [[row.cell(column) for column in HEAD_COLUMNS] for row in head_rows],
++        )
++    )
++
++
++def register(app: typer.Typer) -> None:
++    app.command()(heads)
+diff --git a/src/signalbox/cli/main.py b/src/signalbox/cli/main.py
+index f98c672..36aab68 100644
+--- a/src/signalbox/cli/main.py
++++ b/src/signalbox/cli/main.py
+@@ -29,6 +29,7 @@ from .commands import (
+     export,
+     fmt,
+     graph,
++    heads,
+     headway,
+     locking,
+     pack,
+@@ -115,6 +116,7 @@ for module in (
+     export,
+     aspects,
+     headway,
++    heads,
+     fmt,
+     chainage,
+     locking,
+diff --git a/src/signalbox/interchange/compare.py b/src/signalbox/interchange/compare.py
+index 65598bc..a7c5603 100644
+--- a/src/signalbox/interchange/compare.py
++++ b/src/signalbox/interchange/compare.py
+@@ -106,6 +106,46 @@ class Comparison:
+         return json.dumps(self.as_dict(), indent=2, sort_keys=True) + "\n"
+ 
+ 
++def _zones(data: dict[str, Any]) -> dict[str, str]:
++    """Section name to the reset zone it is in, for the counted sections only."""
++    return {
++        str(section.get("name")): str(section.get("zone"))
++        for section in data.get("sections", [])
++        if section.get("zone")
++    }
++
++
++def _heads(data: dict[str, Any]) -> dict[str, list[Any]]:
++    """Section name to the counting heads that bound it."""
++    return {
++        str(section.get("name")): list(section.get("heads") or [])
++        for section in data.get("sections", [])
++        if section.get("heads")
++    }
++
++
++def detection_differences(before: dict[str, Any], after: dict[str, Any]) -> list[Difference]:
++    """Reset zones and counting heads that are not what they were.
++
++    A section moving between zones is worth calling out on its own, because it
++    changes what has to be proved clear before the section can be reset, and
++    that does not show up anywhere in the routes.
++    """
++    old_zones, new_zones = _zones(before), _zones(after)
++    old_heads, new_heads = _heads(before), _heads(after)
++    found = [
++        Difference(name, "reset zone", old_zones.get(name), new_zones.get(name))
++        for name in sorted(set(old_zones) | set(new_zones))
++        if old_zones.get(name) != new_zones.get(name)
++    ]
++    found.extend(
++        Difference(name, "heads", old_heads.get(name), new_heads.get(name))
++        for name in sorted(set(old_heads) | set(new_heads))
++        if old_heads.get(name) != new_heads.get(name)
++    )
++    return found
++
++
+ def compare(before: dict[str, Any], after: dict[str, Any]) -> Comparison:
+     """Compare two interchange files route by route, then the scheme itself."""
+     result = Comparison()
+@@ -123,6 +163,8 @@ def compare(before: dict[str, Any], after: dict[str, Any]) -> Comparison:
+                     Difference(name, key, old[name].get(key), new[name].get(key))
+                 )
+ 
++    result.changed.extend(detection_differences(before, after))
++
+     for key in ("scheme", "sections", "signals", "track"):
+         if before.get(key) != after.get(key):
+             result.changed.append(
+diff --git a/src/signalbox/interchange/model.py b/src/signalbox/interchange/model.py
+index 7b47c2f..fa76aa0 100644
+--- a/src/signalbox/interchange/model.py
++++ b/src/signalbox/interchange/model.py
+@@ -17,6 +17,7 @@ from ..signalling.conflict import build_matrix
+ from ..signalling.interlocking import Interlocking
+ from ..signalling.locking import LockingTable, build_locking
+ from ..topology.chainage import Chainage, chainage
++from ..topology.counting import CountingPlan, build_counting
+ from ..topology.scheme import Scheme
+ 
+ #: Bumped whenever the shape below changes in a way a reader would notice.
+@@ -126,15 +127,24 @@ def _mileage(marks: Chainage | None, node: str) -> float | None:
+ 
+ 
+ def _sections(scheme: Scheme) -> list[dict[str, Any]]:
+-    return [
+-        {
+-            "name": name,
+-            "kind": scheme.sections.get(name).kind.value,
+-            "edges": list(scheme.sections.get(name).edges),
+-            "length": round(scheme.sections.get(name).length(scheme.graph).metres, 3),
+-        }
+-        for name in sorted(scheme.sections.sections)
+-    ]
++    counting = build_counting(scheme.graph, scheme.sections)
++    return [_section(scheme, counting, name) for name in sorted(scheme.sections.sections)]
++
++
++def _section(scheme: Scheme, counting: CountingPlan, name: str) -> dict[str, Any]:
++    """One section, with its reset zone and heads when it is a counted one."""
++    section = scheme.sections.get(name)
++    record: dict[str, Any] = {
++        "name": name,
++        "kind": section.kind.value,
++        "edges": list(section.edges),
++        "length": round(section.length(scheme.graph).metres, 3),
++    }
++    zone = counting.zone_of(name)
++    if zone is not None:
++        record["zone"] = zone.name
++        record["heads"] = [head.name for head in counting.heads_for_section(name)]
++    return record
+ 
+ 
+ def _signals(scheme: Scheme) -> list[dict[str, Any]]:
+diff --git a/src/signalbox/interchange/report.py b/src/signalbox/interchange/report.py
+index 1a9c4cb..5b6763a 100644
+--- a/src/signalbox/interchange/report.py
++++ b/src/signalbox/interchange/report.py
+@@ -12,6 +12,7 @@ from ..signalling.berth import without_berths
+ from ..signalling.headway import legs, summarise
+ from ..signalling.interlocking import Interlocking
+ from ..signalling.route import RouteClass
++from ..tables.heads_table import build_head_schedule
+ from ..topology.chainage import chainage
+ from ..topology.reachability import unreachable_edges
+ from ..topology.scheme import Scheme
+@@ -81,6 +82,26 @@ def _protection(scheme: Scheme, interlocking: Interlocking) -> list[str]:
+     return lines
+ 
+ 
++def _detection(scheme: Scheme) -> list[str]:
++    """What the scheme is detected with, and what has to be reset together.
++
++    A design review reads this to find out whether the axle counters have been
++    laid out so that a reset takes one section out of use or six.
++    """
++    counted = scheme.sections.counted_names()
++    lines = _heading("Detection")
++    circuits = len(scheme.sections) - len(counted)
++    lines.append(f"  {circuits} track circuits, {len(counted)} axle counter sections")
++    if not counted:
++        return lines
++    schedule = build_head_schedule(scheme)
++    lines.append(f"  {schedule.describe()}")
++    lines.append(f"  counted: {', '.join(counted)}")
++    for zone in schedule.wide():
++        lines.append(f"    {zone.zone} resets {', '.join(zone.sections)} together")
++    return lines
++
++
+ def _capacity(scheme: Scheme, interlocking: Interlocking) -> list[str]:
+     lines = _heading("Capacity")
+     lines.append("  " + summarise(legs(scheme, interlocking)))
+@@ -112,6 +133,7 @@ def write_report(
+     lines += _layout(scheme)
+     lines += _routes(interlocking)
+     lines += _protection(scheme, interlocking)
++    lines += _detection(scheme)
+     lines += _capacity(scheme, interlocking)
+     lines += _findings(findings)
+     return "\n".join(lines) + "\n"
+diff --git a/src/signalbox/interchange/schema.py b/src/signalbox/interchange/schema.py
+index 2a8ff6e..f19a556 100644
+--- a/src/signalbox/interchange/schema.py
++++ b/src/signalbox/interchange/schema.py
+@@ -66,11 +66,16 @@ TRAPS = (
+     Field("facing", str),
+ )
+ 
++#: Counted sections carry two extra fields nothing else needs: the reset zone
++#: they belong to and the counting heads that bound them. A track circuit has
++#: neither, and an older file has neither, so both are optional.
+ SECTIONS = (
+     Field("name", str),
+     Field("kind", str),
+     Field("edges", list),
+     Field("length", (int, float)),
++    Field("zone", str, required=False, note="reset zone, counted sections only"),
++    Field("heads", list, required=False, note="counting heads that bound it"),
+ )
+ 
+ SIGNALS = (
+diff --git a/src/signalbox/signalling/locking.py b/src/signalbox/signalling/locking.py
+index 85e3504..7729281 100644
+--- a/src/signalbox/signalling/locking.py
++++ b/src/signalbox/signalling/locking.py
+@@ -5,6 +5,13 @@ over, the track it runs over, and every route that would conflict with it. The
+ track is held as sub routes, one per section, each with the direction the train
+ runs through it, because that is what lets a long route release behind a train
+ section by section instead of all at once when it finally arrives.
++
++Releasing behind a train assumes each section can say on its own that the train
++has gone. A track circuit can. An axle counter cannot, because what it knows is
++a count, and a count is only worth anything over a whole reset zone. So sub
++routes whose sections share a zone come back together, at the moment the last of
++them is clear, and a route whose track is all inside one zone has nothing to
++release piecemeal at all.
+ """
+ 
+ from __future__ import annotations
+@@ -13,6 +20,7 @@ from collections.abc import Iterator, Mapping
+ from dataclasses import dataclass, field
+ from enum import Enum
+ 
++from ..topology.counting import CountingPlan, build_counting
+ from ..topology.graph import Lie
+ from ..topology.scheme import Scheme
+ from .conflict import ConflictMatrix
+@@ -40,6 +48,7 @@ class LockingEntry:
+     overlap_subroutes: tuple[Subroute, ...] = ()
+     locks_out: tuple[str, ...] = ()
+     release: Release = Release.SECTIONAL
++    zones: Mapping[str, str] = field(default_factory=dict)
+ 
+     @property
+     def is_sectional(self) -> bool:
+@@ -48,11 +57,37 @@ class LockingEntry:
+     def held_track(self) -> tuple[Subroute, ...]:
+         return self.subroutes + self.overlap_subroutes
+ 
++    def zone_of(self, subroute: Subroute) -> str | None:
++        """The reset zone a sub route's section is in, if it is counted."""
++        return self.zones.get(subroute.section)
++
++    def release_groups(self) -> list[tuple[Subroute, ...]]:
++        """Held track in the order it frees, sub routes that share a zone together.
++
++        A sub route on a track circuit is its own group. Sub routes whose
++        sections share a reset zone are one group, and the group sits where the
++        last of them does, because that is when the count comes right.
++        """
++        held = list(self.held_track())
++        keys = [self.zone_of(sub) or f"={sub.name}" for sub in held]
++        order: list[str] = []
++        for index, key in enumerate(keys):
++            if key not in keys[index + 1 :]:
++                order.append(key)
++        return [
++            tuple(sub for sub, key in zip(held, keys, strict=True) if key == wanted)
++            for wanted in order
++        ]
++
+     def releases_in_order(self) -> list[Subroute]:
+         """Sub routes in the order a train passing over them frees them."""
+-        if self.release is Release.COMPLETE:
+-            return list(self.held_track())
+-        return list(self.subroutes) + list(self.overlap_subroutes)
++        return [sub for group in self.release_groups() for sub in group]
++
++    def zones_held(self) -> tuple[str, ...]:
++        """Reset zones this route's track sits in, in name order."""
++        found = {self.zones[sub.section] for sub in self.held_track()
++                 if sub.section in self.zones}
++        return tuple(sorted(found))
+ 
+     def locks(self, node: str) -> Lie | None:
+         return self.points.get(node)
+@@ -62,25 +97,45 @@ class LockingEntry:
+         return f"{self.route}: {track}"
+ 
+ 
++def _zone_map(scheme: Scheme, counting: CountingPlan | None) -> dict[str, str]:
++    """Section name to reset zone name, for the counted sections only."""
++    plan = counting or build_counting(scheme.graph, scheme.sections)
++    return {
++        section: zone.name for zone in plan.zones for section in zone.sections
++    }
++
++
++def _groups_in(subroutes: tuple[Subroute, ...], zones: Mapping[str, str]) -> int:
++    """How many separately releasable pieces a run of sub routes comes to.
++
++    Counted over everything the route holds, its overlap included. The overlap
++    is held for the same reason the route is, and a route that cannot prove the
++    overlap clear on its own has nothing to give up early either.
++    """
++    keys = [zones.get(sub.section) or f"={sub.name}" for sub in subroutes]
++    return len(set(keys))
++
++
+ def locking_for(
+     scheme: Scheme,
+     plan: RoutePlan,
+     matrix: ConflictMatrix,
+     *,
+     sectional_release: bool = True,
++    counting: CountingPlan | None = None,
+ ) -> LockingEntry:
+     """Work out the locking for one route."""
+-    del scheme
+     subroutes = plan.track
+     overlap_subroutes = plan.overlap_track
++    zones = _zone_map(scheme, counting)
+ 
+     points = dict(plan.points())
+     points.update(plan.overlap_points())
+     points.update(plan.flank_points())
+ 
+-    release = (
+-        Release.SECTIONAL if sectional_release and len(subroutes) > 1 else Release.COMPLETE
+-    )
++    held = subroutes + overlap_subroutes
++    piecemeal = sectional_release and _groups_in(held, zones) > 1
++    release = Release.SECTIONAL if piecemeal else Release.COMPLETE
+     return LockingEntry(
+         route=plan.name,
+         points=points,
+@@ -88,6 +143,11 @@ def locking_for(
+         overlap_subroutes=overlap_subroutes,
+         locks_out=tuple(matrix.against(plan.name)),
+         release=release,
++        zones={
++            section: zone
++            for section, zone in zones.items()
++            if any(sub.section == section for sub in subroutes + overlap_subroutes)
++        },
+     )
+ 
+ 
+@@ -124,9 +184,17 @@ def build_locking(
+     *,
+     sectional_release: bool = True,
+ ) -> LockingTable:
++    scheme = interlocking.scheme
++    counting = build_counting(scheme.graph, scheme.sections)
+     return LockingTable(
+         [
+-            locking_for(interlocking.scheme, plan, matrix, sectional_release=sectional_release)
++            locking_for(
++                scheme,
++                plan,
++                matrix,
++                sectional_release=sectional_release,
++                counting=counting,
++            )
+             for plan in interlocking.sorted_plans()
+         ]
+     )
+diff --git a/src/signalbox/tables/heads_table.py b/src/signalbox/tables/heads_table.py
+new file mode 100644
+index 0000000..42ef136
+--- /dev/null
++++ b/src/signalbox/tables/heads_table.py
+@@ -0,0 +1,180 @@
++"""The head schedule: every counting head, and the zone its section resets with.
++
++A scheme with axle counters is handed over with a list of where the heads go,
++the same way one with track circuits is handed over with a list of where the
++joints go. This is that list, read out of the layout rather than drawn on it,
++so it cannot disagree with the plan it came from.
++
++The zone column is the part nobody expects. Two counted sections a train can run
++directly between keep one another's count honest and have to be reset as a pair,
++so the schedule says which sections come out of use together. A zone of one is
++the ordinary case and reads as a dash.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterator
++from dataclasses import dataclass
++
++from ..topology.counting import CountingPlan, Head, build_counting
++from ..topology.scheme import Scheme
++
++HEAD_COLUMNS = (
++    "head",
++    "at",
++    "kind",
++    "section",
++    "edge",
++    "zone",
++    "reset with",
++)
++
++ZONE_COLUMNS = (
++    "zone",
++    "sections",
++    "heads",
++    "reset together",
++)
++
++
++@dataclass(frozen=True)
++class HeadRow:
++    """One counting head, read as a row."""
++
++    head: str
++    at: str
++    kind: str
++    section: str
++    edge: str
++    zone: str
++    reset_with: tuple[str, ...]
++
++    @property
++    def is_shared(self) -> bool:
++        """Whether resetting this head's section takes another one with it."""
++        return bool(self.reset_with)
++
++    def cell(self, column: str) -> str:
++        value = {
++            "head": self.head,
++            "at": self.at,
++            "kind": self.kind,
++            "section": self.section,
++            "edge": self.edge,
++            "zone": self.zone,
++            "reset with": self.reset_with or ("-",),
++        }[column]
++        return ", ".join(value) if isinstance(value, tuple) else str(value)
++
++    def as_dict(self) -> dict[str, str]:
++        return {column: self.cell(column) for column in HEAD_COLUMNS}
++
++    def __str__(self) -> str:
++        return f"{self.head} on {self.section}"
++
++
++@dataclass(frozen=True)
++class ZoneRow:
++    """One reset zone, read as a row."""
++
++    zone: str
++    sections: tuple[str, ...]
++    heads: tuple[str, ...]
++    """The heads bounding the zone, in name order and without repeats."""
++
++    @property
++    def is_single(self) -> bool:
++        return len(self.sections) == 1
++
++    def cell(self, column: str) -> str:
++        value = {
++            "zone": self.zone,
++            "sections": self.sections,
++            "heads": self.heads,
++            "reset together": "no" if self.is_single else "yes",
++        }[column]
++        return ", ".join(value) if isinstance(value, tuple) else str(value)
++
++    def __str__(self) -> str:
++        return f"{self.zone}: {', '.join(self.sections)}"
++
++
++class HeadSchedule:
++    """Every head and every reset zone in a scheme."""
++
++    def __init__(self, rows: list[HeadRow], zones: list[ZoneRow], plan: CountingPlan) -> None:
++        self.rows = rows
++        self.zones = zones
++        self.plan = plan
++
++    def __len__(self) -> int:
++        return len(self.rows)
++
++    def __iter__(self) -> Iterator[HeadRow]:
++        return iter(self.rows)
++
++    @property
++    def is_empty(self) -> bool:
++        return not self.rows and not self.zones
++
++    def for_section(self, section: str) -> list[HeadRow]:
++        return [row for row in self.rows if row.section == section]
++
++    def at_node(self, node: str) -> list[HeadRow]:
++        return [row for row in self.rows if row.at == node]
++
++    def wide(self) -> list[ZoneRow]:
++        """Zones covering more than one section."""
++        return [zone for zone in self.zones if not zone.is_single]
++
++    def column(self, name: str) -> list[str]:
++        return [row.cell(name) for row in self.rows]
++
++    def describe(self) -> str:
++        wide = len(self.wide())
++        tail = "" if not wide else f", {wide} of them shared"
++        return f"{len(self.rows)} counting heads over {len(self.zones)} reset zones{tail}"
++
++
++def _row_for(scheme: Scheme, plan: CountingPlan, head: Head) -> HeadRow:
++    zone = plan.zone_of(head.section)
++    return HeadRow(
++        head=head.name,
++        at=head.node,
++        kind=scheme.graph.node(head.node).kind.value,
++        section=head.section,
++        edge=head.edge,
++        zone=zone.name if zone else "",
++        reset_with=tuple(
++            other for other in (zone.sections if zone else ()) if other != head.section
++        ),
++    )
++
++
++def build_head_schedule(scheme: Scheme) -> HeadSchedule:
++    """Read the head schedule straight out of a scheme's counted sections.
++
++    Nothing is cached and nothing is stored on the scheme: the schedule is a
++    view of the layout, and a layout that has changed has a different schedule.
++    Building it is walking the counted sections once, which is cheap enough that
++    holding a stale copy would cost more than it saved.
++    """
++    plan = build_counting(scheme.graph, scheme.sections)
++    rows = [_row_for(scheme, plan, head) for head in plan.heads]
++    zones = [
++        ZoneRow(
++            zone=zone.name,
++            sections=zone.sections,
++            heads=tuple(
++                sorted(
++                    {
++                        head.name
++                        for section in zone.sections
++                        for head in plan.heads_for_section(section)
++                    }
++                )
++            ),
++        )
++        for zone in plan.zones
++    ]
++    return HeadSchedule(rows, zones, plan)
+diff --git a/src/signalbox/tables/index.py b/src/signalbox/tables/index.py
+index 1caff19..78fbd9f 100644
+--- a/src/signalbox/tables/index.py
++++ b/src/signalbox/tables/index.py
+@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
+ from ..signalling.berth import berth_section
+ from ..signalling.crossing import crossings_over
+ from ..signalling.interlocking import Interlocking
++from ..topology.counting import build_counting
+ from ..topology.scheme import Scheme
+ 
+ KINDS = ("signal", "section", "points", "edge", "crossing")
+@@ -52,6 +53,7 @@ class Index:
+     def __init__(self, scheme: Scheme, interlocking: Interlocking) -> None:
+         self.scheme = scheme
+         self.interlocking = interlocking
++        self.counting = build_counting(scheme.graph, scheme.sections)
+ 
+     def kind_of(self, name: str) -> str | None:
+         if name in self.scheme.signals:
+@@ -95,12 +97,16 @@ class Index:
+         over = [plan.name for plan in self.interlocking if name in plan.sections]
+         overlap = [plan.name for plan in self.interlocking if name in plan.overlap_sections()]
+         section = self.scheme.sections.get(name)
+-        return Uses(
+-            name,
+-            "section",
+-            tuple(over),
+-            {"in the overlap of": tuple(overlap), "covers": section.edges},
+-        )
++        detail = {"in the overlap of": tuple(overlap), "covers": section.edges}
++        zone = self.counting.zone_of(name)
++        if zone is not None:
++            detail["reset with"] = tuple(
++                other for other in zone.sections if other != name
++            )
++            detail["counting heads"] = tuple(
++                head.name for head in self.counting.heads_for_section(name)
++            )
++        return Uses(name, "section", tuple(over), detail)
+ 
+     def _points(self, name: str) -> Uses:
+         run_over = [plan.name for plan in self.interlocking if name in plan.points()]
+diff --git a/src/signalbox/tables/locking_table.py b/src/signalbox/tables/locking_table.py
+index 4b5ff79..c572b6d 100644
+--- a/src/signalbox/tables/locking_table.py
++++ b/src/signalbox/tables/locking_table.py
+@@ -21,6 +21,7 @@ LOCKING_COLUMNS = (
+     "overlap",
+     "release",
+     "releases",
++    "zones",
+     "locks out",
+     "held by",
+ )
+@@ -37,6 +38,7 @@ class LockingRow:
+     releases: tuple[str, ...]
+     locks_out: tuple[str, ...]
+     held_by: tuple[str, ...]
++    zones: tuple[str, ...] = ()
+ 
+     @property
+     def is_sectional(self) -> bool:
+@@ -49,6 +51,7 @@ class LockingRow:
+             "overlap": self.overlap,
+             "release": self.release,
+             "releases": self.releases,
++            "zones": self.zones,
+             "locks out": self.locks_out,
+             "held by": self.held_by,
+         }[column]
+@@ -110,6 +113,7 @@ def build_locking_report(interlocking: Interlocking) -> LockingReport:
+                 overlap=tuple(sub.name for sub in plan.overlap_track),
+                 release=entry.release.value,
+                 releases=tuple(sub.name for sub in entry.releases_in_order()),
++                zones=entry.zones_held(),
+                 locks_out=entry.locks_out,
+                 held_by=tuple(held_by),
+             )
+diff --git a/src/signalbox/topology/counting.py b/src/signalbox/topology/counting.py
+new file mode 100644
+index 0000000..1feaf4c
+--- /dev/null
++++ b/src/signalbox/topology/counting.py
+@@ -0,0 +1,247 @@
++"""Counting heads, and the reset zones a counted section sits in.
++
++A track circuit is bounded by insulated joints and the rails between them are
++the section. An axle counter is bounded by nothing in the track at all: it is
++bounded by counting heads, and the section is clear when every axle counted in
++at one head has been counted out at another. Two things follow, and neither is
++written anywhere in the plan.
++
++The first is where the heads go. A counted section needs a head at every leg of
++itself that a train can leave by onto track the section does not cover. Legs it
++shares with nothing, because they run into a buffer stop, need none: no axle
++passes a dead end. A leg that runs to the edge of the scheme does need one, and
++so does every leg of a set of points, a crossing or a slip, because each of
++those is separate rail and a head on one says nothing about another.
++
++The second is what has to be reset together. A count is only meaningful over
++track a train cannot enter or leave unseen, so counted sections a train can run
++directly between keep one another honest and are reset as a group. Those groups
++are the reset zones. Running directly between is the whole of it: two sections
++on the two legs of the same points are not a pair, because no train runs from
++one to the other without going over the toe first.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterator
++from dataclasses import dataclass
++
++from ..layout.ast import NodeKind
++from .graph import Lie, Sense, TrackGraph
++from .section import Section, SectionMap
++
++#: Node kinds the plan language gives named legs to, so a head can sit on one.
++_LEGGED = (NodeKind.POINTS, NodeKind.CROSSING, NodeKind.SLIP)
++
++
++@dataclass(frozen=True)
++class Head:
++    """One counting head: a leg of a counted section, at the node it stops at."""
++
++    node: str
++    port: str | None
++    section: str
++    edge: str
++
++    @property
++    def name(self) -> str:
++        return f"{self.node}.{self.port}" if self.port else self.node
++
++    def __str__(self) -> str:
++        return f"{self.name} on {self.section}"
++
++
++@dataclass(frozen=True)
++class ResetZone:
++    """Counted sections a train can run directly between, reset as a group."""
++
++    name: str
++    sections: tuple[str, ...]
++
++    @property
++    def is_single(self) -> bool:
++        return len(self.sections) == 1
++
++    def covers(self, section: str) -> bool:
++        return section in self.sections
++
++    def __str__(self) -> str:
++        return f"{self.name}: {', '.join(self.sections)}"
++
++
++def counted_sections(sections: SectionMap) -> list[Section]:
++    """Every axle counter section, in name order."""
++    return sections.counted()
++
++
++def _onward(graph: TrackGraph, edge: str) -> Iterator[tuple[str, str | None, str]]:
++    """Every (from_port, to_edge) a train can take off either end of an edge.
++
++    Yields the port of ``edge`` the train leaves by, together with the edge it
++    arrives on, over both lies of anything movable in the way.
++
++    Both lies matter and the direction the track is worked in does not. A set of
++    points spends its life being called one way and then the other, so a section
++    beyond the reverse leg is reachable whatever the blades happen to be doing
++    when the question is asked. The worked direction is left out for a different
++    reason: it says which way trains are signalled, not which pieces of rail are
++    joined, and a count is kept by rail rather than by timetable.
++    """
++    for sense in (Sense.NOMINAL, Sense.REVERSE):
++        port = graph.edge(edge).port_for(sense)
++        for lie in (Lie.NORMAL, Lie.REVERSE):
++            for next_edge, _next_sense in graph.step(edge, sense, lie):
++                yield port.node, port.name, next_edge
++
++
++def heads_for(graph: TrackGraph, sections: SectionMap) -> list[Head]:
++    """Every counting head a scheme's counted sections ask for.
++
++    One per leg of a counted section that a train can leave by onto track the
++    section does not cover, plus one for every leg that runs to the boundary of
++    the scheme. A leg that ends at a buffer stop gets none.
++    """
++    found: dict[tuple[str, str | None, str], Head] = {}
++    for section in counted_sections(sections):
++        for edge in section.edges:
++            for node, port, onward_edge in _onward(graph, edge):
++                if sections.name_for(onward_edge) == section.name:
++                    continue
++                _remember(found, graph, node, port, section.name, edge)
++            for node, port in _ends_of(graph, edge):
++                if graph.node(node).kind is NodeKind.BOUNDARY:
++                    _remember(found, graph, node, port, section.name, edge)
++    return sorted(found.values(), key=lambda head: (head.section, head.name))
++
++
++def _remember(
++    found: dict[tuple[str, str | None, str], Head],
++    graph: TrackGraph,
++    node: str,
++    port: str | None,
++    section: str,
++    edge: str,
++) -> None:
++    """Record one head, keeping the leg only where the plan gives legs names.
++
++    A plain join, a buffer stop and a boundary have one place for a head and no
++    name for it, so the head is the node. Points, a crossing and a slip are
++    written in the plan with their legs named, and the head goes on the leg.
++    """
++    named = graph.node(node).kind in _LEGGED
++    key = (node, port if named else None, section)
++    found.setdefault(key, Head(node, port if named else None, section, edge))
++
++
++def _ends_of(graph: TrackGraph, edge_name: str) -> list[tuple[str, str | None]]:
++    edge = graph.edge(edge_name)
++    return [(port.node, port.name) for port in (edge.start, edge.end)]
++
++
++def adjacent_counted(graph: TrackGraph, sections: SectionMap) -> dict[str, set[str]]:
++    """Counted sections a train can run directly between, both ways round."""
++    joined: dict[str, set[str]] = {
++        section.name: set() for section in counted_sections(sections)
++    }
++    for section in counted_sections(sections):
++        for edge in section.edges:
++            for _node, _port, onward_edge in _onward(graph, edge):
++                other = sections.name_for(onward_edge)
++                if other is None or other == section.name:
++                    continue
++                if other in joined:
++                    joined[section.name].add(other)
++                    joined[other].add(section.name)
++    return joined
++
++
++def zones_for(graph: TrackGraph, sections: SectionMap) -> list[ResetZone]:
++    """Group counted sections into reset zones, named for their first section.
++
++    The grouping is the connected components of the adjacency above, walked
++    breadth first from the lowest name so that the answer does not depend on
++    the order the sections were declared in. Naming a zone for the first of its
++    members keeps the name stable while the sections are, which matters because
++    the name reaches the interchange file and a comparison between two files is
++    made on it.
++    """
++    joined = adjacent_counted(graph, sections)
++    seen: set[str] = set()
++    zones: list[ResetZone] = []
++    for name in sorted(joined):
++        if name in seen:
++            continue
++        members: list[str] = []
++        stack = [name]
++        while stack:
++            here = stack.pop()
++            if here in seen:
++                continue
++            seen.add(here)
++            members.append(here)
++            stack.extend(sorted(joined[here] - seen))
++        members.sort()
++        zones.append(ResetZone(name=members[0], sections=tuple(members)))
++    return sorted(zones, key=lambda zone: zone.name)
++
++
++class CountingPlan:
++    """The heads and reset zones of one scheme, with the lookups worth having.
++
++    Built once and asked many times. Every reader of this wants one of three
++    questions answered: what heads does this section need, what else comes out
++    of use when this section is reset, and which zones are wide enough to be
++    worth mentioning to a designer.
++    """
++
++    def __init__(self, heads: list[Head], zones: list[ResetZone]) -> None:
++        self.heads = heads
++        self.zones = zones
++        self._zone_of: dict[str, ResetZone] = {}
++        for zone in zones:
++            for section in zone.sections:
++                self._zone_of[section] = zone
++
++    def __len__(self) -> int:
++        return len(self.heads)
++
++    def __iter__(self) -> Iterator[Head]:
++        return iter(self.heads)
++
++    def zone_of(self, section: str) -> ResetZone | None:
++        """The reset zone a section is in, or None if it is not counted."""
++        return self._zone_of.get(section)
++
++    def zone(self, name: str) -> ResetZone:
++        for zone in self.zones:
++            if zone.name == name:
++                return zone
++        raise KeyError(f"no reset zone called {name}")
++
++    def together(self, section: str) -> tuple[str, ...]:
++        """Sections reset alongside this one, itself included, or none at all."""
++        zone = self.zone_of(section)
++        return zone.sections if zone else ()
++
++    def shares(self, first: str, second: str) -> bool:
++        """Whether two sections are reset together."""
++        zone = self.zone_of(first)
++        return zone is not None and zone.covers(second)
++
++    def heads_at(self, node: str) -> list[Head]:
++        return [head for head in self.heads if head.node == node]
++
++    def heads_for_section(self, section: str) -> list[Head]:
++        return [head for head in self.heads if head.section == section]
++
++    def wide_zones(self) -> list[ResetZone]:
++        """Zones holding more than one section, which is what costs availability."""
++        return [zone for zone in self.zones if not zone.is_single]
++
++    def describe(self) -> str:
++        return f"{len(self.heads)} counting heads over {len(self.zones)} reset zones"
++
++
++def build_counting(graph: TrackGraph, sections: SectionMap) -> CountingPlan:
++    """Work out the counting heads and the reset zones for one scheme."""
++    return CountingPlan(heads_for(graph, sections), zones_for(graph, sections))
+diff --git a/src/signalbox/topology/section.py b/src/signalbox/topology/section.py
+index f625b68..47992e1 100644
+--- a/src/signalbox/topology/section.py
++++ b/src/signalbox/topology/section.py
+@@ -84,6 +84,22 @@ class SectionMap:
+                 ordered.append(section)
+         return ordered
+ 
++    def counted(self) -> list[Section]:
++        """Every axle counter section, in name order.
++
++        A counted section is bounded by counting heads rather than by insulated
++        joints, which is why anything working out heads or reset zones starts
++        here rather than walking every section in the scheme.
++        """
++        return [
++            self.sections[name]
++            for name in sorted(self.sections)
++            if self.sections[name].is_counted
++        ]
++
++    def counted_names(self) -> list[str]:
++        return [section.name for section in self.counted()]
++
+     def unassigned(self, graph: TrackGraph) -> list[str]:
+         """Edges that no section covers, which usually means a drafting slip."""
+         return sorted(name for name in graph.edges if name not in self._by_edge)
+diff --git a/src/signalbox/verify/checks/detection.py b/src/signalbox/verify/checks/detection.py
+index 1fd2e05..2c71cbf 100644
+--- a/src/signalbox/verify/checks/detection.py
++++ b/src/signalbox/verify/checks/detection.py
+@@ -1,17 +1,23 @@
+ """Train detection has to cover the layout, and it has to line up with the signals.
+ 
+ Track that no section covers is track the interlocking cannot see a train on,
+-which is an outright error. The other two rules here are about how the detection
+-is cut up: a section so long that a route cannot release behind a train until it
++which is an outright error. The next two rules are about how the detection is
++cut up: a section so long that a route cannot release behind a train until it
+ has gone a very long way, and a signal that does not stand at a joint, so that
+ the section behind it is not a berth and the signal cannot be replaced behind a
+ train the moment it has passed.
++
++The last is about the detection being counted rather than circuited. Counted
++sections a train runs directly between are reset as one, so a reset zone wider
++than a single section is a piece of railway that comes out of use together.
++That is a decision worth making on purpose rather than by accident.
+ """
+ 
+ from __future__ import annotations
+ 
+ from collections.abc import Iterator
+ 
++from ...topology.counting import build_counting
+ from ...units import Distance
+ from ..report import Finding, Severity
+ from ..rules import Context, rule
+@@ -70,3 +76,18 @@ def signals_stand_at_joints(context: Context) -> Iterator[Finding]:
+             message=f"stands {from_joint:.0f}m from the nearest section joint",
+             detail=f"on {edge.name}, which is {edge.length.metres:.0f}m long",
+         )
++
++
++@rule("detection-zone", "reset zones are no wider than they need to be", Severity.WARNING)
++def reset_zones_are_narrow(context: Context) -> Iterator[Finding]:
++    """A reset zone over several sections takes all of them out of use at once."""
++    scheme = context.scheme
++    counting = build_counting(scheme.graph, scheme.sections)
++    for zone in counting.wide_zones():
++        yield Finding(
++            rule="detection-zone",
++            severity=Severity.WARNING,
++            subject=zone.name,
++            message=f"{len(zone.sections)} counted sections reset together",
++            detail=", ".join(zone.sections) + " share a zone, so a reset takes the lot",
++        )
+diff --git a/src/signalbox/verify/guidance.py b/src/signalbox/verify/guidance.py
+index 2cf4fcb..8cef627 100644
+--- a/src/signalbox/verify/guidance.py
++++ b/src/signalbox/verify/guidance.py
+@@ -103,6 +103,13 @@ GUIDANCE: dict[str, Guidance] = dict(
+             "a berth, so the signal cannot be replaced behind a train promptly.",
+             "Move the joint to the signal.",
+         ),
++        _g(
++            "detection-zone",
++            "Counted sections a train runs directly between are reset together, so "
++            "a wide reset zone takes the whole of it out of use at once.",
++            "Break the run with a track circuit, or accept that resetting any of "
++            "it means proving all of it clear.",
++        ),
+         _g(
+             "aspect-clamp",
+             "The aspect sequence wants an aspect this signal has not got the heads to show.",
+diff --git a/tests/golden/kingsmoor-locking.txt b/tests/golden/kingsmoor-locking.txt
+index ecb0528..affe0af 100644
+--- a/tests/golden/kingsmoor-locking.txt
++++ b/tests/golden/kingsmoor-locking.txt
+@@ -1,14 +1,14 @@
+-route   holds                       overlap       release    releases                           locks out                     held by
+-------  --------------------------  ------------  ---------  ---------------------------------  ----------------------------  --------------------
+-K1(M)   TB-AB, TC-AB                TD-AB, TE-AB  sectional  TB-AB, TC-AB, TD-AB, TE-AB         K1(S)
+-K1(S)   TB-AB, TV-AB, TL-AB                       sectional  TB-AB, TV-AB, TL-AB                K1(M), K2(M), K4(M), K8(M)    K2(M), K4(M), K8(M)
+-K2(M)   TQ-BA, TP-BA, TN-BA, TM-BA  TL-BA         sectional  TQ-BA, TP-BA, TN-BA, TM-BA, TL-BA  K1(S), K20(S), K22(S), K8(M)  K1(S), K20(S)
+-K20(S)  TM-AB, TU-AB                              sectional  TM-AB, TU-AB                       K2(M), K22(S), K8(M)          K2(M), K22(S), K8(M)
+-K22(S)  TM-BA                                     complete   TM-BA                              K2(M), K20(S), K8(M)          K20(S)
+-K3(MA)  TD-AB, TE-AB                TF-AB         sectional  TD-AB, TE-AB, TF-AB                K3(MB)
+-K3(MB)  TD-AB, TG-AB                TH-AB         sectional  TD-AB, TG-AB, TH-AB                K3(MA)
+-K4(M)   TL-BA, TK-BA                TJ-BA         sectional  TL-BA, TK-BA, TJ-BA                K1(S)                         K1(S)
++route   holds                       overlap       release    releases                           zones  locks out                     held by
++------  --------------------------  ------------  ---------  ---------------------------------  -----  ----------------------------  --------------------
++K1(M)   TB-AB, TC-AB                TD-AB, TE-AB  sectional  TB-AB, TC-AB, TD-AB, TE-AB                K1(S)
++K1(S)   TB-AB, TV-AB, TL-AB                       sectional  TB-AB, TV-AB, TL-AB                       K1(M), K2(M), K4(M), K8(M)    K2(M), K4(M), K8(M)
++K2(M)   TQ-BA, TP-BA, TN-BA, TM-BA  TL-BA         sectional  TQ-BA, TP-BA, TN-BA, TM-BA, TL-BA         K1(S), K20(S), K22(S), K8(M)  K1(S), K20(S)
++K20(S)  TM-AB, TU-AB                              sectional  TM-AB, TU-AB                       TU     K2(M), K22(S), K8(M)          K2(M), K22(S), K8(M)
++K22(S)  TM-BA                                     complete   TM-BA                                     K2(M), K20(S), K8(M)          K20(S)
++K3(MA)  TD-AB, TE-AB                TF-AB         sectional  TD-AB, TE-AB, TF-AB                       K3(MB)
++K3(MB)  TD-AB, TG-AB                TH-AB         sectional  TD-AB, TG-AB, TH-AB                       K3(MA)
++K4(M)   TL-BA, TK-BA                TJ-BA         sectional  TL-BA, TK-BA, TJ-BA                       K1(S)                         K1(S)
+ K5(M)   TF-AB                                     complete   TF-AB
+ K6(M)   TJ-BA                                     complete   TJ-BA
+ K7(M)   TH-AB                                     complete   TH-AB
+-K8(M)   TS-BA, TP-BA, TN-BA, TM-BA  TL-BA         sectional  TS-BA, TP-BA, TN-BA, TM-BA, TL-BA  K1(S), K2(M), K20(S), K22(S)  K1(S), K20(S)
++K8(M)   TS-BA, TP-BA, TN-BA, TM-BA  TL-BA         sectional  TS-BA, TP-BA, TN-BA, TM-BA, TL-BA         K1(S), K2(M), K20(S), K22(S)  K1(S), K20(S)
+diff --git a/tests/golden/kingsmoor-report.txt b/tests/golden/kingsmoor-report.txt
+index 62c6e4f..5c248ff 100644
+--- a/tests/golden/kingsmoor-report.txt
++++ b/tests/golden/kingsmoor-report.txt
+@@ -27,6 +27,12 @@ Protection
+     K3(MA) at P101
+     K3(MB) at P101
+ 
++Detection
++------------------------------------------------------------------------
++  19 track circuits, 1 axle counter sections
++  1 counting heads over 1 reset zones
++  counted: TU
++
+ Capacity
+ ------------------------------------------------------------------------
+   6 blocks, worst 108s at K2, 33.3 trains an hour
+diff --git a/tests/golden/kingsmoor.sbj b/tests/golden/kingsmoor.sbj
+index 4a73418..c839063 100644
+--- a/tests/golden/kingsmoor.sbj
++++ b/tests/golden/kingsmoor.sbj
+@@ -796,9 +796,13 @@
+       "edges": [
+         "BE"
+       ],
++      "heads": [
++        "P105.reverse"
++      ],
+       "kind": "axle_counter",
+       "length": 150.0,
+-      "name": "TU"
++      "name": "TU",
++      "zone": "TU"
+     },
+     {
+       "edges": [

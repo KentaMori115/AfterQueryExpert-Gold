@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/row-mutation"
+
+[metadata]
+task_id = "row-mutation"
+display_title = "<<EDIT-ME>> One-line title for this task"
+display_description = "<<EDIT-ME>> One or two sentences describing the change."
+category = "feature_request"
+language = "rust"
+repository_url = "platform://gold/repos/2Z9OHwYvfPnfAYyrEo0D"
+base_commit_hash = "928c0b74375a634051b81bae1e4032c9e4c86ac7"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-tanager-2z9ohw:v3"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

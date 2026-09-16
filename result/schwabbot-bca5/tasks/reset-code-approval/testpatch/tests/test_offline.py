@@ -1,0 +1,113 @@
+import os
+from unittest import mock
+
+from django.test import SimpleTestCase
+
+from Engine import offline
+
+
+class OfflineModeTests(SimpleTestCase):
+    def test_is_offline_defaults_to_true(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(offline.is_offline())
+
+    def test_is_offline_respects_zero_flag(self):
+        with mock.patch.dict(os.environ, {"SBOT_OFFLINE": "0"}, clear=True):
+            self.assertFalse(offline.is_offline())
+
+    def test_is_offline_treats_false_as_live(self):
+        with mock.patch.dict(os.environ, {"SBOT_OFFLINE": "false"}, clear=True):
+            self.assertFalse(offline.is_offline())
+
+
+class OfflineQuoteTests(SimpleTestCase):
+    def test_offline_quote_returns_vix_bid(self):
+        quote = offline.offline_quote("$VIX")
+        self.assertEqual(quote["bidPrice"], 18.10)
+
+    def test_offline_quote_falls_back_to_default(self):
+        quote = offline.offline_quote("UNKNOWN_SYMBOL")
+        self.assertEqual(quote["bidPrice"], 1.50)
+
+    def test_offline_quote_map_accepts_comma_separated_symbols(self):
+        rows = offline.offline_quote_map("$VIX,$XSP")
+        self.assertIn("$VIX", rows)
+        self.assertIn("$XSP", rows)
+
+    def test_offline_quote_map_synthesizes_option_symbols(self):
+        rows = offline.offline_quote_map(["XSP   260326C00600000"])
+        self.assertIn("XSP   260326C00600000", rows)
+
+
+class OfflineMarketDataTests(SimpleTestCase):
+    def test_offline_history_daily_returns_candles(self):
+        candles = offline.offline_history_candles("$XSP", "daily")
+        self.assertTrue(len(candles) > 0)
+        self.assertIn("close", candles[0])
+
+    def test_offline_history_minute_uses_index_fixture(self):
+        candles = offline.offline_history_candles("$XSP", "minute")
+        self.assertTrue(len(candles) > 0)
+
+    def test_offline_history_minute_uses_vix_fixture(self):
+        candles = offline.offline_history_candles("$VIX", "minute")
+        self.assertTrue(len(candles) > 0)
+
+    def test_offline_option_chain_call(self):
+        chain = offline.offline_option_chain("$XSP", "CALL")
+        self.assertIn("callExpDateMap", chain)
+
+    def test_offline_option_chain_put(self):
+        chain = offline.offline_option_chain("$XSP", "PUT")
+        self.assertIn("putExpDateMap", chain)
+
+    def test_offline_account_balance(self):
+        self.assertEqual(offline.offline_account_balance(), 25000.0)
+
+    def test_offline_account_details(self):
+        accounts = offline.offline_account_details()
+        self.assertTrue(len(accounts) > 0)
+
+
+class OfflineOAuthTests(SimpleTestCase):
+    def test_offline_access_token_requires_refresh(self):
+        self.assertIsNone(offline.offline_access_token(None))
+
+    def test_offline_access_token_returns_token(self):
+        self.assertEqual(
+            offline.offline_access_token("refresh"),
+            "offline-access-token",
+        )
+
+    def test_offline_oauth_tokens(self):
+        tokens = offline.offline_oauth_tokens()
+        self.assertEqual(tokens["access_token"], "offline-access-token")
+        self.assertEqual(tokens["refresh_token"], "offline-refresh-token")
+
+
+class OfflinePaperOrderTests(SimpleTestCase):
+    def setUp(self):
+        offline._PAPER_ORDERS.clear()
+
+    def test_record_paper_order_assigns_offline_id(self):
+        order_id = offline.record_paper_order({"qty": 1}, "alice")
+        self.assertTrue(order_id.startswith("OFFLINE-"))
+
+    def test_paper_order_status_for_known_order(self):
+        order_id = offline.record_paper_order({"qty": 1}, "alice")
+        status, description = offline.paper_order_status(order_id)
+        self.assertEqual(status, "FILLED")
+        self.assertEqual(description, "offline fill")
+
+    def test_cancel_paper_order_updates_status(self):
+        order_id = offline.record_paper_order({"qty": 1}, "alice")
+        self.assertTrue(offline.cancel_paper_order(order_id))
+        status, description = offline.paper_order_status(order_id)
+        self.assertEqual(status, "CANCELED")
+        self.assertEqual(description, "offline cancel")
+
+    def test_paper_order_summaries_prefers_recorded_orders(self):
+        offline.record_paper_order({"qty": 2}, "bob")
+        summaries = offline.paper_order_summaries("bob")
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0]["status"], "FILLED")

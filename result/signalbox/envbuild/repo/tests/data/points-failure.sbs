@@ -1,0 +1,17 @@
+# The points fail under a set route, the signaller takes the route away with an
+# emergency release, and the train ends up standing at the signal.
+
+scenario "points fail under the route" {
+    step 2
+    until 600
+}
+
+at 0   train 1A05 on D1 at 60 length 80 speed 20
+at 4   set "K1(M)"
+at 10  fail P103
+at 30  release "K1(M)"
+
+expect signal K1 shows R
+expect points P103 status failed
+expect route "K1(M)" is available
+expect train 1A05 on D1

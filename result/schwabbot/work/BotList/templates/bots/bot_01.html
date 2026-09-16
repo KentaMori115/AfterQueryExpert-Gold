@@ -1,0 +1,125 @@
+{% extends 'bot_base.html' %}
+{% load static %}
+
+{% block content %}
+    <style>
+        .form-container {
+            max-width: 600px; /* Limit the maximum width of the form */
+            width: 100%; /* Ensure it takes up full width on smaller devices */
+        }
+    </style>
+    <div>
+        <div class="px-3">
+            <a class="text-start" href="{% url 'bots'%}">Return Bot Selection</a>
+        </div>
+        <h1 class="text-center">Run {{bot.botname}}</h1>
+        <div>
+            <p class="text-center"> Bot1: {{bot.description}}</p>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-center align-items-center vh-20">
+        <form class="border p-4 bg-light rounded form-container">
+            <div class="mb-3">
+                <label>Symbol Selection:</label>
+                <select class="form-control" id="select_symbol" value = {{sel_symbol}}  {% if bot_status == "Running..." %} disabled  {% endif %}>
+                    {% for symbol in valid_symbols %}
+                    <option value="{{symbol}}" {% if sel_symbol == symbol %} selected {% endif %}>{{symbol}}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+
+
+
+            <div class="mb-3">
+                <label for = "select_contract_type" class="col-form-label">Contract Type:</label>
+                <select class="form-control" id="select_contract_type" value = {{contract_type}}  
+                    onchange = "onContractTypeChange()"
+                    {% if bot_status == "Running..." %} disabled  {% endif %} >
+                    <option value="Fixed" {% if contract_type == 'Fixed' %} selected {% endif %}>Fixed</option>
+                    <option value="ByAccountBalance" {% if contract_type == 'ByAccountBalance' %} selected {% endif %}>By Account Balance</option>
+                </select>
+            </div>
+
+
+            <div class="mb-3" id = "div_fixed_lots" {% if contract_type == 'ByAccountBalance' %} hidden {% endif %} >
+                <label for = "input_fixed_lots" class="col-form-label">Fixed Lots:</label>
+                <input class="form-control" type="number" id="input_fixed_lots" value = {{fixed_lots}} name="input_fixed_lots" {% if bot_status == "Running..." %} disabled  {% endif %}>
+            </div>
+
+            <div class="mb-3" id = "div_risk_percentage" {% if contract_type == 'Fixed' %} hidden {% endif %}>
+                <label for = "input_risk_percentage" class="col-form-label">Risk Percentage:</label>
+                <input class="form-control" type="number" id="input_risk_percentage" value = {{risk_percentage}} name="input_risk_percentage" {% if bot_status == "Running..." %} disabled  {% endif %}>
+            </div>
+
+
+            <div class="mb-3">
+                <label for = "select_strategy_type" class="col-form-label">Strategy Type:</label>
+                <select class="form-control" id="select_strategy_type" value = {{strategy_type}}
+                        {% if bot_status == "Running..." %} disabled  {% endif %}>
+                    <option value="Terrance Trade" {% if strategy_type == 'Terrance Trade' %} selected {% endif %}>Terrance Trade</option>
+                    <option value="Iron Fly" {% if strategy_type == 'Iron Fly' %} selected {% endif %}>Iron Fly</option>
+                    <option value="Terrance Trade/Iron Fly Combo" {% if strategy_type == 'Terrance Trade/Iron Fly Combo' %} selected {% endif %}>Terrance Trade/Iron Fly Combo</option>
+                </select>
+            </div>
+
+
+            <br>
+            {% if expire_sec > 0 %}
+                <label id ="lblAuthStatus" style="color:green">Auth Status: Expire at <span style="color:blue">EST {{expire_est_formated}}</span> on the account <span style="color:blue">{{account_number}}</span></label>
+            {% else %}
+                <label id ="lblAuthStatus" style="color:red">Auth Status: Auth is not performed or Expired</label>
+            {% endif %}
+            <br>
+            <br>
+            <label id ="lblBotStatus" {% if bot_status == "Running..." %} style="color:green" {% else %} style="color:red" {% endif %}>Bot Status: {{bot_status}} {{sel_symbol}} {{contract_size}} contracts</label>
+            <div class="row mb-3">
+                <div class="col-sm-6">
+                    <input class="form-control" type="button" id="btnRunBot" onclick="onRunBotBtnClick('{{bot.id}}')" value = "Run Bot" {% if bot_status == "Running..." %} disabled {% endif %}/>
+                </div>
+                <div class="col-sm-6">
+                    <input class="form-control" type="button" id="btnStopBot" onclick="onStopBotBtnClick('{{bot.id}}')" value = "Stop Bot" {% if bot_status == "Stopped" %} disabled {% endif %}/>
+                </div>
+            </div>
+            
+        </form> 
+    </div>
+
+
+    <!--div class="d-flex justify-content-center align-items-center vh-20">
+        <form class="border p-4 bg-light rounded form-container">
+            <h2 class="text-center">
+                Test Form
+            </h2>
+            <div class="row- mb-3">
+                <div class="col-sm-6">
+                    <label for = "txtQuoteCallSymbol" class="col-form-label">Quote Call Symbol:</label>
+                    <input class="form-control" type="text" id = "txtQuoteCallSymbol" title="Quote Call Symbol"/>
+                </div>
+                <div class="col-sm-6">
+                    <label for = "txtQuotePutSymbol" class="col-form-label">Quote Put Symbol:</label>
+                    <input class="form-control" type="text" id = "txtQuotePutSymbol" title="Quote Put Symbol"/>
+                </div>
+
+            </div>
+            <div class="row mb-3">
+                <div class="col-sm-4">
+                    <input class="form-control" type="button" id="btnTestGetServerSignal" onclick="funcGetInstrus()" value = "Get Symbols"/>
+                </div>
+                <div class="col-sm-4">
+                    <input class="form-control" type="button" id="btnTestRunBot" onclick="funcSimQuote()" value = "Simulate Quoting"/>
+                </div>
+                <div class="col-sm-4">
+                    <input class="form-control" type="button" id="btnWebSocketSend" onclick="funcSendWebsocketSignal()" value = "Test WebSocketSend"/>
+                </div>
+            </div>
+        </form> 
+    </div-->
+{% endblock %}
+
+{% block script %} 
+    {{ block.super }}
+    <script src="{% static 'js/config_3.13.js' %}"></script>
+    <script src="{% static 'js/bot_3.13.js' %}"></script>
+{% endblock %}

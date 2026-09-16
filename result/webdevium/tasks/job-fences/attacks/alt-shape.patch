@@ -1,0 +1,194 @@
+diff --git a/lib/ops/jobs/queue.ts b/lib/ops/jobs/queue.ts
+index 0cabb88..2a9a7dc 100644
+--- a/lib/ops/jobs/queue.ts
++++ b/lib/ops/jobs/queue.ts
+@@ -14,6 +14,13 @@ export type QueuedJob = {
+   availableAt: number
+   leaseUntil: number | null
+   idempotencyKey?: string
++  dependsOn?: string[]
++}
++
++export type FencePlan = {
++  ready: string[]
++  waiting: { id: string; blockedBy: string[]; wave: number }[]
++  dead: { id: string; reason: string }[]
+ }
+ 
+ export type Lease = {
+@@ -39,7 +46,48 @@ export function createJobQueue(clock: Clock, options: QueueOptions) {
+   const leased = new Map<string, QueuedJob>()
+   const idempotent = new Map<string, string>()
+   const dead: DeadLetter[] = []
++  const needs = new Map<string, string[]>()
++  const finished = new Map<string, 'done' | 'dead'>()
++  const held: string[] = []
++  const order = new Map<string, number>()
+   let sequence = 0
++  let counter = 0
++
++  const stillNeeded = (id: string) =>
++    (needs.get(id) ?? []).filter((fence) => finished.get(fence) !== 'done')
++
++  const firstDeadFence = (id: string) =>
++    (needs.get(id) ?? []).find((fence) => finished.get(fence) === 'dead') ?? null
++
++  const forget = (id: string) => {
++    const at = held.indexOf(id)
++    if (at !== -1) held.splice(at, 1)
++  }
++
++  const scrap = (job: QueuedJob, reason: string) => {
++    byId.delete(job.id)
++    leased.delete(job.id)
++    forget(job.id)
++    job.leaseUntil = null
++    finished.set(job.id, 'dead')
++    dead.push({ job, reason })
++  }
++
++  const sweep = (rootId: string) => {
++    const queueOfIds = [rootId]
++    const seen = new Set<string>([rootId])
++    while (queueOfIds.length > 0) {
++      const current = queueOfIds.shift()!
++      for (const candidate of [...held]) {
++        if (seen.has(candidate)) continue
++        if (!(needs.get(candidate) ?? []).includes(current)) continue
++        seen.add(candidate)
++        const job = byId.get(candidate)
++        if (job) scrap(job, `blocked by ${rootId}`)
++        queueOfIds.push(candidate)
++      }
++    }
++  }
+ 
+   const recoverExpired = (now: number) => {
+     for (const job of [...leased.values()]) {
+@@ -71,6 +119,7 @@ export function createJobQueue(clock: Clock, options: QueueOptions) {
+       priority?: number
+       maxAttempts?: number
+       idempotencyKey?: string
++      dependsOn?: string[]
+     }) {
+       if (input.idempotencyKey && idempotent.has(input.idempotencyKey)) {
+         const existingId = idempotent.get(input.idempotencyKey)!
+@@ -79,6 +128,11 @@ export function createJobQueue(clock: Clock, options: QueueOptions) {
+       if (byId.has(input.id)) {
+         throw new Error(`Job ${input.id} already exists`)
+       }
++      for (const fence of input.dependsOn ?? []) {
++        if (!byId.has(fence) && !finished.has(fence)) {
++          throw new Error(`Job ${input.id} cannot wait on unknown job ${fence}`)
++        }
++      }
+       const job: QueuedJob = {
+         id: input.id,
+         name: input.name,
+@@ -90,10 +144,24 @@ export function createJobQueue(clock: Clock, options: QueueOptions) {
+         leaseUntil: null,
+         idempotencyKey: input.idempotencyKey,
+       }
+-      byId.set(job.id, job)
++      if ((input.dependsOn ?? []).length > 0) {
++        job.dependsOn = [...(input.dependsOn ?? [])]
++        needs.set(job.id, [...(input.dependsOn ?? [])])
++      }
++      order.set(job.id, counter++)
+       if (job.idempotencyKey) {
+         idempotent.set(job.idempotencyKey, job.id)
+       }
++      const doomed = firstDeadFence(job.id)
++      if (doomed) {
++        scrap(job, `blocked by ${doomed}`)
++        return { id: job.id, reused: false }
++      }
++      byId.set(job.id, job)
++      if (stillNeeded(job.id).length > 0) {
++        held.push(job.id)
++        return { id: job.id, reused: false }
++      }
+       reheap(job)
+       return { id: job.id, reused: false }
+     },
+@@ -118,7 +186,18 @@ export function createJobQueue(clock: Clock, options: QueueOptions) {
+       if (!job) throw new Error(`Unknown job ${id}`)
+       byId.delete(id)
+       leased.delete(id)
++      forget(id)
+       job.leaseUntil = null
++      finished.set(id, 'done')
++      const moment = clock.now()
++      for (const candidate of [...held]) {
++        if (stillNeeded(candidate).length > 0) continue
++        const waiter = byId.get(candidate)
++        forget(candidate)
++        if (!waiter) continue
++        waiter.availableAt = moment
++        reheap(waiter)
++      }
+     },
+     fail(id: string, reason: string) {
+       const job = byId.get(id)
+@@ -126,13 +205,13 @@ export function createJobQueue(clock: Clock, options: QueueOptions) {
+       leased.delete(id)
+       job.leaseUntil = null
+       if (job.attempts >= job.maxAttempts) {
+-        byId.delete(id)
+-        dead.push({ job, reason })
++        scrap(job, reason)
++        sweep(id)
+         return { deadLettered: true }
+       }
+       const wait = delayForAttempt(job.attempts, options.backoff, hash(id))
+       job.availableAt = clock.now() + wait
+-      reheap(job)
++      if (!held.includes(id)) reheap(job)
+       return { deadLettered: false, retryAt: job.availableAt }
+     },
+     heartbeat(id: string) {
+@@ -143,6 +222,44 @@ export function createJobQueue(clock: Clock, options: QueueOptions) {
+       job.leaseUntil = clock.now() + options.visibilityMs
+       return job.leaseUntil
+     },
++    fencePlan(): FencePlan {
++      const now = clock.now()
++      recoverExpired(now)
++
++      const ranked = [...heap].sort((a, b) => a.rank - b.rank || a.tie - b.tie)
++      const ready: string[] = []
++      for (const item of ranked) {
++        if (item.value.availableAt > now) break
++        ready.push(item.value.id)
++      }
++
++      const waves = new Map<string, number>()
++      let round = 1
++      while (waves.size < held.length && round < held.length + 2) {
++        for (const candidate of held) {
++          if (waves.has(candidate)) continue
++          const ahead = stillNeeded(candidate).filter((fence) => held.includes(fence))
++          if (ahead.every((fence) => (waves.get(fence) ?? Infinity) < round)) {
++            waves.set(candidate, round)
++          }
++        }
++        round += 1
++      }
++
++      const waiting = held
++        .map((id) => ({
++          id,
++          blockedBy: stillNeeded(id),
++          wave: waves.get(id) ?? 1,
++        }))
++        .sort((a, b) => a.wave - b.wave || (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
++
++      return {
++        ready,
++        waiting,
++        dead: dead.map((entry) => ({ id: entry.job.id, reason: entry.reason })),
++      }
++    },
+     deadLetters() {
+       return [...dead]
+     },

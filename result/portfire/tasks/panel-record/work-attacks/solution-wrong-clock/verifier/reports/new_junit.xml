@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="73" failures="6" errors="0" time="1.199">
+    <testsuite name="tests/cli/morningAfter.test.ts" timestamp="2026-09-03T18:18:42.096Z" hostname="8e46cd9dc707" tests="26" failures="4" errors="0" skipped="0" time="0.058008195">
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; passes a log that matches the table on the panel&apos;s clock" time="0.022668635">
+            <failure message="expected &apos;warning PF3412: 01.01 shell.150 close…&apos; to be &apos;&apos; // Object.is equality" type="AssertionError">
+AssertionError: expected &apos;warning PF3412: 01.01 shell.150 close…&apos; to be &apos;&apos; // Object.is equality
+
+- Expected
++ Received
+
++ warning PF3412: 01.01 shell.150 closed +4070ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 01.02 mine.100 closed +4060ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 02.01 gerb.silver closed +4060ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
+
+ ❯ tests/cli/morningAfter.test.ts:84:24
+            </failure>
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; fails a log written in show time, since the pre roll was never taken off" time="0.001806658">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; fails on an output the panel never closed" time="0.00105685">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; fails on an output the table has nothing on" time="0.002666205">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; fails on a second row for a pin that already fired" time="0.001185123">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; only warns about a late output and still passes" time="0.001275384">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; lets one frame pass without a word" time="0.001497874">
+            <failure message="expected &apos;warning PF3412: 01.01 shell.150 close…&apos; to be &apos;&apos; // Object.is equality" type="AssertionError">
+AssertionError: expected &apos;warning PF3412: 01.01 shell.150 close…&apos; to be &apos;&apos; // Object.is equality
+
+- Expected
++ Received
+
++ warning PF3412: 01.01 shell.150 closed +4070ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 01.02 mine.100 closed +4020ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 02.01 gerb.silver closed +4100ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
+
+ ❯ tests/cli/morningAfter.test.ts:164:24
+            </failure>
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; takes a tolerance in milliseconds" time="0.002053195">
+            <failure message="expected &apos;warning PF3412: 01.01 shell.150 close…&apos; to be &apos;&apos; // Object.is equality" type="AssertionError">
+AssertionError: expected &apos;warning PF3412: 01.01 shell.150 close…&apos; to be &apos;&apos; // Object.is equality
+
+- Expected
++ Received
+
++ warning PF3412: 01.01 shell.150 closed +4070ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 01.02 mine.100 closed +4260ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 02.01 gerb.silver closed +4060ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
+
+ ❯ tests/cli/morningAfter.test.ts:174:26
+            </failure>
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; refuses a tolerance that is not a number" time="0.000898771">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; reports a log it cannot read" time="0.000326999">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; stops on a log with no usable columns" time="0.00083521">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; skips a row that will not read and grades the rest" time="0.004681619">
+            <failure message="expected &apos;error PF1421: dryrun.csv line 4 has n…&apos; not to contain &apos;warning&apos;" type="AssertionError">
+AssertionError: expected &apos;error PF1421: dryrun.csv line 4 has n…&apos; not to contain &apos;warning&apos;
+
+- Expected
++ Received
+
+- warning
++ error PF1421: dryrun.csv line 4 has no readable pin address
++
++ warning PF3412: 01.01 shell.150 closed +4070ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 01.02 mine.100 closed +4060ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
++
++ warning PF3412: 02.01 gerb.silver closed +4060ms from its time
++ help: a late output on a busy module is usually the module past its simultaneous limit
+
+ ❯ tests/cli/morningAfter.test.ts:212:28
+            </failure>
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; writes the grade to a file on request" time="0.000767442">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="rehearse --log &gt; refuses to grade a show that does not compile" time="0.000632716">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; passes a walk on which every match burnt" time="0.005828349">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; works without the first walk" time="0.000594825">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; fails when a show pin still reads connected" time="0.001034006">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; fails when a show pin was never walked" time="0.000642165">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; fails on a dead cue found with both walks, as an error" time="0.001339064">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; fails on a burnt stray found with both walks" time="0.000549199">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; does not call that stray burnt without the first walk" time="0.00049097">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; plans a refire only onto a pin the after walk read open" time="0.00124202">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; plans no refire onto a pin nobody walked" time="0.000582392">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; reports an after walk it cannot read" time="0.000196952">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; stops on an after walk that will not parse" time="0.000466102">
+        </testcase>
+        <testcase classname="tests/cli/morningAfter.test.ts" name="continuity --after &gt; refuses to read a walk against a show that does not compile" time="0.000321749">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/timeline/panelClock.test.ts" timestamp="2026-09-03T18:18:42.111Z" hostname="8e46cd9dc707" tests="47" failures="2" errors="0" skipped="0" time="0.066521175">
+        <testcase classname="tests/timeline/panelClock.test.ts" name="parsePanelLog &gt; reads a pin column and a time column written like cue times" time="0.007698387">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="parsePanelLog &gt; takes every spelling of the pin column" time="0.002334157">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="parsePanelLog &gt; takes every spelling of the time column" time="0.001034588">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="parsePanelLog &gt; refuses a file without both columns" time="0.000516728">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="parsePanelLog &gt; reports a row that will not read and keeps reading" time="0.000737484">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog on the panel&apos;s clock &gt; takes the pre roll off a log time before comparing" time="0.014878994">
+            <failure message="expected 4070 to be 10 // Object.is equality" type="AssertionError">
+AssertionError: expected 4070 to be 10 // Object.is equality
+
+- Expected
++ Received
+
+- 10
++ 4070
+
+ ❯ tests/timeline/panelClock.test.ts:189:41
+            </failure>
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog on the panel&apos;s clock &gt; reads a log written in show time as early by the whole pre roll" time="0.00405349">
+            <failure message="expected [] to have a length of 3 but got +0" type="AssertionError">
+AssertionError: expected [] to have a length of 3 but got +0
+
+- Expected
++ Received
+
+- 3
++ 0
+
+ ❯ tests/timeline/panelClock.test.ts:201:25
+            </failure>
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog on the panel&apos;s clock &gt; has nothing to take off once the pre roll is absorbed" time="0.001348111">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog on the panel&apos;s clock &gt; carries the event and the row on each match" time="0.000776791">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog matching &gt; lists a show pin the log never mentions as missed, in table order" time="0.000950177">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog matching &gt; keeps fired in the table&apos;s firing order whatever the log&apos;s order" time="0.001639982">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog matching &gt; calls a row for a pin the show never fires extra whatever its time" time="0.000997538">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog matching &gt; takes the earliest logged time as the firing and the rest as extra" time="0.000827656">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog matching &gt; grades an empty log as every pin missed" time="0.000568915">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog tolerance &gt; allows one frame of the show&apos;s format either way" time="0.001655603">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog tolerance &gt; follows the frame rate the script names" time="0.000765278">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog tolerance &gt; takes a tolerance of its own" time="0.001094631">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="gradeLog tolerance &gt; names the match furthest from its time, either way" time="0.0008717">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkLog &gt; says nothing about a log that matches the table" time="0.002120833">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkLog &gt; makes a missed output an error" time="0.000516267">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkLog &gt; makes an extra output an error" time="0.000410327">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkLog &gt; makes a late or an early output a warning, not an error" time="0.001296032">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; calls a show pin that reads open fired" time="0.001418124">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; calls a show pin still connected a misfire" time="0.000252509">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; calls it dead instead when the first walk already read it open" time="0.000497059">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; does not call anything dead without the first walk" time="0.00028054">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; treats a pin the first walk skipped as a misfire, not dead" time="0.002923511">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; calls a show pin the after walk never reported unknown" time="0.000341907">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; lists a show pin reading short" time="0.000990615">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; calls a pin outside the show burnt when it went from connected to open" time="0.001037013">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; does not call an outside pin burnt when it read open both times" time="0.000229294">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; cannot call anything burnt without the first walk" time="0.00017391">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="reconcileAfter &gt; sorts every list by pin" time="0.000473296">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="unfiredPins &gt; is everything but fired, by pin" time="0.000324464">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkAfterWalk &gt; says nothing when everything fired" time="0.000242208">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkAfterWalk &gt; makes a dead cue an error" time="0.000286522">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkAfterWalk &gt; makes a burnt stray an error" time="0.000463357">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="checkAfterWalk &gt; makes a pin nobody walked a warning" time="0.001353351">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="clearancePlan &gt; counts every position&apos;s wait from the show&apos;s last light out" time="0.000977559">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="clearancePlan &gt; does not count from the position&apos;s own last cue" time="0.000217132">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="clearancePlan &gt; takes the longest wait among a position&apos;s own unfired cues" time="0.001084502">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="clearancePlan &gt; has no positions and a zero field time when nothing misfired" time="0.000170172">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="planRefires with usable pins &gt; skips a free pin the caller says is not usable" time="0.000971257">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="planRefires with usable pins &gt; does not hand two refires one usable pin" time="0.000647736">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="planRefires with usable pins &gt; never uses a pin the show itself fires, even when called usable" time="0.0003218">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="planRefires with usable pins &gt; says so when nothing usable is left" time="0.000395168">
+        </testcase>
+        <testcase classname="tests/timeline/panelClock.test.ts" name="planRefires with usable pins &gt; still makes a shell safe rather than refiring it" time="0.000213435">
+        </testcase>
+    </testsuite>
+</testsuites>

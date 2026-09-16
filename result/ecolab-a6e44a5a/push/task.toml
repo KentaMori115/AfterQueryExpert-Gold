@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/event-effects"
+
+[metadata]
+task_id = "event-effects"
+display_title = "Apply an authored disturbance the way the capsule wrote it"
+display_description = "BiomeWeaver decodes four fields on every event effect and a tick reads two of them, then puts one quantity onto every region's pool and reports a number the run never made. Give effects a region and a window, split a quantity over the pools that hold the resource, publish a flow per pool that moved, and let a modifier effect scale renewal while it runs."
+category = "bugfix"
+language = "typescript"
+repository_url = "platform://gold/repos/PENDING_REPO_ID"
+base_commit_hash = "PENDING_BASE_COMMIT"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "PENDING_IMAGE"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

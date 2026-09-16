@@ -1,0 +1,27 @@
+== honest rows ==
+  base: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+  solution: f2p 59/59 pass, p2p 113/113 pass, 172/172 ids present, reward 1
+  uid1000: f2p 59/59 pass, p2p 113/113 pass, 172/172 ids present, reward 1
+== a submission that edits or adds tests ==
+  p2p-edit-restored: f2p 59/59 pass, p2p 113/113 pass, 172/172 ids present, reward 1
+    caught by: restored 46 frozen files
+  example-edit-restored: f2p 59/59 pass, p2p 113/113 pass, 172/172 ids present, reward 1
+  agent-added-tests: f2p 59/59 pass, p2p 113/113 pass, 172/172 ids present, reward 1
+== attacks on the base tree ==
+  gutted-p2p: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+  held-out-edited: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+  pytest-shadow: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+    caught by: removed foreign import hook: pytest.py
+  sitecustomize: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+    caught by: removed foreign import hook
+  runner-monkeypatch: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+  atexit-rewrite: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+  lingering-forger: f2p 0/59 pass, p2p 112/113 pass, 172/172 ids present, reward 0
+    caught by: sweep: ended straggler
+  early-exit-forge: f2p 0/59 pass, p2p 0/113 pass, 172/172 ids present, reward 0
+    caught by: ended before its report was signed
+  stdlib-shadow: f2p 0/59 pass, p2p 113/113 pass, 172/172 ids present, reward 0
+    caught by: removed shadowing module: json.py
+
+MATRIX: PASS
+exit=0

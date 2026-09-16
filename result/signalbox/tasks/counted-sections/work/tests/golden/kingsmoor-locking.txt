@@ -1,0 +1,14 @@
+route   holds                       overlap       release    releases                           zones  locks out                     held by
+------  --------------------------  ------------  ---------  ---------------------------------  -----  ----------------------------  --------------------
+K1(M)   TB-AB, TC-AB                TD-AB, TE-AB  sectional  TB-AB, TC-AB, TD-AB, TE-AB                K1(S)
+K1(S)   TB-AB, TV-AB, TL-AB                       sectional  TB-AB, TV-AB, TL-AB                       K1(M), K2(M), K4(M), K8(M)    K2(M), K4(M), K8(M)
+K2(M)   TQ-BA, TP-BA, TN-BA, TM-BA  TL-BA         sectional  TQ-BA, TP-BA, TN-BA, TM-BA, TL-BA         K1(S), K20(S), K22(S), K8(M)  K1(S), K20(S)
+K20(S)  TM-AB, TU-AB                              sectional  TM-AB, TU-AB                       TU     K2(M), K22(S), K8(M)          K2(M), K22(S), K8(M)
+K22(S)  TM-BA                                     complete   TM-BA                                     K2(M), K20(S), K8(M)          K20(S)
+K3(MA)  TD-AB, TE-AB                TF-AB         sectional  TD-AB, TE-AB, TF-AB                       K3(MB)
+K3(MB)  TD-AB, TG-AB                TH-AB         sectional  TD-AB, TG-AB, TH-AB                       K3(MA)
+K4(M)   TL-BA, TK-BA                TJ-BA         sectional  TL-BA, TK-BA, TJ-BA                       K1(S)                         K1(S)
+K5(M)   TF-AB                                     complete   TF-AB
+K6(M)   TJ-BA                                     complete   TJ-BA
+K7(M)   TH-AB                                     complete   TH-AB
+K8(M)   TS-BA, TP-BA, TN-BA, TM-BA  TL-BA         sectional  TS-BA, TP-BA, TN-BA, TM-BA, TL-BA         K1(S), K2(M), K20(S), K22(S)  K1(S), K20(S)

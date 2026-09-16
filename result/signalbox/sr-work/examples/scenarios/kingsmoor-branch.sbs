@@ -1,0 +1,17 @@
+# A down train off the main line onto the Ashcombe branch, with the points
+# failing under it once it has passed and being put right again.
+
+scenario "down train to the branch, points fail behind it" {
+    step 2
+    until 600
+}
+
+at 0   train 1A05 on D1 at 60 length 80 speed 25
+at 0   book 1A05 stopper "K1(M)" "K3(MB)" "K7(M)"
+
+at 240 fail P103
+at 320 restore P103
+
+expect train 1A05 gone
+expect points P103 status detected
+expect section TA clear

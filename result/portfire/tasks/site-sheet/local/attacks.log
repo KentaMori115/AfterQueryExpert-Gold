@@ -1,0 +1,182 @@
+built chai-tamper: 1 file(s)
+built fake-heldout: 3 file(s)
+built config-and-setup: 3 file(s)
+built node-modules: 1 file(s)
+built npmrc: 2 file(s)
+built report-rewrite: 1 file(s)
+built forge-and-rewrite: 1 file(s)
+built solution-edits-base-test: 17 file(s)
+local base commit in the image: 745caf706f2e90b508a6928da41ed9709fe53996
+
+=== building the verifier image
+
+=== oracle run (reference solution applied)
+oracle                       reward.json = {"reward": 1, "f2p_total": 52, "f2p_passed": 52, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== nop run (base state, nothing applied)
+nop                          reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9760147601476015}
+
+=== chai-tamper run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/chai-tamper.patch)
+chai-tamper                  reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 13, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.25, "p2p": 1.0, "partial": 0.9820110701107011}
+
+=== fake-heldout run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/fake-heldout.patch)
+fake-heldout                 reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9760147601476015}
+
+=== config-and-setup run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/config-and-setup.patch)
+config-and-setup             reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== node-modules run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/node-modules.patch)
+node-modules                 reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0, "apply_failed": 1}
+
+=== npmrc run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/npmrc.patch)
+npmrc                        reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== report-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/report-rewrite.patch)
+report-rewrite               reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9760147601476015}
+
+=== forge-and-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/forge-and-rewrite.patch)
+forge-and-rewrite            reward.json = {"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== solution-edits-base-test run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/attacks/solution-edits-base-test.patch)
+solution-edits-base-test     reward.json = {"reward": 1, "f2p_total": 52, "f2p_passed": 52, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== summary
+--- oracle
+[verifier] vitest child runs as uid 65534 gid 65534
+[publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed), child rc 0
+[publish] wrote /verify/reports/new.xml: 52 cases (0 declared ids added as failed), child rc 0
+P2P 2116/2116 pass 0 fail; F2P 52/52 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- nop
+[verifier] vitest child runs as uid 65534 gid 65534
+[publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed), child rc 0
+[publish] wrote /verify/reports/new.xml: 52 cases (0 declared ids added as failed), child rc 1
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes a show that stays inside the sheet
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails fallout over the sheet's hard boundary
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > refuses a sheet beside an audience distance, and takes either alone
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet it cannot read
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet that will not parse and does not pass the show
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > carries fallout downwind of where the wind comes from
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > leaves a hedge across the wind alone
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails a house whose limit the show passes
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes the same show at a house with a higher limit
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > draws the boundaries and the houses on the plan
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > names the sheet's site on the permit
+--- chai-tamper
+[verifier] vitest child runs as uid 65534 gid 65534
+[publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed), child rc 0
+[publish] wrote /verify/reports/new.xml: 52 cases (0 declared ids added as failed), child rc 1
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes a show that stays inside the sheet
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet that will not parse and does not pass the show
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > draws the boundaries and the houses on the plan
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > puts the sheet's permit into the pack
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.crowd with a sheet > reads the frontage off the audience line
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > reads every statement of a full sheet without complaint
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > keeps hard and soft boundaries apart and in sheet order
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > gives a house its own limit and the sheet's limit to one without
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > applies the sheet limit whichever line comes first
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > leaves a house unlimited when no line says otherwise
+[verifier] ✗ [f2p] tests/safety/siteSheet.test.ts.a site sheet > gets by without a site line or any boundary
+--- fake-heldout
+[verifier] vitest child runs as uid 65534 gid 65534
+[publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed), child rc 0
+[publish] wrote /verify/reports/new.xml: 52 cases (0 declared ids added as failed), child rc 1
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes a show that stays inside the sheet
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails fallout over the sheet's hard boundary
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > refuses a sheet beside an audience distance, and takes either alone
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet it cannot read
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet that will not parse and does not pass the show
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > carries fallout downwind of where the wind comes from
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > leaves a hedge across the wind alone
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails a house whose limit the show passes
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes the same show at a house with a higher limit
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > draws the boundaries and the houses on the plan
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > names the sheet's site on the permit
+--- config-and-setup
+[verifier] vitest child runs as uid 65534 gid 65534
+[verifier] ERROR: model.patch touches tests/setup.ts; every declared id will report failed
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > carries on past an unresolved name
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > still runs the load check on what did resolve
+[verifier] ✗ [p2p] tests/compile.test.ts.pre roll > reports the pre roll a big opener needs
+--- node-modules
+[verifier] ERROR: submitted model.patch failed to apply
+--- npmrc
+[verifier] vitest child runs as uid 65534 gid 65534
+[verifier] ERROR: model.patch touches .npmrc; every declared id will report failed
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > carries on past an unresolved name
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > still runs the load check on what did resolve
+[verifier] ✗ [p2p] tests/compile.test.ts.pre roll > reports the pre roll a big opener needs
+--- report-rewrite
+[verifier] vitest child runs as uid 65534 gid 65534
+[publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed), child rc 0
+[publish] wrote /verify/reports/new.xml: 52 cases (0 declared ids added as failed), child rc 1
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes a show that stays inside the sheet
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails fallout over the sheet's hard boundary
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > refuses a sheet beside an audience distance, and takes either alone
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet it cannot read
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > reports a sheet that will not parse and does not pass the show
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > carries fallout downwind of where the wind comes from
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > leaves a hedge across the wind alone
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > fails a house whose limit the show passes
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.check with a site sheet > passes the same show at a house with a higher limit
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > draws the boundaries and the houses on the plan
+[verifier] ✗ [f2p] tests/cli/siteFlags.test.ts.the other show commands with a sheet > names the sheet's site on the permit
+--- forge-and-rewrite
+[verifier] vitest child runs as uid 65534 gid 65534
+[publish] verdict stream refused (valid=True ended=False declared=-1 heard=0); publishing every declared id as failed
+[publish] wrote /verify/reports/base.xml: 2116 cases (2116 declared ids added as failed), child rc 1
+[publish] verdict stream refused (valid=True ended=False declared=-1 heard=0); publishing every declared id as failed
+[publish] wrote /verify/reports/new.xml: 52 cases (52 declared ids added as failed), child rc 1
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+--- solution-edits-base-test
+[verifier] vitest child runs as uid 65534 gid 65534
+[publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed), child rc 0
+[publish] wrote /verify/reports/new.xml: 52 cases (0 declared ids added as failed), child rc 0
+P2P 2116/2116 pass 0 fail; F2P 52/52 pass 0 fail; PARTIAL 1.0; BINARY 1
+
+logs kept under /root/mindriftwork/AQ_dragan/result/portfire/tasks/site-sheet/local/work/
+
+=== why each attack scored what it did
+--- chai-tamper
+      1 P2P 2116/2116 pass 0 fail; F2P 13/52 pass 39 fail; PARTIAL 0.9820110701107011; BINARY 0
+--- fake-heldout
+      1 P2P 2116/2116 pass 0 fail; F2P 0/52 pass 52 fail; PARTIAL 0.9760147601476015; BINARY 0
+--- config-and-setup
+      1 [verifier] ERROR: model.patch touches tests/setup.ts; every declared id will report failed
+      1 P2P 0/2116 pass 2116 fail; F2P 0/52 pass 52 fail; PARTIAL 0.0; BINARY 0
+--- node-modules
+      1 [grade] model.patch failed to apply; reward.json={"reward": 0, "f2p_total": 52, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0, "apply_failed": 1}
+--- npmrc
+      1 [verifier] ERROR: model.patch touches .npmrc; every declared id will report failed
+      1 P2P 0/2116 pass 2116 fail; F2P 0/52 pass 52 fail; PARTIAL 0.0; BINARY 0
+--- report-rewrite
+      1 P2P 2116/2116 pass 0 fail; F2P 0/52 pass 52 fail; PARTIAL 0.9760147601476015; BINARY 0
+--- forge-and-rewrite
+   2168     verdict stream refused (valid=True ended=False declared=-1 heard=0)
+      2 [publish] verdict stream refused (valid=True ended=False declared=-1 heard=0); publishing every declared id as failed
+      1 P2P 0/2116 pass 2116 fail; F2P 0/52 pass 52 fail; PARTIAL 0.0; BINARY 0

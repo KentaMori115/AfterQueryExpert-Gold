@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/rest-recovery"
+
+[metadata]
+task_id = "rest-recovery"
+display_title = "Make camp: hit dice, slot recovery and the exhaustion track"
+display_description = "Resting is the clock this campaign manager never runs: slots come back only from a long rest, exhaustion only ever climbs, and the hit dice on a stat block are a string nobody spends. Add a spendable hit dice pool and a rest engine that resolves a camp for a whole party and writes down what it did."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/BaWX5OzTFQ77YYpY2WQf"
+base_commit_hash = "00800e20bf11764d07d33a49ffd1f1798ed699ed"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-sagemark-bawx5o:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

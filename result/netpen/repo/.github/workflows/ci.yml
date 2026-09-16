@@ -1,0 +1,64 @@
+# What has to pass before anything is merged.
+#
+# The same four steps the verify script runs locally, in the same order, so a
+# green run here means the same thing as a green run on a laptop. The order is
+# cheapest first: formatting and lint fail in seconds and catch most of what
+# comes in, and there is no point spending three minutes on a type check to
+# tell somebody about a missing semicolon.
+#
+# Node is pinned rather than floating. This is a build that has to reproduce
+# from a tag eighteen months later, when the site it monitors is halfway
+# through a generation and nobody wants a surprise from a minor version.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+          cache: npm
+
+      # ci rather than install: the lockfile is the record of what was tested,
+      # and a build that quietly resolves a different tree is not the build.
+      - name: Install
+        run: npm ci
+
+      - name: Formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Types
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm run coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Keep the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: ignore

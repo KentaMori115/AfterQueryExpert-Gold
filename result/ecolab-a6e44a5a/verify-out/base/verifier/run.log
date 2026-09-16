@@ -1,0 +1,889 @@
++ npx vitest run --config /tmp/biomeweaver-graded.config.ts --reporter=basic --reporter=junit --outputFile.junit=/logs/verifier/new_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+[1m[43m DEPRECATED [49m[22m [33m'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}[39m
+ [31m❯[39m packages/biomeweaver-cli/src/event-commands.test.ts [2m([22m[2m6 tests[22m[2m | [22m[31m6 failed[39m[2m)[22m[32m 19[2mms[22m[39m
+[31m   [31m×[31m event commands[2m > [22mlists every authored event in id order[39m[32m 10[2mms[22m[39m
+[31m     → expected 5 to be +0 // Object.is equality[39m
+[31m   [31m×[31m event commands[2m > [22mprints one line for each effect an event carries[39m[32m 1[2mms[22m[39m
+[31m     → expected 5 to be +0 // Object.is equality[39m
+[31m   [31m×[31m event commands[2m > [22mnames the resource an effect moves[39m[32m 3[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m event commands[2m > [22mnames the modifier an effect scales[39m[32m 1[2mms[22m[39m
+[31m     → expected '' to contain 'salt-growth'[39m
+[31m   [31m×[31m event commands[2m > [22mrefuses an event id the capsule never defines[39m[32m 1[2mms[22m[39m
+[31m     → expected 5 to be 3 // Object.is equality[39m
+[31m   [31m×[31m event commands[2m > [22mlists nothing for a capsule that authors no event[39m[32m 2[2mms[22m[39m
+[31m     → expected 5 to be +0 // Object.is equality[39m
+ [31m❯[39m packages/biome-model/src/event-validation.test.ts [2m([22m[2m12 tests[22m[2m | [22m[31m10 failed[39m[2m)[22m[32m 142[2mms[22m[39m
+   [32m✓[39m authored event effects[2m > [22maccepts an effect that moves a resource in a region it knows[32m 34[2mms[22m[39m
+   [32m✓[39m authored event effects[2m > [22maccepts an effect that scales a modifier for several ticks[32m 12[2mms[22m[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses an effect naming a resource the capsule never defines[39m[32m 21[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses an effect naming a region the capsule never defines[39m[32m 8[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses an unknown region on a modifier effect too[39m[32m 10[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses a resource carrying no quantity[39m[32m 10[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses a modifier carrying no factor[39m[32m 8[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses an effect that carries nothing at all[39m[32m 8[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses an effect that is not a record[39m[32m 6[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses a window shorter than one tick[39m[32m 6[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses a window that is not a whole number of ticks[39m[32m 7[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+[31m   [31m×[31m authored event effects[2m > [22mrefuses a negative factor[39m[32m 8[2mms[22m[39m
+[31m     → expected [] to have a length of 1 but got +0[39m
+ [31m❯[39m packages/tick-runtime/src/fixed-events.test.ts [2m([22m[2m23 tests[22m[2m | [22m[31m20 failed[39m[2m)[22m[33m 338[2mms[22m[39m
+[31m   [31m×[31m fixed disturbances[2m > [22msplits a withdrawal in proportion to what each pool holds[39m[32m 54[2mms[22m[39m
+[31m     → expected 0n to be 1000000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mhands a single leftover unit to the first region in id order[39m[32m 23[2mms[22m[39m
+[31m     → expected 0n to be 666666n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mwalks two leftover units down the region order[39m[32m 22[2mms[22m[39m
+[31m     → expected 0n to be 333333n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22msplits evenly across pools that hold nothing between them[39m[32m 23[2mms[22m[39m
+[31m     → expected 1000000n to be 333334n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mreaches only the region an effect names[39m[32m 29[2mms[22m[39m
+[31m     → expected 6000000n to be 10000000n // Object.is equality[39m
+   [32m✓[39m fixed disturbances[2m > [22mtakes no more from a pool than the pool holds[32m 12[2mms[22m[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mreports the quantity a pool really gave up[39m[32m 13[2mms[22m[39m
+[31m     → expected [ '15.000000' ] to deeply equal [ '2.000000', '8.000000' ][39m
+[31m   [31m×[31m fixed disturbances[2m > [22mpublishes one flow for every pool that moved[39m[32m 15[2mms[22m[39m
+[31m     → expected [ { tick: 1, …(6) } ] to have a length of 3 but got 1[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mcarries the moving pool's own region on each flow[39m[32m 17[2mms[22m[39m
+[31m     → expected [ 'east' ] to deeply equal [ 'east', 'north', 'west' ][39m
+[31m   [31m×[31m fixed disturbances[2m > [22msays nothing about a pool it never moved[39m[32m 19[2mms[22m[39m
+[31m     → expected 'east' to be 'north' // Object.is equality[39m
+   [32m✓[39m fixed disturbances[2m > [22mruns an effect that named no window on its hook tick alone[32m 7[2mms[22m[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mruns the effects of one event in the order the file lists them[39m[32m 9[2mms[22m[39m
+[31m     → expected 0n to be 800000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mkeeps an effect running for the whole window it authored[39m[32m 7[2mms[22m[39m
+[31m     → expected 9000000n to be 7000000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mcloses a window on the tick after it ends[39m[32m 8[2mms[22m[39m
+[31m     → expected 9000000n to be 7000000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mruns two disturbances on one tick in event id order[39m[32m 7[2mms[22m[39m
+[31m     → expected 0n to be 800000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mscales renewal while a modifier window runs[39m[32m 11[2mms[22m[39m
+[31m     → expected 100000000n to be 200000000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mmultiplies two windows over one key, rounding at each step[39m[32m 10[2mms[22m[39m
+[31m     → expected 100000000n to be 11111100n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mgives renewal back once the window closes[39m[32m 7[2mms[22m[39m
+[31m     → expected 200000000n to be 400000000n // Object.is equality[39m
+   [32m✓[39m fixed disturbances[2m > [22mleaves a modifier effect out of the flow record[32m 6[2mms[22m[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mspreads an addition the same way it spreads a withdrawal[39m[32m 9[2mms[22m[39m
+[31m     → expected 8000000n to be 3000000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mdoes nothing for a resource the scenario never pooled[39m[32m 9[2mms[22m[39m
+[31m     → expected [ { tick: 1, …(6) } ] to deeply equal [][39m
+[31m   [31m×[31m fixed disturbances[2m > [22mruns only the part of a window that falls inside the run[39m[32m 7[2mms[22m[39m
+[31m     → expected 10000000n to be 9000000n // Object.is equality[39m
+[31m   [31m×[31m fixed disturbances[2m > [22mkeeps a modifier effect inside the region it names[39m[32m 12[2mms[22m[39m
+[31m     → expected 100000000n to be 300000000n // Object.is equality[39m
+ [31m❯[39m .verifier-canary/canary.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 19[2mms[22m[39m
+[31m   [31m×[31m verifier canary[2m > [22mnever passes[39m[32m 18[2mms[22m[39m
+[31m     → expected 1 to be 2 // Object.is equality[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 37 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m .verifier-canary/canary.test.ts[2m > [22mverifier canary[2m > [22mnever passes
+[31m[1mAssertionError[22m: expected 1 to be 2 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+[36m [2m❯[22m .verifier-canary/canary.test.ts:[2m5:15[22m[39m
+    [90m  3| [39m[34mdescribe[39m([32m"verifier canary"[39m[33m,[39m () [33m=>[39m {
+    [90m  4| [39m  [34mit[39m([32m"never passes"[39m[33m,[39m () [33m=>[39m {
+    [90m  5| [39m    [34mexpect[39m([34m1[39m)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m   | [39m              [31m^[39m
+    [90m  6| [39m  })[33m;[39m
+    [90m  7| [39m})[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses an effect naming a resource the capsule never defines
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m71:29[22m[39m
+    [90m 69| [39m  it("refuses an effect naming a resource the capsule never defines", …
+    [90m 70| [39m    const compiled = compileWith("  - resource: gravel\n    quantity: …
+    [90m 71| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 72| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m 73| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses an effect naming a region the capsule never defines
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m77:29[22m[39m
+    [90m 75| [39m  it("refuses an effect naming a region the capsule never defines", ()…
+    [90m 76| [39m    const compiled = compileWith("  - resource: salt\n    region: sout…
+    [90m 77| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 78| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m 79| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses an unknown region on a modifier effect too
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m83:29[22m[39m
+    [90m 81| [39m  [34mit[39m([32m"refuses an unknown region on a modifier effect too"[39m[33m,[39m () [33m=>[39m {
+    [90m 82| [39m    const compiled = compileWith("  - modifier: salt-growth\n    regio…
+    [90m 83| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 84| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m 85| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses a resource carrying no quantity
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m89:29[22m[39m
+    [90m 87| [39m  [34mit[39m([32m"refuses a resource carrying no quantity"[39m[33m,[39m () [33m=>[39m {
+    [90m 88| [39m    const compiled = compileWith("  - resource: salt\n    region: east…
+    [90m 89| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 90| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m 91| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses a modifier carrying no factor
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m95:29[22m[39m
+    [90m 93| [39m  [34mit[39m([32m"refuses a modifier carrying no factor"[39m[33m,[39m () [33m=>[39m {
+    [90m 94| [39m    const compiled = compileWith("  - modifier: salt-growth\n    regio…
+    [90m 95| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 96| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m 97| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses an effect that carries nothing at all
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m101:29[22m[39m
+    [90m 99| [39m  [34mit[39m([32m"refuses an effect that carries nothing at all"[39m[33m,[39m () [33m=>[39m {
+    [90m100| [39m    [35mconst[39m compiled [33m=[39m [34mcompileWith[39m([32m"  - region: east\n"[39m)[33m;[39m
+    [90m101| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m102| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m103| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses an effect that is not a record
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m107:29[22m[39m
+    [90m105| [39m  [34mit[39m([32m"refuses an effect that is not a record"[39m[33m,[39m () [33m=>[39m {
+    [90m106| [39m    [35mconst[39m compiled [33m=[39m [34mcompileWith[39m([32m"  - east\n"[39m)[33m;[39m
+    [90m107| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m108| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m109| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses a window shorter than one tick
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m113:29[22m[39m
+    [90m111| [39m  [34mit[39m([32m"refuses a window shorter than one tick"[39m[33m,[39m () [33m=>[39m {
+    [90m112| [39m    const compiled = compileWith("  - resource: salt\n    quantity: -2…
+    [90m113| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m114| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m115| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses a window that is not a whole number of ticks
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m119:29[22m[39m
+    [90m117| [39m  [34mit[39m([32m"refuses a window that is not a whole number of ticks"[39m[33m,[39m () [33m=>[39m {
+    [90m118| [39m    const compiled = compileWith("  - resource: salt\n    quantity: -2…
+    [90m119| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m120| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m121| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biome-model/src/event-validation.test.ts[2m > [22mauthored event effects[2m > [22mrefuses a negative factor
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biome-model/src/event-validation.test.ts:[2m125:29[22m[39m
+    [90m123| [39m  [34mit[39m([32m"refuses a negative factor"[39m[33m,[39m () [33m=>[39m {
+    [90m124| [39m    const compiled = compileWith("  - modifier: salt-growth\n    facto…
+    [90m125| [39m    [34mexpect[39m(compiled[33m.[39merrors)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m126| [39m    [34mexpect[39m(compiled[33m.[39mmodel)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m127| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biomeweaver-cli/src/event-commands.test.ts[2m > [22mevent commands[2m > [22mlists every authored event in id order
+[31m[1mAssertionError[22m: expected 5 to be +0 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 5[39m
+
+[36m [2m❯[22m packages/biomeweaver-cli/src/event-commands.test.ts:[2m59:29[22m[39m
+    [90m 57| [39m  [34mit[39m([32m"lists every authored event in id order"[39m[33m,[39m () [33m=>[39m {
+    [90m 58| [39m    [35mconst[39m listed [33m=[39m [34mrunCommand[39m([[32m"event"[39m[33m,[39m [32m"list"[39m[33m,[39m [32m"--root"[39m[33m,[39m root])[33m;[39m
+    [90m 59| [39m    [34mexpect[39m(listed[33m.[39mexitCode)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 60| [39m    expect(lines(listed.stdout)).toEqual(["autumn-flood", "spring-melt…
+    [90m 61| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biomeweaver-cli/src/event-commands.test.ts[2m > [22mevent commands[2m > [22mprints one line for each effect an event carries
+[31m[1mAssertionError[22m: expected 5 to be +0 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 5[39m
+
+[36m [2m❯[22m packages/biomeweaver-cli/src/event-commands.test.ts:[2m65:28[22m[39m
+    [90m 63| [39m  [34mit[39m([32m"prints one line for each effect an event carries"[39m[33m,[39m () [33m=>[39m {
+    [90m 64| [39m    const shown = runCommand(["event", "show", "spring-melt", "--root"…
+    [90m 65| [39m    [34mexpect[39m(shown[33m.[39mexitCode)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+    [90m   | [39m                           [31m^[39m
+    [90m 66| [39m    [34mexpect[39m([34mlines[39m(shown[33m.[39mstdout))[33m.[39m[34mtoHaveLength[39m([34m2[39m)[33m;[39m
+    [90m 67| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biomeweaver-cli/src/event-commands.test.ts[2m > [22mevent commands[2m > [22mnames the resource an effect moves
+[31m[1mAssertionError[22m: expected [] to have a length of 1 but got +0[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0[39m
+
+[36m [2m❯[22m packages/biomeweaver-cli/src/event-commands.test.ts:[2m71:33[22m[39m
+    [90m 69| [39m  [34mit[39m([32m"names the resource an effect moves"[39m[33m,[39m () [33m=>[39m {
+    [90m 70| [39m    const shown = runCommand(["event", "show", "autumn-flood", "--root…
+    [90m 71| [39m    [34mexpect[39m([34mlines[39m(shown[33m.[39mstdout))[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m   | [39m                                [31m^[39m
+    [90m 72| [39m    [34mexpect[39m(shown[33m.[39mstdout)[33m.[39m[34mtoContain[39m([32m"salt"[39m)[33m;[39m
+    [90m 73| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biomeweaver-cli/src/event-commands.test.ts[2m > [22mevent commands[2m > [22mnames the modifier an effect scales
+[31m[1mAssertionError[22m: expected '' to contain 'salt-growth'[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- salt-growth[39m
+
+[36m [2m❯[22m packages/biomeweaver-cli/src/event-commands.test.ts:[2m77:26[22m[39m
+    [90m 75| [39m  [34mit[39m([32m"names the modifier an effect scales"[39m[33m,[39m () [33m=>[39m {
+    [90m 76| [39m    const shown = runCommand(["event", "show", "spring-melt", "--root"…
+    [90m 77| [39m    [34mexpect[39m(shown[33m.[39mstdout)[33m.[39m[34mtoContain[39m([32m"salt-growth"[39m)[33m;[39m
+    [90m   | [39m                         [31m^[39m
+    [90m 78| [39m  })[33m;[39m
+    [90m 79| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biomeweaver-cli/src/event-commands.test.ts[2m > [22mevent commands[2m > [22mrefuses an event id the capsule never defines
+[31m[1mAssertionError[22m: expected 5 to be 3 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 3[39m
+[31m+ 5[39m
+
+[36m [2m❯[22m packages/biomeweaver-cli/src/event-commands.test.ts:[2m82:28[22m[39m
+    [90m 80| [39m  [34mit[39m([32m"refuses an event id the capsule never defines"[39m[33m,[39m () [33m=>[39m {
+    [90m 81| [39m    const shown = runCommand(["event", "show", "midsummer-drought", "-…
+    [90m 82| [39m    [34mexpect[39m(shown[33m.[39mexitCode)[33m.[39m[34mtoBe[39m([34m3[39m)[33m;[39m
+    [90m   | [39m                           [31m^[39m
+    [90m 83| [39m  })[33m;[39m
+    [90m 84| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/biomeweaver-cli/src/event-commands.test.ts[2m > [22mevent commands[2m > [22mlists nothing for a capsule that authors no event
+[31m[1mAssertionError[22m: expected 5 to be +0 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 5[39m
+
+[36m [2m❯[22m packages/biomeweaver-cli/src/event-commands.test.ts:[2m88:29[22m[39m
+    [90m 86| [39m    const bare = capsuleRoot({ "events/spring-melt.yaml": null, "event…
+    [90m 87| [39m    [35mconst[39m listed [33m=[39m [34mrunCommand[39m([[32m"event"[39m[33m,[39m [32m"list"[39m[33m,[39m [32m"--root"[39m[33m,[39m bare])[33m;[39m
+    [90m 88| [39m    [34mexpect[39m(listed[33m.[39mexitCode)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 89| [39m    [34mexpect[39m([34mlines[39m(listed[33m.[39mstdout))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+    [90m 90| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22msplits a withdrawal in proportion to what each pool holds
+[31m[1mAssertionError[22m: expected 0n to be 1000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1000000n[39m
+[31m+ 0n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m104:45[22m[39m
+    [90m102| [39m      [34m2[39m[33m,[39m
+    [90m103| [39m    )[33m;[39m
+    [90m104| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m1_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m105| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m5_000_000n[39m)[33m;[39m
+    [90m106| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mhands a single leftover unit to the first region in id order
+[31m[1mAssertionError[22m: expected 0n to be 666666n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 666666n[39m
+[31m+ 0n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m117:45[22m[39m
+    [90m115| [39m      [34m2[39m[33m,[39m
+    [90m116| [39m    )[33m;[39m
+    [90m117| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m666_666n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m118| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m666_667n[39m)[33m;[39m
+    [90m119| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m666_667n[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mwalks two leftover units down the region order
+[31m[1mAssertionError[22m: expected 0n to be 333333n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 333333n[39m
+[31m+ 0n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m131:45[22m[39m
+    [90m129| [39m      [34m2[39m[33m,[39m
+    [90m130| [39m    )[33m;[39m
+    [90m131| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m333_333n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m132| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m333_333n[39m)[33m;[39m
+    [90m133| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m333_334n[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22msplits evenly across pools that hold nothing between them
+[31m[1mAssertionError[22m: expected 1000000n to be 333334n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 333334n[39m
+[31m+ 1000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m148:45[22m[39m
+    [90m146| [39m      [34m2[39m[33m,[39m
+    [90m147| [39m    )[33m;[39m
+    [90m148| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m333_334n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m149| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m333_333n[39m)[33m;[39m
+    [90m150| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m333_333n[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mreaches only the region an effect names
+[31m[1mAssertionError[22m: expected 6000000n to be 10000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 10000000n[39m
+[31m+ 6000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m165:45[22m[39m
+    [90m163| [39m      [34m2[39m[33m,[39m
+    [90m164| [39m    )[33m;[39m
+    [90m165| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m10_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m166| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m6_000_000n[39m)[33m;[39m
+    [90m167| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mreports the quantity a pool really gave up
+[31m[1mAssertionError[22m: expected [ '15.000000' ] to deeply equal [ '2.000000', '8.000000' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[32m-   "2.000000",[39m
+[32m-   "8.000000",[39m
+[31m+   "15.000000",[39m
+[2m  ][22m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m200:24[22m[39m
+    [90m198| [39m      [33m.[39m[34mmap[39m((flow) [33m=>[39m flow[33m.[39mquantity)
+    [90m199| [39m      [33m.[39m[34msort[39m()[33m;[39m
+    [90m200| [39m    [34mexpect[39m(quantities)[33m.[39m[34mtoEqual[39m([[32m"2.000000"[39m[33m,[39m [32m"8.000000"[39m])[33m;[39m
+    [90m   | [39m                       [31m^[39m
+    [90m201| [39m  })[33m;[39m
+    [90m202| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mpublishes one flow for every pool that moved
+[31m[1mAssertionError[22m: expected [ { tick: 1, …(6) } ] to have a length of 3 but got 1[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 3[39m
+[31m+ 1[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m212:41[22m[39m
+    [90m210| [39m      [34m2[39m[33m,[39m
+    [90m211| [39m    )[33m;[39m
+    [90m212| [39m    [34mexpect[39m([34mdisturbanceFlows[39m(result[33m,[39m [34m1[39m))[33m.[39m[34mtoHaveLength[39m([34m3[39m)[33m;[39m
+    [90m   | [39m                                        [31m^[39m
+    [90m213| [39m  })[33m;[39m
+    [90m214| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mcarries the moving pool's own region on each flow
+[31m[1mAssertionError[22m: expected [ 'east' ] to deeply equal [ 'east', 'north', 'west' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "east",[22m
+[32m-   "north",[39m
+[32m-   "west",[39m
+[2m  ][22m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m228:7[22m[39m
+    [90m226| [39m        [33m.[39m[34mmap[39m((flow) [33m=>[39m flow[33m.[39mregion)
+    [90m227| [39m        [33m.[39m[34msort[39m()[33m,[39m
+    [90m228| [39m    )[33m.[39m[34mtoEqual[39m([[32m"east"[39m[33m,[39m [32m"north"[39m[33m,[39m [32m"west"[39m])[33m;[39m
+    [90m   | [39m      [31m^[39m
+    [90m229| [39m  })[33m;[39m
+    [90m230| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22msays nothing about a pool it never moved
+[31m[1mAssertionError[22m: expected 'east' to be 'north' // Object.is equality[39m
+
+Expected: [32m"north"[39m
+Received: [31m"east"[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m245:30[22m[39m
+    [90m243| [39m    [35mconst[39m flows [33m=[39m [34mdisturbanceFlows[39m(result[33m,[39m [34m1[39m)[33m;[39m
+    [90m244| [39m    [34mexpect[39m(flows)[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+    [90m245| [39m    [34mexpect[39m(flows[[34m0[39m][33m?.[39mregion)[33m.[39m[34mtoBe[39m([32m"north"[39m)[33m;[39m
+    [90m   | [39m                             [31m^[39m
+    [90m246| [39m  })[33m;[39m
+    [90m247| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mruns the effects of one event in the order the file lists them
+[31m[1mAssertionError[22m: expected 0n to be 800000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 800000n[39m
+[31m+ 0n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m274:45[22m[39m
+    [90m272| [39m      [34m2[39m[33m,[39m
+    [90m273| [39m    )[33m;[39m
+    [90m274| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m800_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m275| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m3_200_000n[39m)[33m;[39m
+    [90m276| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mkeeps an effect running for the whole window it authored
+[31m[1mAssertionError[22m: expected 9000000n to be 7000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 7000000n[39m
+[31m+ 9000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m288:45[22m[39m
+    [90m286| [39m    )[33m;[39m
+    [90m287| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m10_000_000n[39m)[33m;[39m
+    [90m288| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m4[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m7_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m289| [39m  })[33m;[39m
+    [90m290| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mcloses a window on the tick after it ends
+[31m[1mAssertionError[22m: expected 9000000n to be 7000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 7000000n[39m
+[31m+ 9000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m301:45[22m[39m
+    [90m299| [39m    )[33m;[39m
+    [90m300| [39m    [34mexpect[39m([34mdisturbanceFlows[39m(result[33m,[39m [34m5[39m))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+    [90m301| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m5[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m7_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m302| [39m  })[33m;[39m
+    [90m303| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mruns two disturbances on one tick in event id order
+[31m[1mAssertionError[22m: expected 0n to be 800000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 800000n[39m
+[31m+ 0n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m318:45[22m[39m
+    [90m316| [39m      [34m2[39m[33m,[39m
+    [90m317| [39m    )[33m;[39m
+    [90m318| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m800_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m319| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m3_200_000n[39m)[33m;[39m
+    [90m320| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mscales renewal while a modifier window runs
+[31m[1mAssertionError[22m: expected 100000000n to be 200000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200000000n[39m
+[31m+ 100000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m331:45[22m[39m
+    [90m329| [39m      [34m3[39m[33m,[39m
+    [90m330| [39m    )[33m;[39m
+    [90m331| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"moss"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m200_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m332| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m2[39m[33m,[39m [32m"moss"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m300_000_000n[39m)[33m;[39m
+    [90m333| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mmultiplies two windows over one key, rounding at each step
+[31m[1mAssertionError[22m: expected 100000000n to be 11111100n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 11111100n[39m
+[31m+ 100000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m349:45[22m[39m
+    [90m347| [39m      [34m2[39m[33m,[39m
+    [90m348| [39m    )[33m;[39m
+    [90m349| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"moss"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m11_111_100n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m350| [39m  })[33m;[39m
+    [90m351| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mgives renewal back once the window closes
+[31m[1mAssertionError[22m: expected 200000000n to be 400000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 400000000n[39m
+[31m+ 200000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m361:45[22m[39m
+    [90m359| [39m      [34m3[39m[33m,[39m
+    [90m360| [39m    )[33m;[39m
+    [90m361| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m2[39m[33m,[39m [32m"moss"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m400_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m362| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m3[39m[33m,[39m [32m"moss"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m500_000_000n[39m)[33m;[39m
+    [90m363| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mspreads an addition the same way it spreads a withdrawal
+[31m[1mAssertionError[22m: expected 8000000n to be 3000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 3000000n[39m
+[31m+ 8000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m392:45[22m[39m
+    [90m390| [39m      [34m2[39m[33m,[39m
+    [90m391| [39m    )[33m;[39m
+    [90m392| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m3_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m393| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"north"[39m))[33m.[39m[34mtoBe[39m([34m15_000_000n[39m)[33m;[39m
+    [90m394| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mdoes nothing for a resource the scenario never pooled
+[31m[1mAssertionError[22m: expected [ { tick: 1, …(6) } ] to deeply equal [][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [][39m
+[31m+ [[39m
+[31m+   {[39m
+[31m+     "cause": "fixed-event",[39m
+[31m+     "kind": "resource-decrease",[39m
+[31m+     "quantity": "3.000000",[39m
+[31m+     "region": "east",[39m
+[31m+     "resource": "moss",[39m
+[31m+     "rule": "events.drain-moss",[39m
+[31m+     "tick": 1,[39m
+[31m+   },[39m
+[31m+ ][39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m405:41[22m[39m
+    [90m403| [39m      [34m2[39m[33m,[39m
+    [90m404| [39m    )[33m;[39m
+    [90m405| [39m    [34mexpect[39m([34mdisturbanceFlows[39m(result[33m,[39m [34m1[39m))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+    [90m   | [39m                                        [31m^[39m
+    [90m406| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m10_000_000n[39m)[33m;[39m
+    [90m407| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mruns only the part of a window that falls inside the run
+[31m[1mAssertionError[22m: expected 10000000n to be 9000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 9000000n[39m
+[31m+ 10000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m418:45[22m[39m
+    [90m416| [39m      [34m3[39m[33m,[39m
+    [90m417| [39m    )[33m;[39m
+    [90m418| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m9_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m419| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m2[39m[33m,[39m [32m"salt"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m9_000_000n[39m)[33m;[39m
+    [90m420| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/37]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m packages/tick-runtime/src/fixed-events.test.ts[2m > [22mfixed disturbances[2m > [22mkeeps a modifier effect inside the region it names
+[31m[1mAssertionError[22m: expected 100000000n to be 300000000n // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 300000000n[39m
+[31m+ 100000000n[39m
+
+[36m [2m❯[22m packages/tick-runtime/src/fixed-events.test.ts:[2m434:45[22m[39m
+    [90m432| [39m      [34m2[39m[33m,[39m
+    [90m433| [39m    )[33m;[39m
+    [90m434| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"moss"[39m[33m,[39m [32m"west"[39m))[33m.[39m[34mtoBe[39m([34m300_000_000n[39m)[33m;[39m
+    [90m   | [39m                                            [31m^[39m
+    [90m435| [39m    [34mexpect[39m([34mheld[39m(result[33m,[39m [34m1[39m[33m,[39m [32m"moss"[39m[33m,[39m [32m"east"[39m))[33m.[39m[34mtoBe[39m([34m100_000_000n[39m)[33m;[39m
+    [90m436| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/37]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m4 failed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[31m37 failed[39m[22m[2m | [22m[1m[32m5 passed[39m[22m[90m (42)[39m
+[2m   Start at [22m 16:00:29
+[2m   Duration [22m 1.14s[2m (transform 524ms, setup 0ms, collect 1.21s, tests 518ms, environment 1ms, prepare 397ms)[22m
+
+JUNIT report written to /logs/verifier/new_junit.xml
++ npx vitest run --config /tmp/biomeweaver-shipped.config.ts --reporter=basic --reporter=junit --outputFile.junit=/logs/verifier/base_junit.xml
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/app[39m
+
+[1m[43m DEPRECATED [49m[22m [33m'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}[39m
+ [32m✓[39m ecosystem-lab/properties/determinism.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 125[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/complete-biomes/crystal-tundra.biome.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 132[2mms[22m[39m
+ [32m✓[39m packages/biomeweaver-cli/src/commands.catalog.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 387[2mms[22m[39m
+ [32m✓[39m packages/tick-runtime/src/advance.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 119[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/cli/commands.cli.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 192[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/gather/gather.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 49[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/properties/metamorphic.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 136[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/properties/conservation.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 116[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/compile.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 90[2mms[22m[39m
+ [32m✓[39m packages/biomeweaver/src/baseline-guard.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/invalid-models/invalid.biome.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 50[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/discovery/discover.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m packages/predation-engine/src/consume.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m packages/flow-explanations/src/catalog.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/yaml/parse-yaml.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/coverage.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m packages/run-store/src/store.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m packages/biomeweaver-cli/src/options.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/rounding.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/gather/fingerprint.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/catalog.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m packages/resource-engine/src/allocate.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/arithmetic.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/biome-reports/src/render.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/population-engine/src/cohorts.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/fixed-point/src/parse.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/diagnostics/diagnostic.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/flow-explanations/src/flow.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/decode.catalog.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/species.catalog.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/capsule-source/src/json/parse-json.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/calendar-engine/src/seasons.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m packages/resource-engine/src/renew.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m packages/population-engine/src/stages.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m ecosystem-lab/properties/locale.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m packages/biome-model/src/identifiers.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+
+
+[2m Test Files [22m [1m[32m36 passed[39m[22m[90m (36)[39m
+[2m      Tests [22m [1m[32m184 passed[39m[22m[90m (184)[39m
+[2m   Start at [22m 16:00:31
+[2m   Duration [22m 4.81s[2m (transform 682ms, setup 0ms, collect 3.51s, tests 1.60s, environment 8ms, prepare 3.00s)[22m
+
+JUNIT report written to /logs/verifier/base_junit.xml

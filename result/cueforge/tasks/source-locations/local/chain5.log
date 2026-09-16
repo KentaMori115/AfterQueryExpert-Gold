@@ -1,0 +1,103 @@
+### verify_task.sh
+== base tree (model.patch empty) ==
+  base: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, grader reward 0
+[verifier] integrity: restored 46 frozen files from d0fb6637073d
+[verifier] integrity: 46 frozen files verified by git against d0fb6637073d; 4 held-out files verified by digest
+[verifier] runner: pytest 8.4.1 from /usr/local/lib/python3.12/site-packages/pytest
+[verifier] runner: base.xml -- 113 cases run, 113 in the report
+[verifier] runner: pytest 8.4.1 from /usr/local/lib/python3.12/site-packages/pytest
+[verifier] runner: new.xml -- 66 cases run, 66 in the report
+[verifier] reports: base.xml signed by this run, published
+[verifier] reports: new.xml signed by this run, published
+== solved tree (model.patch = solution.patch) ==
+  solution: f2p 66/66 pass, p2p 113/113 pass, 179/179 ids present, grader reward 1
+[verifier] integrity: restored 46 frozen files from d0fb6637073d
+[verifier] integrity: 46 frozen files verified by git against d0fb6637073d; 4 held-out files verified by digest
+[verifier] runner: pytest 8.4.1 from /usr/local/lib/python3.12/site-packages/pytest
+[verifier] runner: base.xml -- 113 cases run, 113 in the report
+[verifier] runner: pytest 8.4.1 from /usr/local/lib/python3.12/site-packages/pytest
+[verifier] runner: new.xml -- 66 cases run, 66 in the report
+[verifier] reports: base.xml signed by this run, published
+[verifier] reports: new.xml signed by this run, published
+== solved tree, not root ==
+  uid1000: f2p 66/66 pass, p2p 113/113 pass, 179/179 ids present, grader reward 1
+
+VERIFY: PASS
+exit=0
+### mutants.py
+caught      5  alias points at the anchor
+caught      4  alias covers the node but not what is inside it
+caught      1  keys inside an alias keep their own position
+caught      3  nested aliases point at the innermost
+caught      4  anchored nodes open at the anchor
+caught      1  compile json prints a null source
+caught     47  yaml lines and columns are 0-based
+caught     46  yaml columns are 0-based
+caught      1  json columns count from 0
+caught      1  json escapes are measured after decoding
+caught      1  json repeated key keeps the first value position
+caught      3  unknown field points at the mapping, not the key
+caught      4  missing field points at the document root
+caught      2  unsupported version has no position
+caught      2  duplicate cue id points at the first copy
+caught      7  missing after points at the cue, not the value
+caught      3  unknown uses item points at the uses list
+caught      1  requires resource points at the requires entry
+caught      2  action references point at the action mapping
+caught      1  bad identifier keys point at the entry value
+caught      3  assertions are not checked at compile time
+caught      3  assertion findings point at the assertion entry
+caught      2  undeclared states are accepted
+caught      1  unknown attributes are accepted
+caught      1  cycle points at the last id in the witness
+caught      1  self dependency points at the trigger mapping
+caught      1  reservation conflict points at the resource value
+caught      2  no-cues finding points at the cues key
+caught      1  short duration points at the action
+caught      1  incomplete move points at the cue
+caught     32  compile findings are not located at all
+caught      3  offset points at the trigger
+caught      2  capacity finding points at the resource
+caught      3  workspace nodes point at the manifest
+caught      1  merged lists are not renumbered
+caught      1  duplicate across files points at the first file
+caught      1  sources problems have no position
+caught      2  parse errors have no position
+caught      1  a relative path is reported absolute
+caught      3  compile json never prints source
+caught     50  quoted scalars point past the quote
+caught     26  nearest enclosing node is used for every value
+
+survivors: none
+exit=0
+### attack_matrix.sh
+== honest rows ==
+  base: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+  solution: f2p 66/66 pass, p2p 113/113 pass, 179/179 ids present, reward 1
+  uid1000: f2p 66/66 pass, p2p 113/113 pass, 179/179 ids present, reward 1
+== a submission that edits or adds tests ==
+  p2p-edit-restored: f2p 66/66 pass, p2p 113/113 pass, 179/179 ids present, reward 1
+    caught by: restored 46 frozen files
+  example-edit-restored: f2p 66/66 pass, p2p 113/113 pass, 179/179 ids present, reward 1
+  agent-added-tests: f2p 66/66 pass, p2p 113/113 pass, 179/179 ids present, reward 1
+== attacks on the base tree ==
+  gutted-p2p: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+/root/mindriftwork/AQ_dragan/result/cueforge/tasks/source-locations/tests/test.patch:517: new blank line at EOF.
++
+warning: 1 line adds whitespace errors.
+  held-out-edited: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+  pytest-shadow: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+    caught by: removed foreign import hook: pytest.py
+  sitecustomize: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+    caught by: removed foreign import hook
+  runner-monkeypatch: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+  atexit-rewrite: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+  lingering-forger: f2p 0/66 pass, p2p 112/113 pass, 179/179 ids present, reward 0
+    caught by: sweep: ended straggler
+  early-exit-forge: f2p 0/66 pass, p2p 0/113 pass, 179/179 ids present, reward 0
+    caught by: ended before its report was signed
+  stdlib-shadow: f2p 0/66 pass, p2p 113/113 pass, 179/179 ids present, reward 0
+    caught by: removed shadowing module: json.py
+
+MATRIX: PASS
+exit=0

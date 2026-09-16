@@ -1,0 +1,131 @@
+diff --git a/packages/predation-engine/src/consume.test.ts b/packages/predation-engine/src/consume.test.ts
+deleted file mode 100644
+index 466efdc..0000000
+--- a/packages/predation-engine/src/consume.test.ts
++++ /dev/null
+@@ -1,38 +0,0 @@
+-import { describe, expect, it } from "vitest";
+-import { applyPredation } from "./consume.js";
+-import { DEFAULT_SCALE } from "@biomeweaver/fixed-point";
+-import type { CompiledBiome } from "@biomeweaver/biome-model";
+-
+-describe("authored predation", () => {
+-  it("removes prey without exceeding the prey count", () => {
+-    const model = {
+-      precision: { scale: DEFAULT_SCALE, rounding: "half-even" },
+-      species: {
+-        "glass-lynx": {
+-          predation: [{ prey: "snow-hare", preyStage: "adult", perPredatorPerTick: 200_000n }],
+-        },
+-      },
+-    } as unknown as CompiledBiome;
+-    const result = applyPredation(model, [
+-      {
+-        species: "glass-lynx",
+-        stage: "adult",
+-        region: "northern-basin",
+-        count: 80_000_000n,
+-        condition: DEFAULT_SCALE,
+-        ageTicks: 0,
+-      },
+-      {
+-        species: "snow-hare",
+-        stage: "adult",
+-        region: "northern-basin",
+-        count: 10_000_000n,
+-        condition: DEFAULT_SCALE,
+-        ageTicks: 0,
+-      },
+-    ]);
+-    const hare = result.cohorts.find((cohort) => cohort.species === "snow-hare");
+-    expect(hare?.count).toBe(0n);
+-    expect(result.removals[0]?.quantity).toBe(10_000_000n);
+-  });
+-});
+diff --git a/packages/predation-engine/src/consume.ts b/packages/predation-engine/src/consume.ts
+deleted file mode 100644
+index 0c29574..0000000
+--- a/packages/predation-engine/src/consume.ts
++++ /dev/null
+@@ -1,74 +0,0 @@
+-import type { CompiledBiome } from "@biomeweaver/biome-model";
+-import { clampNonNegative, min, mul, type Fixed } from "@biomeweaver/fixed-point";
+-import type { CohortState } from "@biomeweaver/population-engine";
+-
+-export type PredationResult = {
+-  readonly cohorts: readonly CohortState[];
+-  readonly removals: readonly {
+-    readonly predator: string;
+-    readonly prey: string;
+-    readonly stage: string;
+-    readonly region: string;
+-    readonly quantity: Fixed;
+-    readonly rule: string;
+-  }[];
+-};
+-
+-export function applyPredation(
+-  model: CompiledBiome,
+-  cohorts: readonly CohortState[],
+-): PredationResult {
+-  const next = cohorts.map((cohort) => ({ ...cohort }));
+-  const removals: Array<{
+-    predator: string;
+-    prey: string;
+-    stage: string;
+-    region: string;
+-    quantity: Fixed;
+-    rule: string;
+-  }> = [];
+-  const predators = [...next].sort(
+-    (left, right) =>
+-      left.species.localeCompare(right.species) ||
+-      left.stage.localeCompare(right.stage) ||
+-      left.region.localeCompare(right.region),
+-  );
+-  for (const predator of predators) {
+-    const spec = model.species[predator.species];
+-    if (!spec) {
+-      continue;
+-    }
+-    for (const rule of spec.predation) {
+-      const preyIndex = next.findIndex(
+-        (cohort) =>
+-          cohort.species === rule.prey &&
+-          cohort.stage === rule.preyStage &&
+-          cohort.region === predator.region,
+-      );
+-      if (preyIndex < 0) {
+-        continue;
+-      }
+-      const prey = next[preyIndex];
+-      if (!prey) {
+-        continue;
+-      }
+-      const desired = mul(
+-        predator.count,
+-        rule.perPredatorPerTick,
+-        model.precision.scale,
+-        "half-even",
+-      );
+-      const taken = min(desired, prey.count);
+-      next[preyIndex] = { ...prey, count: clampNonNegative(prey.count - taken) };
+-      removals.push({
+-        predator: predator.species,
+-        prey: rule.prey,
+-        stage: rule.preyStage,
+-        region: predator.region,
+-        quantity: taken,
+-        rule: `${predator.species}.predation.${rule.prey}`,
+-      });
+-    }
+-  }
+-  return { cohorts: next, removals };
+-}
+diff --git a/packages/predation-engine/src/index.ts b/packages/predation-engine/src/index.ts
+index 8d208e3..cb0ff5c 100644
+--- a/packages/predation-engine/src/index.ts
++++ b/packages/predation-engine/src/index.ts
+@@ -1 +1 @@
+-export { applyPredation, type PredationResult } from "./consume.js";
++export {};

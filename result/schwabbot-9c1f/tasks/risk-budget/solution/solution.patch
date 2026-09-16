@@ -1,0 +1,770 @@
+diff --git a/AdminCustom/templates/admin_base.html b/AdminCustom/templates/admin_base.html
+index 8f9e07e..5f989f8 100644
+--- a/AdminCustom/templates/admin_base.html
++++ b/AdminCustom/templates/admin_base.html
+@@ -264,6 +264,12 @@
+                         <span>Run Settings</span>
+                     </a>
+                 </li>
++                <li {% if page_name == 'risk_budget'%} class="active" {% endif %}>
++                    <a href="{% url 'risk_budget' %}">
++                        <i class="fas fa-shield-alt"></i>
++                        <span>Risk Budget</span>
++                    </a>
++                </li>
+             </ul>
+         </div>
+     </div>
+diff --git a/AdminCustom/templates/pages/risk_budget.html b/AdminCustom/templates/pages/risk_budget.html
+new file mode 100644
+index 0000000..97328e0
+--- /dev/null
++++ b/AdminCustom/templates/pages/risk_budget.html
+@@ -0,0 +1,86 @@
++{% extends 'admin_base.html' %}
++{% load static %}
++
++{% block content %}
++    <style>
++        .form-container {
++            max-width: 600px; /* Limit the maximum width of the form */
++            width: 100%; /* Ensure it takes up full width on smaller devices */
++        }
++    </style>
++    <div class="container">
++        <div>
++            <h2 class="text-center">Risk Budget Table</h2>
++        </div>
++        <table class="table table-striped">
++            <thead>
++                <tr>
++                    <th>User ID</th>
++                    <th>User Name</th>
++                    <th>Cap Type</th>
++                    <th>Daily Debit Cap</th>
++                    <th>Cap Percentage</th>
++                    <th>Max Lots Per Order</th>
++                    <th>Max Lots Per Day</th>
++                    <th></th>
++                    <th>Committed Today</th>
++                    <th>Remaining Today</th>
++                    <th></th>
++                    <th>Metered</th>
++                </tr>
++            </thead>
++            <tbody>
++                {% for record in risk_budget_records %}
++                    <tr>
++                        <td>{{record.user_id}}</td>
++                        <td>{{record.user_name}}</td>
++                        <td>
++                            <select class="form-control" id="cap-type-{{record.user_id}}">
++                                <option value="Fixed" {% if record.cap_type == 'Fixed' %} selected {% endif %}>Fixed</option>
++                                <option value="ByAccountBalance" {% if record.cap_type == 'ByAccountBalance' %} selected {% endif %}>By Account Balance</option>
++                            </select>
++                        </td>
++                        <td>
++                            <input class="form-control" type="number" step="0.01" min="0"
++                                id="daily-debit-cap-{{record.user_id}}" value="{{record.daily_debit_cap}}">
++                        </td>
++                        <td>
++                            <input class="form-control" type="number" step="0.01" min="0"
++                                id="cap-percentage-{{record.user_id}}" value="{{record.cap_percentage}}">
++                        </td>
++                        <td>
++                            <input class="form-control" type="number" min="0"
++                                id="max-lots-per-order-{{record.user_id}}" value="{{record.max_lots_per_order}}">
++                        </td>
++                        <td>
++                            <input class="form-control" type="number" min="0"
++                                id="max-lots-per-day-{{record.user_id}}" value="{{record.max_lots_per_day}}">
++                        </td>
++                        <td>
++                            <button type="button" class="btn btn-success"
++                                onclick="changeRiskBudget('{{record.user_id}}')">Apply</button>
++                        </td>
++                        <td>{{record.committed_debit}} ({{record.committed_lots}} lots)</td>
++                        <td>{{record.remaining_debit}}</td>
++                        <td>
++                            <button type="button" class="btn btn-warning"
++                                onclick="releaseRiskBudget('{{record.user_id}}')">Release Day</button>
++                        </td>
++                        <td>
++                            <input type="checkbox" id="metered-{{record.user_id}}" {% if record.enabled %} checked {% endif %}
++                                data-toggle="toggle" data-on="Metered" data-off="Unmetered">
++                        </td>
++                    </tr>
++                {% endfor %}
++            </tbody>
++        </table>
++    </div>
++
++
++{% endblock %}
++
++{% block script %}
++    {{ block.super }}
++    <script src="{% static 'js/config_3.13.js' %}"></script>
++    <script src="{% static 'js/admin_3.13.js' %}"></script>
++{% endblock %}
+diff --git a/AdminCustom/urls.py b/AdminCustom/urls.py
+index 6822b4c..c382cbe 100644
+--- a/AdminCustom/urls.py
++++ b/AdminCustom/urls.py
+@@ -20,5 +20,9 @@ urlpatterns = [
+     path('bot_run_setting/', views.bot_run_setting_page, name = 'bot_run_setting'),
+     path('bot_run_setting_submit/', views.bot_run_setting_submit, name = 'bot_run_setting_submit'),
+ 
++    path('risk_budget/', views.risk_budget_page, name = 'risk_budget'),
++    path('risk_budget_change/', views.risk_budget_change, name = 'risk_budget_change'),
++    path('risk_budget_release/', views.risk_budget_release, name = 'risk_budget_release'),
++
+     path('user_token/', views.user_token_page, name = 'user_token'),
+ ]
+diff --git a/AdminCustom/views.py b/AdminCustom/views.py
+index 4b80cd4..0e58ef7 100644
+--- a/AdminCustom/views.py
++++ b/AdminCustom/views.py
+@@ -12,8 +12,9 @@ from django.utils import timezone
+ from datetime import timedelta
+ import json
+ 
+-from BotList.models import Bot, BotOnOff, BotSetting, BotAdminSetting
++from BotList.models import Bot, BotOnOff, BotSetting, BotAdminSetting, BotRiskLimit
+ from Users.models import UserAllow, UserPwdRequest
++from Engine import risk
+ 
+ # Create your views here.
+ @login_required
+@@ -377,6 +378,92 @@ def user_pwd_allow_change(request):
+ 
+ 
+ 
++@login_required
++@user_passes_test(lambda u: u.is_superuser)
++def risk_budget_page(request):
++    template = loader.get_template('pages/risk_budget.html')
++
++    context = {
++        'risk_budget_records': risk.usage_records(),
++        'page_name':'risk_budget'
++    }
++    return HttpResponse(template.render(context, request))
++
++
++@login_required
++@user_passes_test(lambda u: u.is_superuser)
++@csrf_exempt  # Temporarily disable CSRF for simplicity (not recommended for production)
++def risk_budget_change(request):
++    if request.method == 'POST':
++        params = json.loads(request.body)
++        #the user the cap belongs to has to exist
++        user_id = params['user_id']
++        try:
++            user_obj = User.objects.get(id = user_id)
++        except:
++            return JsonResponse({'error':"The user does not exist"}, status = 400)
++
++        #a cap is money and a lot count is a number of contracts, neither goes below zero
++        try:
++            daily_debit_cap = float(params['daily_debit_cap'])
++            cap_percentage = float(params['cap_percentage'])
++            max_lots_per_order = int(params['max_lots_per_order'])
++            max_lots_per_day = int(params['max_lots_per_day'])
++        except:
++            return JsonResponse({'error':"invalid risk budget"}, status = 400)
++
++        if daily_debit_cap < 0 or cap_percentage < 0:
++            return JsonResponse({'error':"invalid risk budget"}, status = 400)
++
++        if max_lots_per_order < 0 or max_lots_per_day < 0:
++            return JsonResponse({'error':"invalid risk budget"}, status = 400)
++
++        cap_type = params['cap_type']
++        if cap_type not in [risk.CAP_FIXED, risk.CAP_BY_ACCOUNT_BALANCE]:
++            return JsonResponse({'error':"invalid cap type"}, status = 400)
++
++        enabled = bool(params['enabled'])
++
++        risk_limit_obj, created = BotRiskLimit.objects.update_or_create(
++            user_id = user_obj.id,
++            defaults = {
++                'cap_type':cap_type,
++                'daily_debit_cap':daily_debit_cap,
++                'cap_percentage':cap_percentage,
++                'max_lots_per_order':max_lots_per_order,
++                'max_lots_per_day':max_lots_per_day,
++                'enabled':enabled,
++                'created_at':timezone.now()
++            }
++        )
++
++        resp = {'status':'success', 'error':"no_error"}
++        return JsonResponse(resp)
++
++    return JsonResponse({'error':"invalid request"}, status = 400)
++
++
++@login_required
++@user_passes_test(lambda u: u.is_superuser)
++@csrf_exempt  # Temporarily disable CSRF for simplicity (not recommended for production)
++def risk_budget_release(request):
++    if request.method == 'POST':
++        params = json.loads(request.body)
++        #the user whose day is being given back has to exist
++        user_id = params['user_id']
++        try:
++            user_obj = User.objects.get(id = user_id)
++        except:
++            return JsonResponse({'error':"The user does not exist"}, status = 400)
++
++        risk.release_day(user_obj.id)
++
++        resp = {'status':'success', 'error':"no_error"}
++        return JsonResponse(resp)
++
++    return JsonResponse({'error':"invalid request"}, status = 400)
++
++
+ @login_required
+ @user_passes_test(lambda u: u.is_superuser)
+ def user_token_page(request):
+diff --git a/BotList/admin.py b/BotList/admin.py
+index 2c792df..8f62958 100644
+--- a/BotList/admin.py
++++ b/BotList/admin.py
+@@ -2,7 +2,7 @@ from django.contrib import admin
+ 
+ # Register your models here.
+ 
+-from .models import Bot, BotOnOff, BotRefresh, BotAccess, BotSetting, BotAdminSetting
++from .models import Bot, BotOnOff, BotRefresh, BotAccess, BotSetting, BotAdminSetting, BotRiskLimit, BotRiskCommitment
+ 
+ admin.site.register(Bot)
+ admin.site.register(BotOnOff)
+@@ -10,3 +10,5 @@ admin.site.register(BotRefresh)
+ admin.site.register(BotAccess)
+ admin.site.register(BotSetting)
+ admin.site.register(BotAdminSetting)
++admin.site.register(BotRiskLimit)
++admin.site.register(BotRiskCommitment)
+diff --git a/BotList/migrations/0013_botriskcommitment_botrisklimit.py b/BotList/migrations/0013_botriskcommitment_botrisklimit.py
+new file mode 100644
+index 0000000..fc4c610
+--- /dev/null
++++ b/BotList/migrations/0013_botriskcommitment_botrisklimit.py
+@@ -0,0 +1,39 @@
++# Generated by Django 5.1.5
++
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ('BotList', '0012_rename_vix_user_automatic_botadminsetting_vix_automatic_mode'),
++    ]
++
++    operations = [
++        migrations.CreateModel(
++            name='BotRiskCommitment',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('user_id', models.IntegerField()),
++                ('order_id', models.CharField(max_length=100)),
++                ('trade_date', models.CharField(max_length=10)),
++                ('debit', models.FloatField(default=0.0)),
++                ('lots', models.IntegerField(default=0)),
++                ('created_at', models.DateTimeField()),
++            ],
++        ),
++        migrations.CreateModel(
++            name='BotRiskLimit',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('user_id', models.IntegerField()),
++                ('cap_type', models.CharField(default='Fixed', max_length=20)),
++                ('daily_debit_cap', models.FloatField(default=0.0)),
++                ('cap_percentage', models.FloatField(default=0.0)),
++                ('max_lots_per_order', models.IntegerField(default=0)),
++                ('max_lots_per_day', models.IntegerField(default=0)),
++                ('enabled', models.BooleanField(default=True)),
++                ('created_at', models.DateTimeField()),
++            ],
++        ),
++    ]
+diff --git a/BotList/models.py b/BotList/models.py
+index df6095c..95e9f79 100644
+--- a/BotList/models.py
++++ b/BotList/models.py
+@@ -35,4 +35,23 @@ class BotAdminSetting(models.Model):
+     vix_automatic_mode = models.BooleanField(default = False)
+     vix_gap_lower = models.BooleanField(default = True)
+     vix_gap_up = models.BooleanField(default = False)
+-    order_gap_sec = models.IntegerField(default = 10)
+\ No newline at end of file
++    order_gap_sec = models.IntegerField(default = 10)
++
++class BotRiskLimit(models.Model):
++    user_id = models.IntegerField()
++    cap_type = models.CharField(max_length = 20, default = 'Fixed')
++    daily_debit_cap = models.FloatField(default = 0.0)
++    cap_percentage = models.FloatField(default = 0.0)
++    max_lots_per_order = models.IntegerField(default = 0)
++    max_lots_per_day = models.IntegerField(default = 0)
++    enabled = models.BooleanField(default = True)
++    created_at = models.DateTimeField()
++
++
++class BotRiskCommitment(models.Model):
++    user_id = models.IntegerField()
++    order_id = models.CharField(max_length = 100)
++    trade_date = models.CharField(max_length = 10)
++    debit = models.FloatField(default = 0.0)
++    lots = models.IntegerField(default = 0)
++    created_at = models.DateTimeField()
+diff --git a/BotList/views.py b/BotList/views.py
+index 822b35a..d22a056 100644
+--- a/BotList/views.py
++++ b/BotList/views.py
+@@ -12,6 +12,7 @@ from django.core.exceptions import ValidationError
+ 
+ from Engine.server_api import get_timezones, get_validsymbols, get_token_req_headers, get_account_details
+ from Engine.config import AUTH_ENDPOINT,CLIENT_ID, CLIENT_SECRET, REDIRECT_URI,TOKEN_ENDPOINT, REF_TOKEN_EXPIRE_DAY
++from Engine import risk
+ from Engine.offline import is_offline, offline_oauth_tokens
+ 
+ import os
+@@ -200,6 +201,15 @@ def bot_onoff(request):
+         user_name = request.user.username
+         user_id = request.user.id
+ 
++        #a metered user out of money or out of lots may not start the bot at all
++        remaining_debit = risk.remaining_debit(user_id)
++        lots_left = risk.lots_left(user_id)
++        spent_money = remaining_debit is not None and remaining_debit <= 0
++        spent_lots = lots_left is not None and lots_left <= 0
++        if spent_money or spent_lots:
++            resp = {'status':'fail', 'error':"Today's risk budget is used up"}
++            return JsonResponse(resp)
++
+         #update the bot setting
+         setting_ob, created = BotSetting.objects.update_or_create(
+             bot_id = bot_id,
+diff --git a/Engine/risk.py b/Engine/risk.py
+new file mode 100644
+index 0000000..8f6b049
+--- /dev/null
++++ b/Engine/risk.py
+@@ -0,0 +1,290 @@
++"""Per user risk budget for the bot order path.
++
++An admin gives a user a `BotRiskLimit`: how much debit that account may spend
++on bot orders in one trading day, and how many lots one order may carry. The
++send path in `Engine/server_api.py` asks this module how many lots it is
++allowed to place, and tells it what a placed order committed. A cancelled
++order gives its debit back to the day.
++
++Money here is option debit in dollars: a combo priced at 5.78 costs
++5.78 * 100 * lots, the same 100 multiplier the account balance sizing in
++`send_order` already uses.
++"""
++
++import math
++
++from datetime import timezone as datetime_timezone
++
++import pytz
++
++from django.contrib.auth.models import User
++from django.utils import timezone
++
++from BotList.models import Bot, BotOnOff, BotRiskCommitment, BotRiskLimit
++from Users.models import UserMessage
++
++
++# The trading day of the exchange the bots trade, not the server clock.
++TRADING_TIME_ZONE = 'US/Eastern'
++
++# One option contract covers 100 shares of the underlying.
++CONTRACT_MULTIPLIER = 100
++
++# A cap is either a plain dollar figure or a slice of the account, the same two
++# words the user's own contract type uses for lots.
++CAP_FIXED = 'Fixed'
++CAP_BY_ACCOUNT_BALANCE = 'ByAccountBalance'
++
++# Written for the user when a send is skipped for want of budget.
++SKIP_MESSAGE = (
++    "Your bot order was skipped: today's risk budget has no room left for "
++    "another lot. Ask the administrator to raise the daily cap."
++)
++
++
++def trading_day(moment = None):
++    """The US/Eastern calendar date a moment belongs to, as 'YYYY-MM-DD'.
++
++    A moment with no timezone is read as UTC, which is what the database
++    hands back when Django is asked for a naive datetime.
++    """
++    if moment is None:
++        moment = timezone.now()
++    if moment.tzinfo is None:
++        moment = moment.replace(tzinfo = datetime_timezone.utc)
++    trading_tz = pytz.timezone(TRADING_TIME_ZONE)
++    return moment.astimezone(trading_tz).strftime("%Y-%m-%d")
++
++
++def order_debit(price, lots):
++    """Dollar debit of `lots` lots of a combo priced at `price`."""
++    try:
++        return float(price) * CONTRACT_MULTIPLIER * int(lots)
++    except (TypeError, ValueError):
++        return 0.0
++
++
++def active_limit(user_id):
++    """The user's risk limit, or None when the user is not metered."""
++    try:
++        limit_obj = BotRiskLimit.objects.get(user_id = user_id)
++    except BotRiskLimit.DoesNotExist:
++        return None
++    except BotRiskLimit.MultipleObjectsReturned:
++        limit_obj = BotRiskLimit.objects.filter(user_id = user_id).order_by('-id').first()
++
++    if limit_obj is None or not limit_obj.enabled:
++        return None
++    return limit_obj
++
++
++def committed_debit(user_id, day = None):
++    """Debit the user's live orders hold against `day`, today by default."""
++    if day is None:
++        day = trading_day()
++
++    total = 0.0
++    commitment_objs = BotRiskCommitment.objects.filter(user_id = user_id, trade_date = day)
++    for commitment_obj in commitment_objs:
++        total += commitment_obj.debit
++    return total
++
++
++def committed_lots(user_id, day = None):
++    """Lots the user's live orders hold against `day`, today by default."""
++    if day is None:
++        day = trading_day()
++
++    total = 0
++    commitment_objs = BotRiskCommitment.objects.filter(user_id = user_id, trade_date = day)
++    for commitment_obj in commitment_objs:
++        total += commitment_obj.lots
++    return total
++
++
++def account_equity(user_id):
++    """The account equity Schwab reports for the user, 0 when it is unreachable."""
++    #imported here because server_api asks this module for the lot size
++    from .server_api import get_access_token
++    from .schwab_api import get_access_headers, schwab_api_get_account_balance
++
++    access_token = get_access_token(user_id)
++    if access_token is None:
++        return 0.0
++
++    try:
++        headers = get_access_headers('Bearer', access_token)
++        return float(schwab_api_get_account_balance(headers))
++    except (TypeError, ValueError):
++        return 0.0
++
++
++def daily_cap(limit_obj, user_id):
++    """Today's cap in dollars, whichever way the admin wrote it down."""
++    if limit_obj.cap_type == CAP_BY_ACCOUNT_BALANCE:
++        return account_equity(user_id) * (limit_obj.cap_percentage / 100.0)
++    return limit_obj.daily_debit_cap
++
++
++def remaining_debit(user_id):
++    """What is left of today's cap, or None when the user is not metered."""
++    limit_obj = active_limit(user_id)
++    if limit_obj is None:
++        return None
++
++    remaining = daily_cap(limit_obj, user_id) - committed_debit(user_id)
++    if remaining < 0:
++        remaining = 0.0
++    return remaining
++
++
++def lots_left(user_id):
++    """Lots today's cap still allows, or None when the user is not metered."""
++    limit_obj = active_limit(user_id)
++    if limit_obj is None:
++        return None
++
++    left = limit_obj.max_lots_per_day - committed_lots(user_id)
++    if left < 0:
++        left = 0
++    return left
++
++
++def allowed_lots(user_id, price, lots):
++    """How many of `lots` lots the budget allows at `price`.
++
++    Zero means nothing may be sent: the caller places no order at all rather
++    than falling back to a single lot.
++    """
++    limit_obj = active_limit(user_id)
++    if limit_obj is None:
++        return lots
++
++    allowed = min(int(lots), limit_obj.max_lots_per_order)
++
++    #whatever the day has already placed comes off the day's lot cap
++    lots_left_today = limit_obj.max_lots_per_day - committed_lots(user_id)
++    if lots_left_today < allowed:
++        allowed = lots_left_today
++
++    if allowed < 1:
++        return 0
++
++    lot_debit = order_debit(price, 1)
++    if lot_debit <= 0:
++        return 0
++
++    remaining = daily_cap(limit_obj, user_id) - committed_debit(user_id)
++    affordable = int(math.floor(remaining / lot_debit))
++    if affordable < allowed:
++        allowed = affordable
++
++    if allowed < 1:
++        return 0
++    return allowed
++
++
++def commit_order(user_id, order_id, price, lots):
++    """Hold the debit of a placed order against today's cap."""
++    if order_id is None or active_limit(user_id) is None:
++        return None
++
++    commitment_obj, created = BotRiskCommitment.objects.update_or_create(
++        order_id = f"{order_id}",
++        defaults = {
++            'user_id': user_id,
++            'trade_date': trading_day(),
++            'debit': order_debit(price, lots),
++            'lots': int(lots),
++            'created_at': timezone.now(),
++        }
++    )
++    return commitment_obj
++
++
++def release_day(user_id, day = None):
++    """Drop everything the user holds against `day`, today by default."""
++    if day is None:
++        day = trading_day()
++    BotRiskCommitment.objects.filter(user_id = user_id, trade_date = day).delete()
++
++
++def release_order(order_id):
++    """Give a cancelled order's debit back. Cancelling twice gives it back once."""
++    if order_id is None:
++        return
++    BotRiskCommitment.objects.filter(order_id = f"{order_id}").delete()
++
++
++def stop_bot(user_id):
++    """Switch Bot1 off for the user, so the run stops asking for more."""
++    try:
++        bot_obj = Bot.objects.get(botname = 'Bot1')
++    except Bot.DoesNotExist:
++        return
++    except Bot.MultipleObjectsReturned:
++        bot_obj = Bot.objects.filter(botname = 'Bot1').order_by('id').first()
++
++    BotOnOff.objects.update_or_create(
++        bot_id = bot_obj.id,
++        user_id = user_id,
++        defaults = {'status': False, 'created_at': timezone.now()}
++    )
++
++
++def record_skip(user_id):
++    """Tell the user why nothing was sent, and stop the bot for them."""
++    UserMessage.objects.create(
++        user_id = user_id,
++        message = SKIP_MESSAGE,
++        created_at = timezone.now(),
++    )
++    stop_bot(user_id)
++
++
++def usage_records():
++    """One row per user for the admin page: cap, lots, what today has spent."""
++    records = []
++    user_objs = User.objects.all().order_by('id')
++    for user_obj in user_objs:
++        try:
++            limit_obj = BotRiskLimit.objects.get(user_id = user_obj.id)
++        except BotRiskLimit.DoesNotExist:
++            limit_obj = None
++
++        if limit_obj is None:
++            cap_type = CAP_FIXED
++            daily_debit_cap = 0.0
++            cap_percentage = 0.0
++            max_lots_per_order = 0
++            max_lots_per_day = 0
++            enabled = False
++            cap = 0.0
++        else:
++            cap_type = limit_obj.cap_type
++            daily_debit_cap = limit_obj.daily_debit_cap
++            cap_percentage = limit_obj.cap_percentage
++            max_lots_per_order = limit_obj.max_lots_per_order
++            max_lots_per_day = limit_obj.max_lots_per_day
++            enabled = limit_obj.enabled
++            cap = daily_cap(limit_obj, user_obj.id) if enabled else 0.0
++
++        committed = committed_debit(user_obj.id)
++        remaining = cap - committed
++        if remaining < 0:
++            remaining = 0.0
++
++        records.append({
++            'user_id': user_obj.id,
++            'user_name': user_obj.username,
++            'cap_type': cap_type,
++            'daily_debit_cap': round(daily_debit_cap, 2),
++            'cap_percentage': round(cap_percentage, 2),
++            'max_lots_per_order': max_lots_per_order,
++            'max_lots_per_day': max_lots_per_day,
++            'enabled': enabled,
++            'committed_lots': committed_lots(user_obj.id),
++            'committed_debit': round(committed, 2),
++            'remaining_debit': round(remaining, 2) if enabled else 0.0,
++        })
++    return records
+diff --git a/Engine/server_api.py b/Engine/server_api.py
+index d085511..5a69cb7 100644
+--- a/Engine/server_api.py
++++ b/Engine/server_api.py
+@@ -11,6 +11,7 @@ from .config import *
+ from BotList.models import Bot, BotRefresh, BotAccess, BotOnOff, BotSetting
+ from django.contrib.auth.models import User
+ from .schwab_api import *
++from . import risk
+ from .offline import (
+     cancel_paper_order,
+     is_offline,
+@@ -314,8 +315,17 @@ def send_order(username, payload_dump, order_type):
+ 
+ 
+             lot_size = max(lot_size, 1)
+-            payload['orderLegCollection'][0]['quantity'] = lot_size
+-            payload['orderLegCollection'][1]['quantity'] = lot_size
++
++        #the risk budget has the last word on the size, and it may be zero
++        allowed_lot_size = risk.allowed_lots(user_id, payload['price'], lot_size)
++        if allowed_lot_size < 1:
++            print(f'Bot1 - {username} has no risk budget left for this order')
++            risk.record_skip(user_id)
++            return None, None, 0, None
++
++        lot_size = allowed_lot_size
++        payload['orderLegCollection'][0]['quantity'] = lot_size
++        payload['orderLegCollection'][1]['quantity'] = lot_size
+ 
+     else:
+         pass
+@@ -362,6 +372,8 @@ def send_order(username, payload_dump, order_type):
+     if is_offline():
+         order_id = record_paper_order(payload, username)
+         order_state, status_description = paper_order_status(order_id)
++        if order_type == 'combo_order':
++            risk.commit_order(user_id, order_id, payload['price'], lot_size)
+         return order_id, order_state, lot_size, status_description
+ 
+     response = requests.post(order_endpoint, data=json.dumps(payload), headers=headers)
+@@ -382,6 +394,8 @@ def send_order(username, payload_dump, order_type):
+                 #print(account_id, order_id, user_id)
+                 order_state, status_description = get_order_status(account_id, order_id, user_id)
+                 print(status_description)
++                if order_type == 'combo_order':
++                    risk.commit_order(user_id, order_id, payload['price'], lot_size)
+                 return order_id, order_state, lot_size, status_description
+             else:
+                 print('Location header is missing in the response.')
+@@ -659,11 +673,13 @@ def cancel_order(username, order_id):
+ 
+     if is_offline():
+         cancel_paper_order(order_id)
++        risk.release_order(order_id)
+         print(f'Cancelled the order {order_id} on the account {username}')
+         return
+ 
+     response = requests.delete(order_endpoint, headers=headers)
+     if response.ok:
++        risk.release_order(order_id)
+         print(f'Cancelled the order {order_id} on the account {username}')
+     else:
+         print('Error in cancelling the order as following reason')
+diff --git a/Static/js/admin_3.13.js b/Static/js/admin_3.13.js
+index 34425bd..882fc60 100644
+--- a/Static/js/admin_3.13.js
++++ b/Static/js/admin_3.13.js
+@@ -63,6 +63,52 @@ async function changeAllowStatus(user_id, status) {
+ }
+ 
+ 
++async function changeRiskBudget(user_id) {
++    var endPoint = `${window.SERVER_ENDPOINT}/admin/risk_budget_change/`
++
++    var paramPayload = {
++        'user_id':user_id,
++        'cap_type':document.getElementById(`cap-type-${user_id}`).value,
++        'daily_debit_cap':document.getElementById(`daily-debit-cap-${user_id}`).value,
++        'cap_percentage':document.getElementById(`cap-percentage-${user_id}`).value,
++        'max_lots_per_order':document.getElementById(`max-lots-per-order-${user_id}`).value,
++        'max_lots_per_day':document.getElementById(`max-lots-per-day-${user_id}`).value,
++        'enabled':document.getElementById(`metered-${user_id}`).checked
++    }
++    console.log(paramPayload);
++    const response = await fetch(endPoint, {
++        method: "POST",
++        mode:'no-cors',
++        headers: {
++            "Content-Type": "application/json",
++        },
++        body: JSON.stringify(paramPayload),
++    });
++    console.log(response)
++    location.reload();
++}
++
++
++async function releaseRiskBudget(user_id) {
++    var endPoint = `${window.SERVER_ENDPOINT}/admin/risk_budget_release/`
++
++    var paramPayload = {
++        'user_id':user_id
++    }
++    console.log(paramPayload);
++    const response = await fetch(endPoint, {
++        method: "POST",
++        mode:'no-cors',
++        headers: {
++            "Content-Type": "application/json",
++        },
++        body: JSON.stringify(paramPayload),
++    });
++    console.log(response)
++    location.reload();
++}
++
++
+ async function changePwdAllowStatus(user_id, allow_by_admin) {
+     var endPoint = `${window.SERVER_ENDPOINT}/admin/user_pwd_allow_change/`
+ 

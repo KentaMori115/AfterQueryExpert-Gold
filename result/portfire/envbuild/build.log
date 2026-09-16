@@ -1,0 +1,363 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 DONE 0.0s
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.21kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node:24-bookworm-slim
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 DONE 0.0s
+
+#5 [1/6] FROM docker.io/library/node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
+#5 resolve docker.io/library/node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e 0.0s done
+#5 CACHED
+
+#4 [internal] load build context
+#4 transferring context: 512.62kB 0.1s done
+#4 DONE 0.2s
+
+#6 [2/6] RUN command -v git >/dev/null 2>&1 || { { apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*; } || apk add --no-cache git || microdnf -y install git || dnf -y install git || yum -y install git || { echo "PLATFORM ERROR: this base image has no git, and no apt-get/apk/dnf/yum to install it. Use one of the approved base images, or add git to the image yourself."; exit 1; }; }
+#6 0.334 Get:1 http://deb.debian.org/debian bookworm InRelease [151 kB]
+#6 0.357 Get:2 http://deb.debian.org/debian bookworm-updates InRelease [55.4 kB]
+#6 0.369 Get:3 http://deb.debian.org/debian-security bookworm-security InRelease [34.8 kB]
+#6 0.440 Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8790 kB]
+#6 0.556 Get:5 http://deb.debian.org/debian bookworm-updates/main amd64 Packages [6924 B]
+#6 0.746 Get:6 http://deb.debian.org/debian-security bookworm-security/main amd64 Packages [335 kB]
+#6 1.498 Fetched 9374 kB in 1s (7918 kB/s)
+#6 1.498 Reading package lists...
+#6 2.089 Reading package lists...
+#6 2.665 Building dependency tree...
+#6 2.827 Reading state information...
+#6 2.940 The following additional packages will be installed:
+#6 2.940   git-man libbrotli1 libcurl3-gnutls liberror-perl libexpat1 libgdbm-compat4
+#6 2.940   libgdbm6 libgssapi-krb5-2 libk5crypto3 libkeyutils1 libkrb5-3
+#6 2.941   libkrb5support0 libldap-2.5-0 libnghttp2-14 libperl5.36 libpsl5 librtmp1
+#6 2.941   libsasl2-2 libsasl2-modules-db libssh2-1 libssl3 perl perl-modules-5.36
+#6 2.942 Suggested packages:
+#6 2.942   gettext-base git-daemon-run | git-daemon-sysvinit git-doc git-email git-gui
+#6 2.942   gitk gitweb git-cvs git-mediawiki git-svn gdbm-l10n krb5-doc krb5-user
+#6 2.942   sensible-utils perl-doc libterm-readline-gnu-perl
+#6 2.942   | libterm-readline-perl-perl make libtap-harness-archive-perl
+#6 2.942 Recommended packages:
+#6 2.942   ca-certificates patch less ssh-client krb5-locales libldap-common
+#6 2.942   publicsuffix libsasl2-modules netbase
+#6 3.114 The following NEW packages will be installed:
+#6 3.114   git git-man libbrotli1 libcurl3-gnutls liberror-perl libexpat1
+#6 3.114   libgdbm-compat4 libgdbm6 libgssapi-krb5-2 libk5crypto3 libkeyutils1
+#6 3.115   libkrb5-3 libkrb5support0 libldap-2.5-0 libnghttp2-14 libperl5.36 libpsl5
+#6 3.115   librtmp1 libsasl2-2 libsasl2-modules-db libssh2-1 libssl3 perl
+#6 3.116   perl-modules-5.36
+#6 3.155 0 upgraded, 24 newly installed, 0 to remove and 0 not upgraded.
+#6 3.155 Need to get 20.7 MB of archives.
+#6 3.155 After this operation, 109 MB of additional disk space will be used.
+#6 3.155 Get:1 http://deb.debian.org/debian bookworm/main amd64 perl-modules-5.36 all 5.36.0-7+deb12u3 [2815 kB]
+#6 3.212 Get:2 http://deb.debian.org/debian bookworm/main amd64 libgdbm6 amd64 1.23-3 [72.2 kB]
+#6 3.213 Get:3 http://deb.debian.org/debian bookworm/main amd64 libgdbm-compat4 amd64 1.23-3 [48.2 kB]
+#6 3.213 Get:4 http://deb.debian.org/debian bookworm/main amd64 libperl5.36 amd64 5.36.0-7+deb12u3 [4196 kB]
+#6 3.271 Get:5 http://deb.debian.org/debian bookworm/main amd64 perl amd64 5.36.0-7+deb12u3 [239 kB]
+#6 3.273 Get:6 http://deb.debian.org/debian bookworm/main amd64 libbrotli1 amd64 1.0.9-2+b6 [275 kB]
+#6 3.274 Get:7 http://deb.debian.org/debian bookworm/main amd64 libkrb5support0 amd64 1.20.1-2+deb12u5 [33.2 kB]
+#6 3.275 Get:8 http://deb.debian.org/debian bookworm/main amd64 libk5crypto3 amd64 1.20.1-2+deb12u5 [79.7 kB]
+#6 3.277 Get:9 http://deb.debian.org/debian bookworm/main amd64 libkeyutils1 amd64 1.6.3-2 [8808 B]
+#6 3.277 Get:10 http://deb.debian.org/debian bookworm/main amd64 libssl3 amd64 3.0.20-1~deb12u2 [2036 kB]
+#6 3.304 Get:11 http://deb.debian.org/debian bookworm/main amd64 libkrb5-3 amd64 1.20.1-2+deb12u5 [332 kB]
+#6 3.304 Get:12 http://deb.debian.org/debian bookworm/main amd64 libgssapi-krb5-2 amd64 1.20.1-2+deb12u5 [135 kB]
+#6 3.305 Get:13 http://deb.debian.org/debian bookworm/main amd64 libsasl2-modules-db amd64 2.1.28+dfsg-10 [20.3 kB]
+#6 3.306 Get:14 http://deb.debian.org/debian bookworm/main amd64 libsasl2-2 amd64 2.1.28+dfsg-10 [59.7 kB]
+#6 3.306 Get:15 http://deb.debian.org/debian bookworm/main amd64 libldap-2.5-0 amd64 2.5.13+dfsg-5 [183 kB]
+#6 3.309 Get:16 http://deb.debian.org/debian bookworm/main amd64 libnghttp2-14 amd64 1.52.0-1+deb12u3 [72.4 kB]
+#6 3.309 Get:17 http://deb.debian.org/debian bookworm/main amd64 libpsl5 amd64 0.21.2-1 [58.7 kB]
+#6 3.310 Get:18 http://deb.debian.org/debian bookworm/main amd64 librtmp1 amd64 2.4+20151223.gitfa8646d.1-2+b2 [60.8 kB]
+#6 3.310 Get:19 http://deb.debian.org/debian bookworm/main amd64 libssh2-1 amd64 1.10.0-3+b1 [179 kB]
+#6 3.311 Get:20 http://deb.debian.org/debian bookworm/main amd64 libcurl3-gnutls amd64 7.88.1-10+deb12u15 [386 kB]
+#6 3.318 Get:21 http://deb.debian.org/debian-security bookworm-security/main amd64 libexpat1 amd64 2.5.0-1+deb12u3 [104 kB]
+#6 3.319 Get:22 http://deb.debian.org/debian bookworm/main amd64 liberror-perl all 0.17029-2 [29.0 kB]
+#6 3.327 Get:23 http://deb.debian.org/debian bookworm/main amd64 git-man all 1:2.39.5-0+deb12u3 [2053 kB]
+#6 3.346 Get:24 http://deb.debian.org/debian bookworm/main amd64 git amd64 1:2.39.5-0+deb12u3 [7264 kB]
+#6 3.536 debconf: delaying package configuration, since apt-utils is not installed
+#6 3.570 Fetched 20.7 MB in 0s (73.4 MB/s)
+#6 3.594 Selecting previously unselected package perl-modules-5.36.
+#6 3.594 (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 6096 files and directories currently installed.)
+#6 3.602 Preparing to unpack .../00-perl-modules-5.36_5.36.0-7+deb12u3_all.deb ...
+#6 3.605 Unpacking perl-modules-5.36 (5.36.0-7+deb12u3) ...
+#6 3.990 Selecting previously unselected package libgdbm6:amd64.
+#6 3.996 Preparing to unpack .../01-libgdbm6_1.23-3_amd64.deb ...
+#6 4.000 Unpacking libgdbm6:amd64 (1.23-3) ...
+#6 4.036 Selecting previously unselected package libgdbm-compat4:amd64.
+#6 4.038 Preparing to unpack .../02-libgdbm-compat4_1.23-3_amd64.deb ...
+#6 4.039 Unpacking libgdbm-compat4:amd64 (1.23-3) ...
+#6 4.075 Selecting previously unselected package libperl5.36:amd64.
+#6 4.076 Preparing to unpack .../03-libperl5.36_5.36.0-7+deb12u3_amd64.deb ...
+#6 4.083 Unpacking libperl5.36:amd64 (5.36.0-7+deb12u3) ...
+#6 4.445 Selecting previously unselected package perl.
+#6 4.447 Preparing to unpack .../04-perl_5.36.0-7+deb12u3_amd64.deb ...
+#6 4.455 Unpacking perl (5.36.0-7+deb12u3) ...
+#6 4.490 Selecting previously unselected package libbrotli1:amd64.
+#6 4.492 Preparing to unpack .../05-libbrotli1_1.0.9-2+b6_amd64.deb ...
+#6 4.494 Unpacking libbrotli1:amd64 (1.0.9-2+b6) ...
+#6 4.533 Selecting previously unselected package libkrb5support0:amd64.
+#6 4.533 Preparing to unpack .../06-libkrb5support0_1.20.1-2+deb12u5_amd64.deb ...
+#6 4.535 Unpacking libkrb5support0:amd64 (1.20.1-2+deb12u5) ...
+#6 4.573 Selecting previously unselected package libk5crypto3:amd64.
+#6 4.573 Preparing to unpack .../07-libk5crypto3_1.20.1-2+deb12u5_amd64.deb ...
+#6 4.579 Unpacking libk5crypto3:amd64 (1.20.1-2+deb12u5) ...
+#6 4.616 Selecting previously unselected package libkeyutils1:amd64.
+#6 4.619 Preparing to unpack .../08-libkeyutils1_1.6.3-2_amd64.deb ...
+#6 4.619 Unpacking libkeyutils1:amd64 (1.6.3-2) ...
+#6 4.648 Selecting previously unselected package libssl3:amd64.
+#6 4.653 Preparing to unpack .../09-libssl3_3.0.20-1~deb12u2_amd64.deb ...
+#6 4.659 Unpacking libssl3:amd64 (3.0.20-1~deb12u2) ...
+#6 4.815 Selecting previously unselected package libkrb5-3:amd64.
+#6 4.815 Preparing to unpack .../10-libkrb5-3_1.20.1-2+deb12u5_amd64.deb ...
+#6 4.816 Unpacking libkrb5-3:amd64 (1.20.1-2+deb12u5) ...
+#6 4.893 Selecting previously unselected package libgssapi-krb5-2:amd64.
+#6 4.895 Preparing to unpack .../11-libgssapi-krb5-2_1.20.1-2+deb12u5_amd64.deb ...
+#6 4.896 Unpacking libgssapi-krb5-2:amd64 (1.20.1-2+deb12u5) ...
+#6 4.939 Selecting previously unselected package libsasl2-modules-db:amd64.
+#6 4.940 Preparing to unpack .../12-libsasl2-modules-db_2.1.28+dfsg-10_amd64.deb ...
+#6 4.942 Unpacking libsasl2-modules-db:amd64 (2.1.28+dfsg-10) ...
+#6 4.972 Selecting previously unselected package libsasl2-2:amd64.
+#6 4.975 Preparing to unpack .../13-libsasl2-2_2.1.28+dfsg-10_amd64.deb ...
+#6 4.981 Unpacking libsasl2-2:amd64 (2.1.28+dfsg-10) ...
+#6 5.024 Selecting previously unselected package libldap-2.5-0:amd64.
+#6 5.025 Preparing to unpack .../14-libldap-2.5-0_2.5.13+dfsg-5_amd64.deb ...
+#6 5.027 Unpacking libldap-2.5-0:amd64 (2.5.13+dfsg-5) ...
+#6 5.070 Selecting previously unselected package libnghttp2-14:amd64.
+#6 5.070 Preparing to unpack .../15-libnghttp2-14_1.52.0-1+deb12u3_amd64.deb ...
+#6 5.074 Unpacking libnghttp2-14:amd64 (1.52.0-1+deb12u3) ...
+#6 5.103 Selecting previously unselected package libpsl5:amd64.
+#6 5.104 Preparing to unpack .../16-libpsl5_0.21.2-1_amd64.deb ...
+#6 5.106 Unpacking libpsl5:amd64 (0.21.2-1) ...
+#6 5.133 Selecting previously unselected package librtmp1:amd64.
+#6 5.134 Preparing to unpack .../17-librtmp1_2.4+20151223.gitfa8646d.1-2+b2_amd64.deb ...
+#6 5.137 Unpacking librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b2) ...
+#6 5.171 Selecting previously unselected package libssh2-1:amd64.
+#6 5.171 Preparing to unpack .../18-libssh2-1_1.10.0-3+b1_amd64.deb ...
+#6 5.174 Unpacking libssh2-1:amd64 (1.10.0-3+b1) ...
+#6 5.216 Selecting previously unselected package libcurl3-gnutls:amd64.
+#6 5.217 Preparing to unpack .../19-libcurl3-gnutls_7.88.1-10+deb12u15_amd64.deb ...
+#6 5.220 Unpacking libcurl3-gnutls:amd64 (7.88.1-10+deb12u15) ...
+#6 5.264 Selecting previously unselected package libexpat1:amd64.
+#6 5.264 Preparing to unpack .../20-libexpat1_2.5.0-1+deb12u3_amd64.deb ...
+#6 5.266 Unpacking libexpat1:amd64 (2.5.0-1+deb12u3) ...
+#6 5.292 Selecting previously unselected package liberror-perl.
+#6 5.294 Preparing to unpack .../21-liberror-perl_0.17029-2_all.deb ...
+#6 5.297 Unpacking liberror-perl (0.17029-2) ...
+#6 5.326 Selecting previously unselected package git-man.
+#6 5.327 Preparing to unpack .../22-git-man_1%3a2.39.5-0+deb12u3_all.deb ...
+#6 5.329 Unpacking git-man (1:2.39.5-0+deb12u3) ...
+#6 5.421 Selecting previously unselected package git.
+#6 5.425 Preparing to unpack .../23-git_1%3a2.39.5-0+deb12u3_amd64.deb ...
+#6 5.436 Unpacking git (1:2.39.5-0+deb12u3) ...
+#6 5.859 Setting up libexpat1:amd64 (2.5.0-1+deb12u3) ...
+#6 5.863 Setting up libkeyutils1:amd64 (1.6.3-2) ...
+#6 5.866 Setting up libpsl5:amd64 (0.21.2-1) ...
+#6 5.869 Setting up libbrotli1:amd64 (1.0.9-2+b6) ...
+#6 5.873 Setting up libssl3:amd64 (3.0.20-1~deb12u2) ...
+#6 5.876 Setting up libnghttp2-14:amd64 (1.52.0-1+deb12u3) ...
+#6 5.880 Setting up libkrb5support0:amd64 (1.20.1-2+deb12u5) ...
+#6 5.883 Setting up libsasl2-modules-db:amd64 (2.1.28+dfsg-10) ...
+#6 5.885 Setting up perl-modules-5.36 (5.36.0-7+deb12u3) ...
+#6 5.889 Setting up librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b2) ...
+#6 5.892 Setting up libk5crypto3:amd64 (1.20.1-2+deb12u5) ...
+#6 5.895 Setting up libsasl2-2:amd64 (2.1.28+dfsg-10) ...
+#6 5.898 Setting up git-man (1:2.39.5-0+deb12u3) ...
+#6 5.902 Setting up libssh2-1:amd64 (1.10.0-3+b1) ...
+#6 5.905 Setting up libkrb5-3:amd64 (1.20.1-2+deb12u5) ...
+#6 5.908 Setting up libgdbm6:amd64 (1.23-3) ...
+#6 5.915 Setting up libldap-2.5-0:amd64 (2.5.13+dfsg-5) ...
+#6 5.918 Setting up libgssapi-krb5-2:amd64 (1.20.1-2+deb12u5) ...
+#6 5.922 Setting up libgdbm-compat4:amd64 (1.23-3) ...
+#6 5.925 Setting up libperl5.36:amd64 (5.36.0-7+deb12u3) ...
+#6 5.928 Setting up libcurl3-gnutls:amd64 (7.88.1-10+deb12u15) ...
+#6 5.931 Setting up perl (5.36.0-7+deb12u3) ...
+#6 5.942 Setting up liberror-perl (0.17029-2) ...
+#6 5.945 Setting up git (1:2.39.5-0+deb12u3) ...
+#6 5.954 Processing triggers for libc-bin (2.36-9+deb12u14) ...
+#6 DONE 6.1s
+
+#7 [3/6] COPY repo/ /app
+#7 DONE 0.2s
+
+#8 [4/6] WORKDIR /app
+#8 DONE 0.0s
+
+#9 [5/6] RUN npm ci --no-audit --no-fund  && npm run format  && npm run typecheck  && npm run lint  && npm test  && npm run build  && node dist/bin/portfire.js check examples/autumn/show.pf --catalog examples/autumn/house.csv --rig examples/autumn/autumn.rig --audience 200 --stats  && node dist/bin/portfire.js table examples/autumn/show.pf --catalog examples/autumn/house.csv --rig examples/autumn/autumn.rig --out /tmp/panel.csv  && test -s /tmp/panel.csv  && node dist/bin/portfire.js lint examples/autumn/show.pf --follow  && rm -rf dist dist-bench coverage /tmp/panel.csv  && npm cache clean --force
+#9 3.047 npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+#9 3.588 npm warn deprecated eslint@9.18.0: This version is no longer supported. Please see https://eslint.org/version-support for other options.
+#9 3.756 
+#9 3.756 added 216 packages in 3s
+#9 3.756 npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+#9 3.756 npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js)
+#9 3.756 npm warn install-scripts
+#9 3.756 npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+#9 3.757 npm notice
+#9 3.757 npm notice New major version of npm available! 11.19.0 -> 12.0.2
+#9 3.757 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+#9 3.757 npm notice To update run: npm install -g npm@12.0.2
+#9 3.757 npm notice
+#9 3.959 
+#9 3.959 > portfire@0.1.0 format
+#9 3.959 > prettier --check .
+#9 3.959 
+#9 4.066 Checking formatting...
+#9 7.606 All matched files use Prettier code style!
+#9 7.788 
+#9 7.788 > portfire@0.1.0 typecheck
+#9 7.788 > tsc --noEmit
+#9 7.788 
+#9 11.35 
+#9 11.35 > portfire@0.1.0 lint
+#9 11.35 > eslint . --max-warnings 0
+#9 11.35 
+#9 28.96 
+#9 28.96 > portfire@0.1.0 test
+#9 28.96 > vitest run
+#9 28.96 
+#9 29.57 
+#9 29.57  RUN  v2.1.8 /app
+#9 29.57 
+#9 31.84  ✓ tests/coverage.test.ts (38 tests) 109ms
+#9 31.88  ✓ tests/rig/redundancy.test.ts (32 tests) 147ms
+#9 31.95  ✓ tests/cli/commands.test.ts (28 tests) 216ms
+#9 32.69  ✓ tests/compile.test.ts (30 tests) 68ms
+#9 32.84  ✓ tests/script/parser.test.ts (38 tests) 54ms
+#9 32.96  ✓ tests/safety/noise.test.ts (28 tests) 63ms
+#9 33.28  ✓ tests/safety/rules.test.ts (22 tests) 28ms
+#9 33.75  ✓ tests/rig/wiring.test.ts (24 tests) 65ms
+#9 33.91  ✓ tests/safety/crowd.test.ts (32 tests) 39ms
+#9 33.94  ✓ tests/rig/continuity.test.ts (25 tests) 38ms
+#9 34.57  ✓ tests/timeline/load.test.ts (19 tests) 39ms
+#9 34.58  ✓ tests/timeline/diff.test.ts (18 tests) 75ms
+#9 34.64  ✓ tests/script/expand.test.ts (24 tests) 46ms
+#9 35.66  ✓ tests/cli/permitContinuity.test.ts (22 tests) 128ms
+#9 35.75  ✓ tests/endToEnd.test.ts (31 tests) 312ms
+#9 35.88  ✓ tests/robust.test.ts (137 tests) 598ms
+#9 36.27  ✓ tests/catalog/substitute.test.ts (23 tests) 53ms
+#9 36.38  ✓ tests/timeline/chain.test.ts (18 tests) 44ms
+#9 36.62  ✓ tests/rig/layout.test.ts (19 tests) 38ms
+#9 37.08  ✓ tests/export/permit.test.ts (22 tests) 22ms
+#9 37.26  ✓ tests/cli/sheetInventory.test.ts (19 tests) 69ms
+#9 37.50  ✓ tests/cli/planLayout.test.ts (24 tests) 126ms
+#9 37.53  ✓ tests/timeline/sync.test.ts (25 tests) 30ms
+#9 37.73  ✓ tests/catalog/parse.test.ts (20 tests) 26ms
+#9 38.06  ✓ tests/timeline/misfire.test.ts (20 tests) 24ms
+#9 38.07  ✓ tests/cli/command.test.ts (25 tests) 17ms
+#9 38.27  ✓ tests/timeline/density.test.ts (18 tests) 31ms
+#9 38.56  ✓ tests/catalog/palette.test.ts (25 tests) 51ms
+#9 38.59  ✓ tests/cli/args.test.ts (30 tests) 27ms
+#9 38.78  ✓ tests/rig/allocate.test.ts (16 tests) 23ms
+#9 39.09  ✓ tests/timeline/schedule.test.ts (18 tests) 38ms
+#9 39.22  ✓ tests/core/timecode.test.ts (32 tests) 34ms
+#9 39.31  ✓ tests/timeline/balance.test.ts (22 tests) 18ms
+#9 39.93  ✓ tests/core/diagnostic.test.ts (19 tests) 55ms
+#9 40.00  ✓ tests/script/resolve.test.ts (22 tests) 15ms
+#9 40.03  ✓ tests/timeline/rehearsal.test.ts (18 tests) 67ms
+#9 40.49  ✓ tests/catalog/hazard.test.ts (23 tests) 23ms
+#9 40.76  ✓ tests/script/renumber.test.ts (22 tests) 48ms
+#9 40.83  ✓ tests/export/json.test.ts (21 tests) 24ms
+#9 40.95  ✓ tests/core/text.test.ts (34 tests) 20ms
+#9 41.45  ✓ tests/script/lint.test.ts (22 tests) 40ms
+#9 41.51  ✓ tests/core/rng.test.ts (29 tests) 130ms
+#9 41.69  ✓ tests/rig/parse.test.ts (26 tests) 32ms
+#9 42.20  ✓ tests/catalog/validate.test.ts (23 tests) 38ms
+#9 42.37  ✓ tests/rig/rig.test.ts (27 tests) 51ms
+#9 42.53  ✓ tests/examples.test.ts (17 tests) 188ms
+#9 42.76  ✓ tests/timeline/quantise.test.ts (17 tests) 16ms
+#9 43.27  ✓ tests/catalog/inventory.test.ts (20 tests) 18ms
+#9 43.28  ✓ tests/export/explain.test.ts (19 tests) 11ms
+#9 43.30  ✓ tests/cli/diffHazard.test.ts (16 tests) 53ms
+#9 43.69  ✓ tests/safety/wind.test.ts (26 tests) 14ms
+#9 43.85  ✓ tests/version.test.ts (25 tests) 18ms
+#9 43.90  ✓ tests/export/pack.test.ts (16 tests) 54ms
+#9 44.12  ✓ tests/catalog/effect.test.ts (20 tests) 23ms
+#9 44.30  ✓ tests/export/siteplan.test.ts (14 tests) 43ms
+#9 44.34  ✓ tests/core/span.test.ts (26 tests) 13ms
+#9 44.58  ✓ tests/export/firingTable.test.ts (19 tests) 26ms
+#9 44.67  ✓ tests/catalog/registry.test.ts (21 tests) 22ms
+#9 44.68  ✓ tests/script/token.test.ts (24 tests) 15ms
+#9 44.95  ✓ tests/core/result.test.ts (26 tests) 12ms
+#9 45.05  ✓ tests/script/include.test.ts (17 tests) 13ms
+#9 45.08  ✓ tests/catalog/envelope.test.ts (21 tests) 12ms
+#9 45.39  ✓ tests/script/format.test.ts (21 tests) 15ms
+#9 45.41  ✓ tests/core/interval.test.ts (29 tests) 13ms
+#9 45.45  ✓ tests/cli/lint.test.ts (19 tests) 20ms
+#9 45.70  ✓ tests/sim/preview.test.ts (19 tests) 14ms
+#9 45.74  ✓ tests/safety/distance.test.ts (20 tests) 13ms
+#9 45.82  ✓ tests/export/sheets.test.ts (20 tests) 15ms
+#9 46.05  ✓ tests/catalog/timing.test.ts (22 tests) 12ms
+#9 46.12  ✓ tests/script/annotate.test.ts (15 tests) 20ms
+#9 46.18  ✓ tests/core/numeric.test.ts (27 tests) 14ms
+#9 46.35  ✓ tests/core/ids.test.ts (25 tests) 11ms
+#9 46.49  ✓ tests/rig/pin.test.ts (23 tests) 26ms
+#9 46.61  ✓ tests/core/codes.test.ts (17 tests) 25ms
+#9 46.66  ✓ tests/rig/circuit.test.ts (24 tests) 12ms
+#9 46.79  ✓ tests/core/csv.test.ts (28 tests) 16ms
+#9 46.93  ✓ tests/script/ast.test.ts (19 tests) 10ms
+#9 46.98  ✓ tests/core/graph.test.ts (22 tests) 21ms
+#9 47.12  ✓ tests/catalog/calibre.test.ts (19 tests) 22ms
+#9 47.31  ✓ tests/rig/module.test.ts (19 tests) 16ms
+#9 47.44  ✓ tests/safety/site.test.ts (19 tests) 10ms
+#9 47.63  ✓ tests/catalog/magazine.test.ts (14 tests) 17ms
+#9 47.88  ✓ tests/cli/distance.test.ts (17 tests) 27ms
+#9 47.91  ✓ tests/core/units.test.ts (21 tests) 15ms
+#9 48.21  ✓ tests/catalog/lift.test.ts (18 tests) 19ms
+#9 48.26  ✓ tests/sim/trajectory.test.ts (20 tests) 766ms
+#9 48.26    ✓ trajectoryFor > agrees with the table across the range 348ms
+#9 48.70  ✓ tests/cli/label.test.ts (13 tests) 21ms
+#9 48.76  ✓ tests/cli/preview.test.ts (9 tests) 43ms
+#9 48.89  ✓ tests/large.test.ts (11 tests) 425ms
+#9 49.05  ✓ tests/core/collect.test.ts (12 tests) 8ms
+#9 49.14  ✓ tests/cli/completion.test.ts (14 tests) 11ms
+#9 49.35  ✓ tests/surface.test.ts (7 tests) 5ms
+#9 49.37 
+#9 49.37  Test Files  92 passed (92)
+#9 49.37       Tests  2117 passed (2117)
+#9 49.37    Start at  17:40:25
+#9 49.37    Duration  19.80s (transform 3.57s, setup 0ms, collect 17.44s, tests 5.45s, environment 26ms, prepare 11.82s)
+#9 49.37 
+#9 49.54 
+#9 49.54 > portfire@0.1.0 build
+#9 49.54 > tsc -p tsconfig.build.json
+#9 49.54 
+#9 52.01 warning PF3001: 1 pairs of cues land on the same frame
+#9 52.01 help: the first is 03.22 and 05.03, so that run will read as one report
+#9 52.01 cues        104
+#9 52.01 runs        104.8s
+#9 52.01 pre roll    0.8s
+#9 52.01 first fire  -0:00.840
+#9 52.01 drift       worst 20.0ms on a 40.0ms frame
+#9 52.01 density     peak 17 at 1:34.670, lit 89.5s of 100.0s (89%), 0 lulls
+#9 52.01 diagnostics 0 errors, 1 warning
+#9 52.01 ready, 104 cues, 0 errors, 1 warnings
+#9 52.12 warning PF3001: 1 pairs of cues land on the same frame
+#9 52.12 help: the first is 03.22 and 05.03, so that run will read as one report
+#9 52.13 wrote 104 cues to /tmp/panel.csv
+#9 52.25 2 files, 0 errors, 0 warnings
+#9 52.37 npm warn using --force Recommended protections disabled.
+#9 DONE 52.7s
+
+#10 [6/6] RUN git config --global --add safe.directory /app && cd /app && git config core.hooksPath /dev/null
+#10 DONE 0.3s
+
+#11 exporting to image
+#11 exporting layers
+#11 exporting layers 4.9s done
+#11 exporting manifest sha256:658c65270ab9db5f2b3b356c584ed27f49cfcb523f887678b297c00057f3ac1a done
+#11 exporting config sha256:d726ecbd2f50228c2b4423bc7b4639801db71000799a1eff909390421d2f0a70 done
+#11 exporting attestation manifest sha256:bebee271b97b3e96d2c09a7511861749e13858af524d9a1be71763d1fb84b8d2 done
+#11 exporting manifest list sha256:5bfc7be2b461ca5ec79f604f89bb366f90e10b47b699b86d6e568ad51bd01a22 done
+#11 naming to docker.io/library/portfire-env:v1 done
+#11 unpacking to docker.io/library/portfire-env:v1
+#11 unpacking to docker.io/library/portfire-env:v1 2.8s done
+#11 DONE 7.9s
+BUILD RC=0

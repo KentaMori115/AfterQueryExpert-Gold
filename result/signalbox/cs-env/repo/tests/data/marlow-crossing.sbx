@@ -1,0 +1,27 @@
+# A single track branch with two level crossings on it, used to test the
+# crossing columns without dragging the whole of Kingsmoor into it.
+
+scheme marlow {
+    area "Marlow Road"
+    prefix M
+}
+
+node W boundary
+node E boundary
+node J1 plain
+node J2 plain
+
+edge B1 from W to J1 length 700 speed 50 direction down
+edge B2 from J1 to J2 length 900 speed 50 direction down
+edge B3 from J2 to E length 400 speed 50 direction down
+
+section MA over B1
+section MB over B2
+section MC over B3
+
+signal M1 on B1 at 700 facing forward direction down aspects 3
+signal M3 on B2 at 900 facing forward direction down aspects 3
+
+crossing LC21 on B2 at 300 type mcb strike_in 30
+crossing LC23 on B2 at 700 type ahb
+crossing LC25 on B3 at 200 type uwc

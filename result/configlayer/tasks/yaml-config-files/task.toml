@@ -1,0 +1,37 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/yaml-config-files"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+timeout_sec = 1800
+environment_mode = "separate"
+
+[verifier.environment]
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+build_timeout_sec = 1800
+
+[environment]
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-configlayer-vfym9e:v1"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+gpus = 0
+build_timeout_sec = 1800
+
+[metadata]
+task_id = "yaml-config-files"
+display_title = "Add YAML config file support"
+display_description = "Parse a minimal YAML subset — block structure, flow collections, typed scalars — with a hand-written, dependency-free loader wired into FileSource."
+category = "feature_request"
+language = "python"
+repository_url = ""
+base_commit_hash = "dd49c9a17543604fb728e10cbb7e3b3201355d10"

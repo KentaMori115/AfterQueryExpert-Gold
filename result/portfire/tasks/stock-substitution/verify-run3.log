@@ -1,0 +1,32 @@
+
+=== staging the base tree
+local base commit: 573ecf880e9ba0eaa0d491caaa8d7e396873bb0e
+
+=== building the environment image
+
+=== building the verifier image
+
+=== oracle run (reference solution applied)
+oracle     reward.json = {"reward": 1, "f2p_total": 48, "f2p_passed": 48, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== nop run (base state, nothing applied)
+nop        reward.json = {"reward": 0, "f2p_total": 48, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.977818853974122}
+
+=== summary
+--- oracle
+P2P 2116/2116 pass 0 fail; F2P 48/48 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- nop
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > hands the shells to the earliest cues and runs out on the last
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > counts a ripple shot by shot rather than as one cue
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > breaks a tie on the same instant by the order the script wrote them
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > draws a cue inside a played group at the time it is played
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.drawing stock in firing order > carries no lot at all when the compile was given no magazine
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > keeps a shell for its own later cue rather than lending it earlier
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > covers the earlier of two shots left without when one stand-in is left
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.own cues before stand-ins > lends the remainder once every own cue is served
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > prefers the same calibre over a band match
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > takes the nearest lead among band matches
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > breaks an equal lead by effect id
+[verifier] ✗ [f2p] tests/catalog/draw.test.ts.choosing a stand-in > offers nothing substitutesFor would not, so a lead too far off is short
+
+logs kept under /root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/runs/

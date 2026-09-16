@@ -1,0 +1,200 @@
+diff --git a/lib/upload-assembly.ts b/lib/upload-assembly.ts
+new file mode 100644
+index 0000000..58591d2
+--- /dev/null
++++ b/lib/upload-assembly.ts
+@@ -0,0 +1,33 @@
++import { getExtension } from "./file-utils"
++import { partsFor } from "./upload-parts"
++import { uploadStatus, type UploadSession } from "./upload-session"
++
++export function assembleUpload(
++    session: UploadSession,
++    uploaded: Array<{ index: number; fileId: string; filePath: string }>,
++) {
++    if (!uploadStatus(session).complete) throw new Error("not finished")
++    const parts = partsFor(session.totalSize)
++    const slots: Array<{ index: number; fileId: string; filePath: string } | undefined> = parts.map(() => undefined)
++    for (const item of uploaded) {
++        if (!Number.isInteger(item.index) || item.index < 0 || item.index >= parts.length) {
++            throw new Error("no such part")
++        }
++        if (slots[item.index] !== undefined) throw new Error("part twice")
++        slots[item.index] = item
++    }
++    if (slots.some((slot) => slot === undefined)) throw new Error("part missing")
++    const ordered = slots as Array<{ index: number; fileId: string; filePath: string }>
++    const record: Record<string, unknown> = {
++        fileId: ordered[0].fileId,
++        filePath: ordered[0].filePath,
++        originalFilename: session.filename,
++        extension: getExtension(session.filename),
++        size: session.totalSize,
++    }
++    if (ordered.length > 1) {
++        record.chunks = ordered.map((part) => part.fileId)
++        record.chunkPaths = ordered.map((part) => part.filePath)
++    }
++    return record as any
++}
+diff --git a/lib/upload-parts.ts b/lib/upload-parts.ts
+new file mode 100644
+index 0000000..d5c1507
+--- /dev/null
++++ b/lib/upload-parts.ts
+@@ -0,0 +1,29 @@
++import { PART_BYTES, spanCovers, type UploadSession } from "./upload-session"
++
++export function partsFor(totalSize: number) {
++    const count = Math.ceil(totalSize / PART_BYTES)
++    return Array.from({ length: count }, (_, index) => ({
++        index,
++        start: index * PART_BYTES,
++        end: Math.min((index + 1) * PART_BYTES, totalSize) - 1,
++    }))
++}
++
++export function nextUploadBatch(session: UploadSession) {
++    const parts = partsFor(session.totalSize)
++    return parts
++        .filter((part) => !session.sent.has(part.index) && spanCovers(session, part.start, part.end + 1))
++        .map((part) => {
++            session.sent.add(part.index)
++            return {
++                index: part.index,
++                name:
++                    parts.length === 1
++                        ? session.filename
++                        : session.filename + ".part" + (part.index + 1) + "_of_" + parts.length,
++                start: part.start,
++                end: part.end,
++                size: part.end - part.start + 1,
++            }
++        })
++}
+diff --git a/lib/upload-session.ts b/lib/upload-session.ts
+new file mode 100644
+index 0000000..0b329e5
+--- /dev/null
++++ b/lib/upload-session.ts
+@@ -0,0 +1,76 @@
++import { MAX_FILE_SIZE } from "./file-utils"
++
++export const PART_BYTES = 45 * 1024 * 1024
++export const IDLE_AFTER = 21600000
++
++// Half open spans, [from, to), kept in a flat list of pairs.
++export class UploadSession {
++    id: string
++    userId: string
++    filename: string
++    totalSize: number
++    startedAt: number
++    lastSeen: number
++    spans: number[][]
++    sent: Set<number>
++
++    constructor(id: string, userId: string, filename: string, totalSize: number, startedAt: number) {
++        this.id = id
++        this.userId = userId
++        this.filename = filename
++        this.totalSize = totalSize
++        this.startedAt = startedAt
++        this.lastSeen = startedAt
++        this.spans = []
++        this.sent = new Set<number>()
++    }
++}
++
++export function createUploadSession(
++    id: string,
++    userId: string,
++    filename: string,
++    totalSize: number,
++    startedAt: number,
++): UploadSession {
++    const name = String(filename).trim()
++    if (name.length === 0) throw new Error("blank name")
++    if (!Number.isInteger(totalSize)) throw new Error("size must be whole")
++    if (totalSize < 1 || totalSize > MAX_FILE_SIZE) throw new Error("size out of range")
++    return new UploadSession(id, userId, name, totalSize, startedAt)
++}
++
++export function recordChunk(session: UploadSession, start: number, end: number, at: number): void {
++    if (!Number.isInteger(start) || !Number.isInteger(end)) throw new Error("whole offsets only")
++    if (start < 0 || end < start || end >= session.totalSize) throw new Error("outside the file")
++
++    const spans = session.spans.concat([[start, end + 1]])
++    spans.sort((a, b) => a[0] - b[0])
++    const kept: number[][] = []
++    for (const span of spans) {
++        if (kept.length && span[0] <= kept[kept.length - 1][1]) {
++            kept[kept.length - 1][1] = Math.max(kept[kept.length - 1][1], span[1])
++        } else {
++            kept.push([span[0], span[1]])
++        }
++    }
++    session.spans = kept
++    session.lastSeen = at
++}
++
++export function uploadStatus(session: UploadSession) {
++    const held = session.spans.reduce((sum, span) => sum + span[1] - span[0], 0)
++    const missing: Array<{ start: number; end: number }> = []
++    let at = 0
++    for (const span of session.spans) {
++        if (span[0] > at) missing.push({ start: at, end: span[0] - 1 })
++        at = span[1]
++    }
++    if (at < session.totalSize) missing.push({ start: at, end: session.totalSize - 1 })
++    const leading = session.spans.length && session.spans[0][0] === 0 ? session.spans[0][1] : 0
++    return { receivedBytes: held, nextOffset: leading, missing, complete: held === session.totalSize }
++}
++
++export function spanCovers(session: UploadSession, from: number, toExclusive: number): boolean {
++    return session.spans.some((span) => span[0] <= from && span[1] >= toExclusive)
++}
+diff --git a/lib/upload-store.ts b/lib/upload-store.ts
+new file mode 100644
+index 0000000..6e05955
+--- /dev/null
++++ b/lib/upload-store.ts
+@@ -0,0 +1,38 @@
++import { IDLE_AFTER, type UploadSession } from "./upload-session"
++
++export interface SessionStore {
++    byId: Record<string, UploadSession>
++}
++
++export function createSessionStore(): SessionStore {
++    return { byId: {} }
++}
++
++function alive(session: UploadSession, now: number): boolean {
++    return now - session.lastSeen < IDLE_AFTER
++}
++
++export function openSession(store: SessionStore, session: UploadSession, now: number): void {
++    if (Object.prototype.hasOwnProperty.call(store.byId, session.id)) throw new Error("id in use")
++    const mine = listSessions(store, session.userId, now)
++    if (mine.length > 3) throw new Error("too many")
++    store.byId[session.id] = session
++}
++
++export function getSession(store: SessionStore, userId: string, id: string, now: number) {
++    const found = store.byId[id]
++    if (found === undefined) return null
++    return found.userId === userId && alive(found, now) ? found : null
++}
++
++export function listSessions(store: SessionStore, userId: string, now: number): UploadSession[] {
++    return Object.values(store.byId)
++        .filter((session) => session.userId === userId && alive(session, now))
++        .sort((a, b) => a.startedAt - b.startedAt)
++}
++
++export function sweepSessions(store: SessionStore, now: number): string[] {
++    const gone = Object.values(store.byId).filter((session) => !alive(session, now)).map((s) => s.id)
++    for (const id of gone) delete store.byId[id]
++    return gone.sort()
++}

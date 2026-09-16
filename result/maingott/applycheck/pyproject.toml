@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "maingott-reel-generator"
+version = "0.1.0"
+description = "AI-assisted MainGott short-form advertising video generator"
+requires-python = ">=3.12"
+dependencies = [
+    "openai",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "python-dotenv",
+    "python-docx",
+    "typer",
+    "rich",
+    "tenacity",
+    "orjson",
+    "pillow",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff", "mypy", "static-ffmpeg"]
+
+[project.scripts]
+maingott-reel = "maingott_reel.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "PTH", "RUF", "ANN", "BLE"]
+# RUF001-003: the source specification and its keyword lists are Russian;
+# Cyrillic characters in strings are intentional, not homoglyph mistakes.
+ignore = ["ANN401", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN201", "ANN001"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["maingott_reel"]
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

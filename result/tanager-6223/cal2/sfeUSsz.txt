@@ -1,0 +1,5963 @@
+This is [harness] version 2.4.6.
+Check the v2 migration guide at https://klieret.short.gy/mini-v2-migration
+Loading global config from '/root/.config/[harness]/.env'
+Warning: Input is not a terminal (fd=0).
+Building agent config from specs: ['mini.yaml', 'agent.cost_limit=0', 
+'model.model_class=[internal]']
+
+System:
+You are a helpful assistant that can interact with a computer.
+
+User:
+Please solve this issue: README grammar runs select, insert, create_table, 
+drop_table. Rows land once and stay
+there. Fill the gap:
+
+    UPDATE table [alias] SET col = expr {, col = expr} [WHERE expr]
+    DELETE FROM table [alias] [WHERE expr]
+
+No WHERE, every row. With one, only rows whose predicate comes out TRUE, so 
+FALSE and
+unknown both stay put. Alias, where written, qualifies columns in SET and in 
+WHERE.
+
+Right-hand sides read stored row as it stood before the statement, not as 
+assignments
+leave it, so SET a = b, b = a swaps two columns. Values land under rules INSERT 
+already
+follows. INTEGER widens into a FLOAT column, nothing else converts, and a NOT 
+NULL column
+refuses NULL however that NULL arose. Build every candidate row and check it 
+before
+touching a column. One row that cannot be computed or stored ends the statement 
+with the
+table as it was. Nothing outside that table moves.
+
+DELETE drops matched rows, survivors keeping stored order. UPDATE writes matched
+rows
+where they already sit.
+
+Database::execute answers two more Outcome variants. Deleted(usize), rows 
+removed.
+Updated(usize), rows holding different values afterwards, so a matched row that 
+comes out
+identical is not one of them.
+
+Error kinds stay the engine's own. Catalog, table not there. Binder, unknown 
+column, a
+WHERE that is not boolean, an aggregate call, or one column assigned twice in a 
+SET list.
+Type, a value the column cannot hold.
+
+IMPORTANT: Please work on this in a new branch from main and commit everything 
+when you are done.
+
+
+You can execute bash commands and edit files to implement the necessary changes.
+
+## Recommended Workflow
+
+This workflow should be done step-by-step so that you can iterate on your 
+changes and any possible problems.
+
+1. Analyze the codebase by finding and reading relevant files
+2. Create a script to reproduce the issue
+3. Edit the source code to resolve the issue
+4. Verify your fix works by running your script again
+5. Test edge cases to ensure your fix is robust
+6. Submit your changes and finish your work by issuing the following command: 
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+   Do not combine it with any other command. <important>After this command, you 
+cannot continue working on this task.</important>
+
+## Command Execution Rules
+
+You are operating in an environment where
+
+1. You issue at least one command
+2. The system executes the command(s) in a subshell
+3. You see the result(s)
+4. You write your next command(s)
+
+Each response should include:
+
+1. **Reasoning text** where you explain your analysis and plan
+2. At least one tool call with your command
+
+**CRITICAL REQUIREMENTS:**
+
+- Your response SHOULD include reasoning text explaining what you're doing
+- Your response MUST include AT LEAST ONE bash tool call
+- Directory or environment variable changes are not persistent. Every action is 
+executed in a new subshell.
+- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd 
+/path/to/working/dir && ...` or write/load environment variables from files
+- Submit your changes and finish your work by issuing the following command: 
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+  Do not combine it with any other command. <important>After this command, you 
+cannot continue working on this task.</important>
+
+Example of a CORRECT response:
+<example_response>
+I need to understand the structure of the repository first. Let me check what 
+files are in the current directory to get a better understanding of the 
+codebase.
+
+[Makes bash tool call with {"command": "ls -la"} as arguments]
+</example_response>
+
+<system_information>
+Linux 6.12.85+ #1 SMP Sat Jun 27 09:44:00 UTC 2026 x86_64
+</system_information>
+
+## Useful command examples
+
+### Create a new file:
+
+```bash
+cat <<'EOF' > newfile.py
+import numpy as np
+hello = "world"
+print(hello)
+EOF
+```
+
+### Edit files with sed:```bash
+# Replace all occurrences
+sed -i 's/old_string/new_string/g' filename.py
+
+# Replace only first occurrence
+sed -i 's/old_string/new_string/' filename.py
+
+# Replace first occurrence on line 1
+sed -i '1s/old_string/new_string/' filename.py
+
+# Replace all occurrences in lines 1-10
+sed -i '1,10s/old_string/new_string/g' filename.py
+```
+
+### View file content:
+
+```bash
+# View specific lines with numbers
+nl -ba filename.py | sed -n '10,20p'
+```
+
+### Any other command you want to run
+
+```bash
+anything
+```
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 1, $0.01):
+I'll start by exploring the repository structure.
+
+```
+ls -la && cat README* 2>/dev/null | head -100
+```
+
+```
+find . -name "*.rs" -not -path "./target/*" | head -50 && cat Cargo.toml 
+2>/dev/null
+```
+
+Tool:
+<returncode>
+0
+<output>
+total 84
+drwxr-xr-x 10 root root 4096 Aug  9 17:55 .
+drwxr-xr-x 20 root root 4096 Sep  5 23:26 ..
+drwxr-xr-x  2 root root 4096 Aug  9 17:48 .config
+-rw-r--r--  1 root root  238 Aug  9 17:48 .editorconfig
+drwxr-xr-x  8 root root 4096 Aug  9 17:55 .git
+-rw-r--r--  1 root root  121 Aug  9 17:48 .gitattributes
+drwxr-xr-x  3 root root 4096 Aug  9 17:48 .github
+-rw-r--r--  1 root root    8 Aug  9 17:48 .gitignore
+-rw-r--r--  1 root root 1173 Aug  9 17:48 CHANGELOG.md
+-rw-r--r--  1 root root 1826 Aug  9 17:48 CONTRIBUTING.md
+-rw-r--r--  1 root root  151 Aug  9 17:48 Cargo.lock
+-rw-r--r--  1 root root  568 Aug  9 17:48 Cargo.toml
+-rw-r--r--  1 root root 1070 Aug  9 17:48 LICENSE
+-rw-r--r--  1 root root 5668 Aug  9 17:48 README.md
+drwxr-xr-x  2 root root 4096 Aug  9 17:48 docs
+drwxr-xr-x  2 root root 4096 Aug  9 17:48 examples
+-rw-r--r--  1 root root   33 Aug  9 17:48 rustfmt.toml
+drwxr-xr-x 11 root root 4096 Aug  9 17:48 src
+drwxr-xr-x  5 root root 4096 Aug  9 17:55 target
+drwxr-xr-x  3 root root 4096 Aug  9 17:48 tests
+# tanager
+
+**tanager** is an embeddable, in-memory analytical SQL query engine written in
+Rust with **zero external dependencies**. It parses a substantial SQL subset,
+binds and type-checks it against an in-memory catalog, applies rule-based
+optimizations, and executes the resulting plan over columnar tables.
+
+It is small enough to read end to end, but complete enough to run real 
+analytical
+queries: joins, grouping and aggregation, sorting with explicit NULL ordering,
+scalar and aggregate functions, and SQL's three-valued (NULL) logic throughout.
+
+```rust
+use tanager::Database;
+
+let mut db = Database::new();
+db.execute("CREATE TABLE employees (id INTEGER, name TEXT, dept_id INTEGER, 
+salary INTEGER)").unwrap();
+db.execute("INSERT INTO employees VALUES (1, 'Ada', 1, 160000), (2, 'Grace', 1, 
+150000), (3, 'Tim', 2, 90000)").unwrap();
+
+let result = db
+    .query("SELECT dept_id, COUNT(*), AVG(salary) AS avg_pay
+            FROM employees GROUP BY dept_id ORDER BY dept_id")
+    .unwrap();
+
+println!("{}", tanager::render_table(&result));
+// dept_id | count | avg_pay
+// --------+-------+---------
+// 1       | 2     | 155000.0
+// 2       | 1     | 90000.0
+// (2 rows)
+```
+
+## Features
+
+- **DDL / DML** — `CREATE TABLE` (with `NOT NULL` and `IF NOT EXISTS`),
+  `DROP TABLE`, and multi-row `INSERT` with optional column lists. Inserts are
+  atomic: a row that violates a type or `NOT NULL` constraint rejects the whole
+  statement.
+- **Queries** — `SELECT` with projection and aliases, `WHERE`, `INNER`/`LEFT`
+  joins (with table aliases and self-joins), `GROUP BY` / `HAVING`, `DISTINCT`,
+  `ORDER BY` (ASC/DESC, `NULLS FIRST`/`LAST`, positional and non-projected 
+keys),
+  and `LIMIT` / `OFFSET`.
+- **Expressions** — arithmetic, comparison, `AND`/`OR`/`NOT`, `BETWEEN`, `IN`,
+  `LIKE` (`%` and `_`), `IS [NOT] NULL`, `CAST`, and searched/simple `CASE`.
+- **Functions** — a broad scalar library (math: `ABS`, `ROUND`, `CEIL`, `FLOOR`,
+  `MOD`, `POWER`, `SQRT`, `SIGN`, `GREATEST`, `LEAST`; text: `LENGTH`, `UPPER`,
+  `LOWER`, `TRIM`, `LTRIM`, `RTRIM`, `SUBSTR`, `CONCAT`, `REPLACE`, `REVERSE`,
+  `REPEAT`, `LPAD`, `RPAD`, `INSTR`; general: `COALESCE`, `NULLIF`) and 
+aggregates
+  (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `GROUP_CONCAT`, `VAR_POP`, `STDDEV_POP`,
+  all with optional `DISTINCT`), plus the `||` concatenation operator.
+- **Typing** — a small static type system (`INTEGER`, `FLOAT`, `TEXT`,
+  `BOOLEAN`, `NULL`) with integer→float promotion and full type checking at bind
+  time.
+- **NULL semantics** — SQL three-valued logic everywhere: comparisons yield
+  `NULL`, predicates keep only `TRUE` rows, arithmetic propagates `NULL`, and
+  division/modulo by zero is a deterministic error rather than an infinity.
+- **Optimizer** — a rule-based, fixpoint optimizer with constant folding
+  (conservative: never folds an expression whose evaluation would error) and
+  predicate pushdown into join inputs.
+- **Determinism** — grouping and `DISTINCT` preserve first-seen order and sorts
+  are stable, so identical inputs always render identical output.
+
+## Architecture
+
+The engine is a pipeline of stages, each in its own module under `src/`:
+
+| Stage | Module | Responsibility |
+|-------|--------|----------------|
+| Types | `types` | Logical types, runtime `Value`s (three-valued ops, casting),
+schemas |
+| Storage | `storage` | Columnar `Table`s, `Row`s, and the `Catalog` |
+| Parse | `parser` | Lexer, tokens/keywords, and a Pratt parser producing the 
+AST |
+| AST | `ast` | Expression and statement syntax trees |
+| Plan | `planner` | Name/type binding, aggregate lifting, the typed 
+`LogicalPlan` |
+| Optimize | `optimizer` | `OptimizerRule` trait, fixpoint driver, folding + 
+pushdown |
+| Execute | `exec` | Expression evaluator and materializing physical operators |
+| Functions | `functions` | Scalar and aggregate function registries |
+
+The top-level `Database` (`api`) wires the pipeline together, and `format`
+renders result sets as aligned ASCII tables.
+
+```
+SQL text
+  │  parser::parse_statement
+  ▼
+AST (ast::Statement)
+  │  planner::Binder            name resolution + type checking
+  ▼
+LogicalPlan (typed)
+  │  optimizer::Optimizer       constant folding, predicate pushdown
+  ▼
+LogicalPlan (optimized)
+  │  exec::Executor             materializing operators
+  ▼
+Rows  ──►  format::render_table
+```
+
+## Command-line runner
+
+The crate ships a small `tanager` binary that runs SQL from arguments or 
+standard
+input:
+
+
+
+Tool:
+<returncode>
+0
+<output>
+./src/ast/mod.rs
+./src/ast/expr.rs
+./src/ast/display.rs
+./src/ast/statement.rs
+./src/ast/operators.rs
+./src/storage/column.rs
+./src/storage/row.rs
+./src/storage/table.rs
+./src/storage/mod.rs
+./src/storage/catalog.rs
+./src/exec/mod.rs
+./src/exec/agg_exec.rs
+./src/exec/eval.rs
+./src/exec/executor.rs
+./src/exec/predicate.rs
+./src/exec/sort_exec.rs
+./src/exec/join_exec.rs
+./src/format.rs
+./src/planner/bound.rs
+./src/planner/scope.rs
+./src/planner/mod.rs
+./src/planner/binder.rs
+./src/planner/logical.rs
+./src/planner/binder_util.rs
+./src/api.rs
+./src/bin/tanager.rs
+./src/lib.rs
+./src/prelude.rs
+./src/error.rs
+./src/types/mod.rs
+./src/types/convert.rs
+./src/types/value.rs
+./src/types/datatype.rs
+./src/types/schema.rs
+./src/parser/mod.rs
+./src/parser/lexer.rs
+./src/parser/parser.rs
+./src/parser/keyword.rs
+./src/parser/token.rs
+./src/optimizer/plan_util.rs
+./src/optimizer/optimizer.rs
+./src/optimizer/mod.rs
+./src/optimizer/limit_pushdown.rs
+./src/optimizer/constant_folding.rs
+./src/optimizer/predicate_pushdown.rs
+./src/optimizer/rule.rs
+./src/optimizer/conjuncts.rs
+./src/functions/scalar_string.rs
+./src/functions/aggregate.rs
+./src/functions/mod.rs
+[package]
+name = "tanager"
+version = "0.6.0"
+edition = "2021"
+rust-version = "1.92"
+description = "An embeddable in-memory analytical SQL query engine with a 
+cost-light rule optimizer."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/noureddine-py/tanager"
+keywords = ["sql", "query-engine", "database", "analytics", "in-memory"]
+categories = ["database-implementations"]
+
+[lib]
+name = "tanager"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tanager"
+path = "src/bin/tanager.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+[profile.test]
+opt-level = 0
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 2, $0.04):
+```
+cd /app 2>/dev/null || cd .; tail -60 README.md; echo ====; cat src/api.rs; echo
+====; cat src/ast/statement.rs
+```
+
+```
+cat src/error.rs; echo ====; cat src/storage/table.rs; echo ====; ls tests; ls 
+docs
+```
+
+Tool:
+<returncode>
+0
+<output_head>
+AST (ast::Statement)
+  │  planner::Binder            name resolution + type checking
+  ▼
+LogicalPlan (typed)
+  │  optimizer::Optimizer       constant folding, predicate pushdown
+  ▼
+LogicalPlan (optimized)
+  │  exec::Executor             materializing operators
+  ▼
+Rows  ──►  format::render_table
+```
+
+## Command-line runner
+
+The crate ships a small `tanager` binary that runs SQL from arguments or 
+standard
+input:
+
+```console
+$ tanager "CREATE TABLE t (id INTEGER, name TEXT);
+           INSERT INTO t VALUES (1, 'ada'), (2, 'grace');
+           SELECT * FROM t ORDER BY id DESC"
+CREATE TABLE t
+INSERT 2
+id | name
+---+------
+2  | grace
+1  | ada
+(2 rows)
+```
+
+## Supported SQL grammar (informal)
+
+```
+statement   := select | insert | create_table | drop_table
+select      := SELECT [DISTINCT] select_list
+               [FROM table [alias] { join }]
+               [WHERE expr]
+               [GROUP BY expr {, expr} [HAVING expr]]
+               [ORDER BY sort_key {, sort_key}]
+               [LIMIT n] [OFFSET n]
+join        := [INNER | LEFT] JOIN table [alias] ON expr
+sort_key    := expr [ASC | DESC] [NULLS (FIRST | LAST)]
+insert      := INSERT INTO table [ ( col {, col} ) ] VALUES tuple {, tuple}
+create_table:= CREATE TABLE [IF NOT EXISTS] table ( col type [NOT NULL] {, ...} 
+)
+type        := INTEGER | FLOAT | TEXT | BOOLEAN
+```
+
+## Building and testing
+
+```console
+$ cargo build
+$ cargo test
+```
+
+The test suite combines module-level unit tests with end-to-end integration 
+tests
+under `tests/` that exercise the engine through the public `Database` API.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+====
+//! The high-level embedding API: [`Database`], [`QueryResult`], and 
+[`Outcome`].
+
+use crate::ast::statement::{CreateTableStmt, DropTableStmt, InsertStmt, 
+SelectStmt, Statement};
+use crate::error::{Error, Result};
+use crate::exec::Executor;
+use crate::optimizer::Optimizer;
+use crate::parser::{parse_program, parse_statement};
+use crate::planner::scope::Scope;
+use crate::planner::Binder;
+use crate::storage::{Catalog, Row};
+use crate::types::{Field, Schema, Value};
+
+/// An embeddable SQL database: an in-memory catalog plus the query pipeline.
+///
+/// ```
+/// use tanager::Database;
+/// let mut db = Database::new();
+/// db.execute("CREATE TABLE t (id INTEGER, name TEXT)").unwrap();
+/// db.execute("INSERT INTO t VALUES (1, 'ada'), (2, 'grace')").unwrap();
+/// let result = db.query("SELECT name FROM t WHERE id = 2").unwrap();
+/// assert_eq!(result.row_count(), 1);
+/// assert_eq!(result.rows()[0].get(0).unwrap().to_string(), "grace");
+/// ```
+pub struct Database {
+    catalog: Catalog,
+    optimizer: Optimizer,
+}
+
+/// The result of a statement that is not a query.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Outcome {
+    /// `CREATE TABLE` succeeded (or was a no-op under `IF NOT EXISTS`).
+    TableCreated(String),
+    /// `DROP TABLE` succeeded (or was a no-op under `IF EXISTS`).
+    TableDropped(String),
+    /// `INSERT` added this many rows.
+    Inserted(usize),
+    /// `SELECT` produced a result set.
+    Query(QueryResult),
+}
+
+impl Outcome {
+    /// Extract the query result, or error if this outcome was not a query.
+    pub fn into_query(self) -> Result<QueryResult> {
+        match self {
+            Outcome::Query(q) => Ok(q),
+            _ => Err(Error::api("statement did not produce a result set")),
+        }
+    }
+}
+
+impl Database {
+    /// A new, empty database.
+    pub fn new() -> Database {
+        Database {
+            catalog: Catalog::new(),
+            optimizer: Optimizer::new(),
+        }
+    }
+
+    /// Borrow the catalog (for inspection).
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    /// The names of all tables, in deterministic (case-insensitive) order.
+    pub fn table_names(&self) -> Vec<String> {
+        self.catalog.table_names()
+    }
+
+    /// Whether a table with the given name exists.
+    pub fn has_table(&self, name: &str) -> bool {
+        self.catalog.contains(name)
+    }
+
+    /// Execute a single statement.
+    pub fn execute(&mut self, sql: &str) -> Result<Outcome> {
+        let stmt = parse_statement(sql)?;
+        self.execute_statement(stmt)
+    }
+
+    /// Execute a `;`-separated script, returning one outcome per statement.
+    pub fn execute_script(&mut self, sql: &str) -> Result<Vec<Outcome>> {
+        let stmts = parse_program(sql)?;
+        let mut outcomes = Vec::with_capacity(stmts.len());
+        for stmt in stmts {
+            outcomes.push(self.execute_statement(stmt)?);
+        }
+        Ok(outcomes)
+    }
+
+    /// Execute a statement that must be a `SELECT`, returning its result set.
+    pub fn query(&mut self, sql: &str) -> Result<QueryResult> {
+        self.execute(sql)?.into_query()
+    }
+
+    fn execute_statement(&mut self, stmt: Statement) -> Result<Outcome> {
+        match stmt {
+            Statement::CreateTable(c) => self.exec_create(c),
+            Statement::DropTable(d) => self.exec_drop(d),
+            Statement::Insert(i) => self.exec_insert(i),
+   
+<output_tail>
+elf) -> usize {
+        self.rows.len()
+    }
+
+    /// Whether the result set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Consume the result, returning its rows.
+    pub fn into_rows(self) -> Vec<Row> {
+        self.rows
+    }
+
+    /// The value at `(row, column)`, if in range.
+    pub fn value(&self, row: usize, column: usize) -> Option<&Value> {
+        self.rows.get(row).and_then(|r| r.get(column))
+    }
+}
+====
+//! The statement AST: the top-level nodes the parser produces.
+
+use crate::ast::expr::Expr;
+use crate::types::DataType;
+
+/// A parsed top-level statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    Select(SelectStmt),
+    Insert(InsertStmt),
+    CreateTable(CreateTableStmt),
+    DropTable(DropTableStmt),
+    /// `EXPLAIN <select>` — return the optimized plan instead of executing it.
+    Explain(SelectStmt),
+}
+
+/// One projection item in a `SELECT` list.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectItem {
+    /// `*`
+    Wildcard,
+    /// `t.*`
+    QualifiedWildcard(String),
+    /// An expression with an optional `AS alias`.
+    Expr { expr: Expr, alias: Option<String> },
+}
+
+/// The kind of join.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinType {
+    Inner,
+    Left,
+}
+
+impl JoinType {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            JoinType::Inner => "INNER JOIN",
+            JoinType::Left => "LEFT JOIN",
+        }
+    }
+}
+
+/// A joined relation and its `ON` predicate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Join {
+    pub join_type: JoinType,
+    pub relation: TableFactor,
+    pub on: Expr,
+}
+
+/// A base relation in a `FROM` clause: a named table with an optional alias.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableFactor {
+    pub name: String,
+    pub alias: Option<String>,
+}
+
+impl TableFactor {
+    /// The name by which columns of this relation are qualified: the alias if
+    /// present, otherwise the table name.
+    pub fn binding_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// A `FROM` clause: a base relation plus zero or more joins.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FromClause {
+    pub base: TableFactor,
+    pub joins: Vec<Join>,
+}
+
+/// Sort direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+/// One `ORDER BY` key.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderByExpr {
+    pub expr: Expr,
+    pub direction: SortDirection,
+    /// `true` to sort `NULL`s before non-nulls. Defaults follow SQL: `NULLS
+    /// FIRST` for ascending is *not* assumed — the parser sets this explicitly.
+    pub nulls_first: bool,
+}
+
+/// A `SELECT` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectStmt {
+    pub distinct: bool,
+    pub projection: Vec<SelectItem>,
+    /// `None` for a `SELECT` with no `FROM` (constant projection).
+    pub from: Option<FromClause>,
+    pub selection: Option<Expr>,
+    pub group_by: Vec<Expr>,
+    pub having: Option<Expr>,
+    pub order_by: Vec<OrderByExpr>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+impl SelectStmt {
+    /// An empty `SELECT *` shell, used by the parser as a starting point.
+    pub fn empty() -> SelectStmt {
+        SelectStmt {
+            distinct: false,
+            projection: Vec::new(),
+            from: None,
+            selection: None,
+            group_by: Vec::new(),
+            having: None,
+            order_by: Vec::new(),
+            limit: None,
+            offset: None,
+        }
+    }
+}
+
+/// A column definition in `CREATE TABLE`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnDef {
+    pub name: String,
+    pub data_type: DataType,
+    pub not_null: bool,
+}
+
+/// A `CREATE TABLE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateTableStmt {
+    pub name: String,
+    pub columns: Vec<ColumnDef>,
+    /// `CREATE TABLE IF NOT EXISTS`.
+    pub if_not_exists: bool,
+}
+
+/// A `DROP TABLE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropTableStmt {
+    pub name: String,
+    pub if_exists: bool,
+}
+
+/// An `INSERT` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsertStmt {
+    pub table: String,
+    /// Explicit column list, if given (`INSERT INTO t (a, b) ...`).
+    pub columns: Option<Vec<String>>,
+    /// One expression tuple per `VALUES` row.
+    pub rows: Vec<Vec<Expr>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_factor_binding_prefers_alias() {
+        let tf = TableFactor {
+            name: "employees".into(),
+            alias: Some("e".into()),
+        };
+        assert_eq!(tf.binding_name(), "e");
+        let tf2 = TableFactor {
+            name: "employees".into(),
+            alias: None,
+        };
+        assert_eq!(tf2.binding_name(), "employees");
+    }
+
+    #[test]
+    fn join_keywords() {
+        assert_eq!(JoinType::Inner.keyword(), "INNER JOIN");
+        assert_eq!(JoinType::Left.keyword(), "LEFT JOIN");
+    }
+}
+
+<elided_chars>
+4694
+<warning>
+Output too long.
+
+Tool:
+<returncode>
+0
+<output_head>
+//! Error types for the tanager query engine.
+//!
+//! Every fallible operation in the engine returns [`Result<T>`], which is a
+//! type alias for `std::result::Result<T, Error>`. Errors carry a category so
+//! callers (and tests) can distinguish, for example, a parse failure from a
+//! type error without matching on human-readable strings.
+
+use std::fmt;
+
+/// The category of an [`Error`].
+///
+/// Categories are deliberately coarse: they describe *which stage* of query
+/// processing rejected the input, which is the level of detail callers need to
+/// route errors. The attached message carries the specifics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ErrorKind {
+    /// The lexer could not tokenize the input.
+    Lex,
+    /// The parser rejected an otherwise well-tokenized statement.
+    Parse,
+    /// Name resolution failed: an unknown table, column, or function.
+    Binder,
+    /// A type rule was violated (incompatible operands, bad cast, ...).
+    Type,
+    /// A value-level failure surfaced during execution (division by zero, ...).
+    Execution,
+    /// A catalog mutation was rejected (duplicate table, missing table, ...).
+    Catalog,
+    /// The caller misused the public API (e.g. wrong column count on insert).
+    Api,
+    /// A feature was recognized but is intentionally not implemented.
+    Unsupported,
+}
+
+impl ErrorKind {
+    /// A short, stable, lower-case tag for the category. Useful in tests and
+    /// structured logging; never changes for a given variant.
+    pub fn tag(self) -> &'static str {
+        match self {
+            ErrorKind::Lex => "lex",
+            ErrorKind::Parse => "parse",
+            ErrorKind::Binder => "binder",
+            ErrorKind::Type => "type",
+            ErrorKind::Execution => "execution",
+            ErrorKind::Catalog => "catalog",
+            ErrorKind::Api => "api",
+            ErrorKind::Unsupported => "unsupported",
+        }
+    }
+}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.tag())
+    }
+}
+
+/// An engine error: a [`ErrorKind`] plus a human-readable message and an
+/// optional source position (byte offset into the original SQL text).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+    position: Option<usize>,
+}
+
+impl Error {
+    /// Build an error of `kind` with `message`.
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Error {
+            kind,
+            message: message.into(),
+            position: None,
+        }
+    }
+
+    /// Attach a source byte offset, returning the updated error.
+    pub fn at(mut self, position: usize) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    /// The category of this error.
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+
+    /// The human-readable message (without the category prefix).
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The source byte offset, if one was attached.
+    pub fn position(&self) -> Option<usize> {
+        self.position
+    }
+
+    // ------------------------------------------------------------------
+    // Convenience constructors, one per category. These keep call sites
+    // terse and consistent across the codebase.
+    // ------------------------------------------------------------------
+
+    pub fn lex(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Lex, message)
+    }
+    pub fn parse(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Parse, message)
+    }
+    pub fn binder(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Binder, message)
+    }
+    pub fn type_error(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Type, message)
+    }
+    pub fn execution(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Execution, message)
+    }
+    pub fn catalog(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Catalog, message)
+    }
+    pub fn api(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Api, message)
+    }
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Error::new(ErrorKind::Unsupported, message)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.position {
+            Some(pos) => write!(f, "{} error at byte {}: {}", self.kind, pos, 
+self.message),
+            None => write!(f, "{} error: {}", self.kind, self.message),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// The crate-wide result type.
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tags_are_stable() {
+        assert_eq!(ErrorKind::Parse.tag(), "parse");
+        assert_eq!(ErrorKind::Type.tag(), "type");
+        assert_eq!(ErrorKind::Execution.tag(), "execution");
+    }
+
+    #[test]
+    fn display_inc
+<output_tail>
+every value before mutating any column so a
+        // rejected row leaves the table unchanged.
+        let mut coerced = Vec::with_capacity(values.len());
+        for (value, field) in values.into_iter().zip(self.schema.fields()) {
+            coerced.push(coerce_for_field(value, field)?);
+        }
+        for (column, value) in self.columns.iter_mut().zip(coerced) {
+            column.push_unchecked(value);
+        }
+        self.row_count += 1;
+        Ok(())
+    }
+
+    /// Insert many rows, stopping at (and returning) the first invalid row. 
+Rows
+    /// already inserted before the failure remain.
+    pub fn insert_rows(&mut self, rows: impl IntoIterator<Item = Row>) -> 
+Result<usize> {
+        let mut n = 0;
+        for row in rows {
+            self.insert_row(row)?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
+    /// Materialize the row at `index`.
+    pub fn row(&self, index: usize) -> Option<Row> {
+        if index >= self.row_count {
+            return None;
+        }
+        let values = self
+            .columns
+            .iter()
+            .map(|c| c.get(index).cloned().unwrap_or(Value::Null))
+            .collect();
+        Some(Row::new(values))
+    }
+
+    /// Iterate over all rows, materializing each on demand.
+    pub fn iter_rows(&self) -> RowIter<'_> {
+        RowIter {
+            table: self,
+            pos: 0,
+        }
+    }
+
+    /// Collect all rows into a vector (convenience for small results/tests).
+    pub fn to_rows(&self) -> Vec<Row> {
+        self.iter_rows().collect()
+    }
+}
+
+/// Widen/validate `value` for storage in `field`'s column.
+fn coerce_for_field(value: Value, field: &Field) -> Result<Value> {
+    if value.is_null() {
+        if !field.is_nullable() {
+            return Err(Error::api(format!(
+                "column '{}' is NOT NULL but a NULL was supplied",
+                field.name()
+            )));
+        }
+        return Ok(Value::Null);
+    }
+    match (value.data_type(), field.data_type()) {
+        (a, b) if a == b => Ok(value),
+        (DataType::Integer, DataType::Float) => Ok(Value::Float(value.as_i64()? 
+as f64)),
+        (actual, expected) => Err(Error::type_error(format!(
+            "column '{}' expects {}, got {}",
+            field.name(),
+            expected,
+            actual
+        ))),
+    }
+}
+
+/// Iterator over a table's rows, produced by [`Table::iter_rows`].
+pub struct RowIter<'a> {
+    table: &'a Table,
+    pos: usize,
+}
+
+impl<'a> Iterator for RowIter<'a> {
+    type Item = Row;
+
+    fn next(&mut self) -> Option<Row> {
+        let row = self.table.row(self.pos)?;
+        self.pos += 1;
+        Some(row)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.table.row_count.saturating_sub(self.pos);
+        (remaining, Some(remaining))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn people() -> Table {
+        let schema = Schema::new(vec![
+            Field::with_nullability("id", DataType::Integer, false),
+            Field::new("name", DataType::Text),
+            Field::new("score", DataType::Float),
+        ])
+        .unwrap();
+        Table::new("people", schema)
+    }
+
+    #[test]
+    fn insert_and_iterate() {
+        let mut t = people();
+        t.insert_row(Row::new(vec![
+            Value::Integer(1),
+            Value::text("ada"),
+            Value::Float(9.5),
+        ]))
+        .unwrap();
+        // integer widened into the FLOAT column
+        t.insert_row(Row::new(vec![
+            Value::Integer(2),
+            Value::text("grace"),
+            Value::Integer(8),
+        ]))
+        .unwrap();
+        assert_eq!(t.row_count(), 2);
+        let rows = t.to_rows();
+        assert_eq!(rows[1].get(2), Some(&Value::Float(8.0)));
+    }
+
+    #[test]
+    fn rejects_bad_arity() {
+        let mut t = people();
+        let err = t.insert_row(Row::new(vec![Value::Integer(1)])).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Api);
+        assert_eq!(t.row_count(), 0);
+    }
+
+    #[test]
+    fn rejects_null_in_not_null_column() {
+        let mut t = people();
+        let err = t
+            .insert_row(Row::new(vec![Value::Null, Value::text("x"), 
+Value::Null]))
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Api);
+    }
+
+    #[test]
+    fn rejects_type_mismatch() {
+        let mut t = people();
+        let err = t
+            .insert_row(Row::new(vec![
+                Value::text("nope"),
+                Value::text("x"),
+                Value::Float(1.0),
+            ]))
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Type);
+    }
+}
+====
+aggregation.rs
+casting.rs
+cli.rs
+common
+ddl_and_dml.rs
+determinism.rs
+errors.rs
+execution_errors.rs
+explain.rs
+expressions.rs
+formatting.rs
+functions.rs
+introspection.rs
+joins.rs
+like_in_between.rs
+multi_join.rs
+null_semantics.rs
+operators.rs
+optimizer_effects.rs
+order_and_limit.rs
+parser_api.rs
+select_basic.rs
+sql_robustness.rs
+text_functions.rs
+DESIGN.md
+
+<elided_chars>
+3073
+<warning>
+Output too long.
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 3, $0.11):
+```
+sed -n 90,220p src/api.rs; echo ==== ; wc -l src/parser/parser.rs 
+src/planner/binder.rs src/planner/logical.rs src/planner/bound.rs 
+src/exec/executor.rs src/exec/eval.rs src/storage/table.rs 
+src/storage/catalog.rs src/planner/scope.rs
+```
+
+```
+cat src/parser/keyword.rs | head -120; echo ====; grep -n "fn " 
+src/parser/parser.rs | head -60
+```
+
+Tool:
+<returncode>
+0
+<output>
+    }
+
+    /// Execute a statement that must be a `SELECT`, returning its result set.
+    pub fn query(&mut self, sql: &str) -> Result<QueryResult> {
+        self.execute(sql)?.into_query()
+    }
+
+    fn execute_statement(&mut self, stmt: Statement) -> Result<Outcome> {
+        match stmt {
+            Statement::CreateTable(c) => self.exec_create(c),
+            Statement::DropTable(d) => self.exec_drop(d),
+            Statement::Insert(i) => self.exec_insert(i),
+            Statement::Select(s) => Ok(Outcome::Query(self.run_select(&s)?)),
+            Statement::Explain(s) => Ok(Outcome::Query(self.run_explain(&s)?)),
+        }
+    }
+
+    fn run_explain(&self, select: &SelectStmt) -> Result<QueryResult> {
+        let plan = Binder::new(&self.catalog).bind_select(select)?;
+        let plan = self.optimizer.optimize(plan)?;
+        let schema = Schema::new_unchecked(vec![Field::new("plan", 
+crate::types::DataType::Text)]);
+        let rows = plan
+            .explain_lines()
+            .into_iter()
+            .map(|line| Row::new(vec![Value::text(line)]))
+            .collect();
+        Ok(QueryResult { schema, rows })
+    }
+
+    fn exec_create(&mut self, stmt: CreateTableStmt) -> Result<Outcome> {
+        if stmt.if_not_exists && self.catalog.contains(&stmt.name) {
+            return Ok(Outcome::TableCreated(stmt.name));
+        }
+        let fields = stmt
+            .columns
+            .iter()
+            .map(|c| Field::with_nullability(c.name.clone(), c.data_type, 
+!c.not_null))
+            .collect();
+        let schema = Schema::new(fields)?;
+        self.catalog.create_table(stmt.name.clone(), schema)?;
+        Ok(Outcome::TableCreated(stmt.name))
+    }
+
+    fn exec_drop(&mut self, stmt: DropTableStmt) -> Result<Outcome> {
+        if stmt.if_exists && !self.catalog.contains(&stmt.name) {
+            return Ok(Outcome::TableDropped(stmt.name));
+        }
+        self.catalog.drop_table(&stmt.name)?;
+        Ok(Outcome::TableDropped(stmt.name))
+    }
+
+    fn exec_insert(&mut self, stmt: InsertStmt) -> Result<Outcome> {
+        let schema = self.catalog.schema_of(&stmt.table)?;
+        let width = schema.len();
+
+        // Resolve the target column positions for the supplied values.
+        let target: Vec<usize> = match &stmt.columns {
+            Some(cols) => {
+                let mut idxs = Vec::with_capacity(cols.len());
+                for c in cols {
+                    idxs.push(schema.index_of(c)?);
+                }
+                idxs
+            }
+            None => (0..width).collect(),
+        };
+
+        // Bind and evaluate the constant value expressions (no column refs).
+        let binder = Binder::new(&self.catalog);
+        let empty_scope = Scope::empty();
+        let empty_row = Row::empty();
+
+        let mut built_rows = Vec::with_capacity(stmt.rows.len());
+        for row_exprs in &stmt.rows {
+            if row_exprs.len() != target.len() {
+                return Err(Error::api(format!(
+                    "INSERT into '{}' has {} target column(s) but {} value(s)",
+                    stmt.table,
+                    target.len(),
+                    row_exprs.len()
+                )));
+            }
+            let mut values = vec![Value::Null; width];
+            for (expr, &pos) in row_exprs.iter().zip(&target) {
+                let bound = binder.bind_scalar(expr, &empty_scope)?;
+                values[pos] = crate::exec::eval::eval(&bound, &empty_row)?;
+            }
+            built_rows.push(Row::new(values));
+        }
+
+        // Apply after all rows are built and typed, so a bad row rejects the
+        // whole statement without partial insertion.
+        let table = self.catalog.table_mut(&stmt.table)?;
+        // Validate every row first (dry run) to keep INSERT atomic.
+        let mut probe = table.clone();
+        for row in &built_rows {
+            probe.insert_row(row.clone())?;
+        }
+        let n = built_rows.len();
+        for row in built_rows {
+            table.insert_row(row)?;
+        }
+        Ok(Outcome::Inserted(n))
+    }
+
+    fn run_select(&self, select: &SelectStmt) -> Result<QueryResult> {
+        let plan = Binder::new(&self.catalog).bind_select(select)?;
+        let plan = self.optimizer.optimize(plan)?;
+        let schema = plan.schema().clone();
+        let rows = Executor::new(&self.catalog).execute(&plan)?;
+        Ok(QueryResult { schema, rows })
+    }
+}
+
+impl Default for Database {
+    fn default() -> Self {
+        Database::new()
+    }
+}
+
+/// A materialized result set: an output schema and its rows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryResult {
+    schema: Schema,
+    rows: Vec<Row>,
+}
+
+impl QueryResult {
+    /// The output schema (column names and types).
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+====
+   866 src/parser/parser.rs
+   744 src/planner/binder.rs
+   173 src/planner/logical.rs
+   346 src/planner/bound.rs
+   213 src/exec/executor.rs
+   319 src/exec/eval.rs
+   240 src/storage/table.rs
+   139 src/storage/catalog.rs
+   185 src/planner/scope.rs
+  3225 total
+
+
+Tool:
+<returncode>
+0
+<output>
+//! Reserved keywords.
+
+/// A recognized SQL keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Keyword {
+    Select,
+    Distinct,
+    From,
+    Where,
+    Group,
+    By,
+    Having,
+    Order,
+    Asc,
+    Desc,
+    Nulls,
+    First,
+    Last,
+    Limit,
+    Offset,
+    Insert,
+    Into,
+    Values,
+    Create,
+    Table,
+    Drop,
+    If,
+    Exists,
+    As,
+    Join,
+    Inner,
+    Left,
+    On,
+    And,
+    Or,
+    Not,
+    Null,
+    True,
+    False,
+    Is,
+    Between,
+    In,
+    Like,
+    Cast,
+    Case,
+    Explain,
+    When,
+    Then,
+    Else,
+    End,
+    // Type names
+    Integer,
+    Float,
+    Text,
+    Boolean,
+}
+
+impl Keyword {
+    /// Map an already-upper-cased word to a keyword, if it is one.
+    pub fn from_upper(word: &str) -> Option<Keyword> {
+        let kw = match word {
+            "SELECT" => Keyword::Select,
+            "DISTINCT" => Keyword::Distinct,
+            "FROM" => Keyword::From,
+            "WHERE" => Keyword::Where,
+            "GROUP" => Keyword::Group,
+            "BY" => Keyword::By,
+            "HAVING" => Keyword::Having,
+            "ORDER" => Keyword::Order,
+            "ASC" => Keyword::Asc,
+            "DESC" => Keyword::Desc,
+            "NULLS" => Keyword::Nulls,
+            "FIRST" => Keyword::First,
+            "LAST" => Keyword::Last,
+            "LIMIT" => Keyword::Limit,
+            "OFFSET" => Keyword::Offset,
+            "INSERT" => Keyword::Insert,
+            "INTO" => Keyword::Into,
+            "VALUES" => Keyword::Values,
+            "CREATE" => Keyword::Create,
+            "TABLE" => Keyword::Table,
+            "DROP" => Keyword::Drop,
+            "IF" => Keyword::If,
+            "EXISTS" => Keyword::Exists,
+            "AS" => Keyword::As,
+            "JOIN" => Keyword::Join,
+            "INNER" => Keyword::Inner,
+            "LEFT" => Keyword::Left,
+            "ON" => Keyword::On,
+            "AND" => Keyword::And,
+            "OR" => Keyword::Or,
+            "NOT" => Keyword::Not,
+            "NULL" => Keyword::Null,
+            "TRUE" => Keyword::True,
+            "FALSE" => Keyword::False,
+            "IS" => Keyword::Is,
+            "BETWEEN" => Keyword::Between,
+            "IN" => Keyword::In,
+            "LIKE" => Keyword::Like,
+            "CAST" => Keyword::Cast,
+            "CASE" => Keyword::Case,
+            "EXPLAIN" => Keyword::Explain,
+            "WHEN" => Keyword::When,
+            "THEN" => Keyword::Then,
+            "ELSE" => Keyword::Else,
+            "END" => Keyword::End,
+            "INTEGER" | "INT" => Keyword::Integer,
+            "FLOAT" | "REAL" | "DOUBLE" => Keyword::Float,
+            "TEXT" | "VARCHAR" | "STRING" => Keyword::Text,
+            "BOOLEAN" | "BOOL" => Keyword::Boolean,
+            _ => return None,
+        };
+        Some(kw)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+====
+17:pub fn parse_statement(sql: &str) -> Result<Statement> {
+27:pub fn parse_program(sql: &str) -> Result<Vec<Statement>> {
+39:    fn new(tokens: Vec<Token>) -> Parser {
+45:    fn peek(&self) -> &TokenKind {
+49:    fn peek_at(&self, ahead: usize) -> &TokenKind {
+54:    fn position(&self) -> usize {
+58:    fn is_eof(&self) -> bool {
+62:    fn advance(&mut self) -> TokenKind {
+70:    fn eat(&mut self, kind: &TokenKind) -> bool {
+79:    fn expect(&mut self, kind: &TokenKind) -> Result<()> {
+93:    fn at_keyword(&self, kw: Keyword) -> bool {
+97:    fn eat_keyword(&mut self, kw: Keyword) -> bool {
+106:    fn expect_keyword(&mut self, kw: Keyword) -> Result<()> {
+120:    fn expect_identifier(&mut self) -> Result<String> {
+138:    fn peek_is_identifier(&self) -> bool {
+144:    fn parse_program(&mut self) -> Result<Vec<Statement>> {
+163:    fn parse_statement(&mut self) -> Result<Statement> {
+191:    fn parse_select(&mut self) -> Result<SelectStmt> {
+233:    fn parse_select_item(&mut self) -> Result<SelectItem> {
+259:    fn parse_optional_alias(&mut self) -> Result<Option<String>> {
+269:    fn parse_from_clause(&mut self) -> Result<FromClause> {
+296:    fn parse_table_factor(&mut self) -> Result<TableFactor> {
+302:    fn parse_order_by_item(&mut self) -> Result<OrderByExpr> {
+329:    fn parse_u64(&mut self, ctx: &str) -> Result<u64> {
+346:    fn parse_create_table(&mut self) -> Result<CreateTableStmt> {
+388:    fn parse_drop_table(&mut self) -> Result<DropTableStmt> {
+401:    fn parse_data_type(&mut self) -> Result<DataType> {
+423:    fn parse_insert(&mut self) -> Result<InsertStmt> {
+461:    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr> {
+481:    fn peek_binary_op(&self) -> Option<BinaryOp> {
+509:    fn peek_starts_keyword_postfix(&self) -> bool {
+531:    fn parse_keyword_postfix(&mut self, lhs: Expr) -> Result<Expr> {
+579:    fn parse_prefix(&mut self) -> Result<Expr> {
+603:    fn parse_primary(&mut self) -> Result<Expr> {
+667:    fn parse_function_call(&mut self, name: String) -> Result<Expr> {
+697:    fn parse_cast(&mut self) -> Result<Expr> {
+710:    fn parse_case(&mut self) -> Result<Expr> {
+747:    fn expr(sql: &str) -> Expr {
+759:    fn precedence_multiplies_before_adds() {
+779:    fn comparison_below_arithmetic() {
+792:    fn and_below_or_above_comparison() {
+805:    fn parses_between_without_eating_outer_and() {
+818:    fn parses_full_select() {
+840:    fn parses_create_and_insert() {
+854:    fn rejects_trailing_tokens() {
+859:    fn case_and_cast_parse() {
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 4, $0.17):
+```
+sed -n 140,200p src/parser/parser.rs; echo ====; sed -n 260,300p 
+src/parser/parser.rs; echo ==== INSERT; sed -n 388,470p src/parser/parser.rs
+```
+
+```
+cat src/planner/scope.rs; echo ======; sed -n 1,120p src/planner/binder.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+    }
+
+    // ---- program / statements ----
+
+    fn parse_program(&mut self) -> Result<Vec<Statement>> {
+        let mut stmts = Vec::new();
+        loop {
+            while self.eat(&TokenKind::Semicolon) {}
+            if self.is_eof() {
+                break;
+            }
+            stmts.push(self.parse_statement()?);
+            if !self.is_eof() && !matches!(self.peek(), TokenKind::Semicolon) {
+                return Err(Error::parse(format!(
+                    "expected `;` or end of input, found {}",
+                    self.peek().describe()
+                ))
+                .at(self.position()));
+            }
+        }
+        Ok(stmts)
+    }
+
+    fn parse_statement(&mut self) -> Result<Statement> {
+        match self.peek() {
+            TokenKind::Word {
+                keyword: Some(kw), ..
+            } => match kw {
+                Keyword::Select => Ok(Statement::Select(self.parse_select()?)),
+                Keyword::Insert => Ok(Statement::Insert(self.parse_insert()?)),
+                Keyword::Create => 
+Ok(Statement::CreateTable(self.parse_create_table()?)),
+                Keyword::Drop => 
+Ok(Statement::DropTable(self.parse_drop_table()?)),
+                Keyword::Explain => {
+                    self.expect_keyword(Keyword::Explain)?;
+                    Ok(Statement::Explain(self.parse_select()?))
+                }
+                _ => Err(Error::parse(format!(
+                    "unexpected keyword `{:?}` at start of statement",
+                    kw
+                ))
+                .at(self.position())),
+            },
+            other => Err(
+                Error::parse(format!("expected a statement, found {}", 
+other.describe()))
+                    .at(self.position()),
+            ),
+        }
+    }
+
+    // ---- SELECT ----
+
+    fn parse_select(&mut self) -> Result<SelectStmt> {
+        self.expect_keyword(Keyword::Select)?;
+        let mut stmt = SelectStmt::empty();
+        stmt.distinct = self.eat_keyword(Keyword::Distinct);
+
+        stmt.projection.push(self.parse_select_item()?);
+        while self.eat(&TokenKind::Comma) {
+            stmt.projection.push(self.parse_select_item()?);
+        }
+
+====
+        // An alias is introduced either by an explicit `AS` or by a bare
+        // trailing identifier; both require an identifier to follow.
+        if self.eat_keyword(Keyword::As) || self.peek_is_identifier() {
+            Ok(Some(self.expect_identifier()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn parse_from_clause(&mut self) -> Result<FromClause> {
+        let base = self.parse_table_factor()?;
+        let mut joins = Vec::new();
+        loop {
+            let join_type = if self.eat_keyword(Keyword::Inner) {
+                self.expect_keyword(Keyword::Join)?;
+                JoinType::Inner
+            } else if self.eat_keyword(Keyword::Left) {
+                self.eat_keyword(Keyword::Join); // optional OUTER omitted; JOIN
+required
+                JoinType::Left
+            } else if self.eat_keyword(Keyword::Join) {
+                JoinType::Inner
+            } else {
+                break;
+            };
+            let relation = self.parse_table_factor()?;
+            self.expect_keyword(Keyword::On)?;
+            let on = self.parse_expr(0)?;
+            joins.push(Join {
+                join_type,
+                relation,
+                on,
+            });
+        }
+        Ok(FromClause { base, joins })
+    }
+
+    fn parse_table_factor(&mut self) -> Result<TableFactor> {
+        let name = self.expect_identifier()?;
+        let alias = self.parse_optional_alias()?;
+        Ok(TableFactor { name, alias })
+    }
+==== INSERT
+    fn parse_drop_table(&mut self) -> Result<DropTableStmt> {
+        self.expect_keyword(Keyword::Drop)?;
+        self.expect_keyword(Keyword::Table)?;
+        let if_exists = if self.eat_keyword(Keyword::If) {
+            self.expect_keyword(Keyword::Exists)?;
+            true
+        } else {
+            false
+        };
+        let name = self.expect_identifier()?;
+        Ok(DropTableStmt { name, if_exists })
+    }
+
+    fn parse_data_type(&mut self) -> Result<DataType> {
+        let pos = self.position();
+        match self.peek().clone() {
+            TokenKind::Word {
+                keyword: Some(kw), ..
+            } => {
+                let dt = match kw {
+                    Keyword::Integer => DataType::Integer,
+                    Keyword::Float => DataType::Float,
+                    Keyword::Text => DataType::Text,
+                    Keyword::Boolean => DataType::Boolean,
+                    _ => return Err(Error::parse("expected a data 
+type").at(pos)),
+                };
+                self.advance();
+                Ok(dt)
+            }
+            other => Err(
+                Error::parse(format!("expected a data type, found {}", 
+other.describe())).at(pos),
+            ),
+        }
+    }
+
+    fn parse_insert(&mut self) -> Result<InsertStmt> {
+        self.expect_keyword(Keyword::Insert)?;
+        self.expect_keyword(Keyword::Into)?;
+        let table = self.expect_identifier()?;
+        let columns = if matches!(self.peek(), TokenKind::LParen) {
+            self.advance();
+            let mut cols = vec![self.expect_identifier()?];
+            while self.eat(&TokenKind::Comma) {
+                cols.push(self.expect_identifier()?);
+            }
+            self.expect(&TokenKind::RParen)?;
+            Some(cols)
+        } else {
+            None
+        };
+        self.expect_keyword(Keyword::Values)?;
+        let mut rows = Vec::new();
+        loop {
+            self.expect(&TokenKind::LParen)?;
+            let mut row = vec![self.parse_expr(0)?];
+            while self.eat(&TokenKind::Comma) {
+                row.push(self.parse_expr(0)?);
+            }
+            self.expect(&TokenKind::RParen)?;
+            rows.push(row);
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        Ok(InsertStmt {
+            table,
+            columns,
+            rows,
+        })
+    }
+
+    // ---- expressions (Pratt) ----
+
+    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr> {
+        let mut lhs = self.parse_prefix()?;
+        loop {
+            // Keyword postfix operators live at comparison precedence (4).
+            if min_bp <= 4 && self.peek_starts_keyword_postfix() {
+                lhs = self.parse_keyword_postfix(lhs)?;
+                continue;
+            }
+            let op = match self.peek_binary_op() {
+                Some(op) if op.binding_power() >= min_bp => op,
+
+
+Tool:
+<returncode>
+0
+<output_head>
+//! Name resolution: mapping column references to positional indices.
+
+use crate::ast::expr::ColumnRef;
+use crate::error::{Error, Result};
+use crate::types::{DataType, Schema};
+
+/// One resolvable column in a scope.
+#[derive(Debug, Clone)]
+struct Binding {
+    /// The relation qualifier (table name or alias). `None` for a scope built
+    /// from an output schema (e.g. resolving `ORDER BY`).
+    qualifier: Option<String>,
+    name: String,
+    index: usize,
+    data_type: DataType,
+}
+
+/// A flat namespace of columns available to expression binding, in row order.
+#[derive(Debug, Clone, Default)]
+pub struct Scope {
+    bindings: Vec<Binding>,
+}
+
+impl Scope {
+    /// An empty scope (no columns) — used for constant `SELECT`s and `INSERT`
+    /// value expressions.
+    pub fn empty() -> Scope {
+        Scope {
+            bindings: Vec::new(),
+        }
+    }
+
+    /// Build a scope for a base relation whose columns start at `start_index`
+    /// in the combined row, qualified by `qualifier`.
+    pub fn from_table(qualifier: &str, schema: &Schema, start_index: usize) -> 
+Scope {
+        let bindings = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, f)| Binding {
+                qualifier: Some(qualifier.to_string()),
+                name: f.name().to_string(),
+                index: start_index + i,
+                data_type: f.data_type(),
+            })
+            .collect();
+        Scope { bindings }
+    }
+
+    /// Build an unqualified scope from an output schema, for resolving
+    /// `ORDER BY` keys against result columns.
+    pub fn from_output(schema: &Schema) -> Scope {
+        let bindings = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, f)| Binding {
+                qualifier: None,
+                name: f.name().to_string(),
+                index: i,
+                data_type: f.data_type(),
+            })
+            .collect();
+        Scope { bindings }
+    }
+
+    /// The number of columns in scope.
+    pub fn len(&self) -> usize {
+        self.bindings.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bindings.is_empty()
+    }
+
+    /// Concatenate two scopes (left columns then right), as a join produces.
+    pub fn concat(&self, other: &Scope) -> Scope {
+        let mut bindings = self.bindings.clone();
+        bindings.extend(other.bindings.iter().cloned());
+        Scope { bindings }
+    }
+
+    /// Resolve a column reference to its `(index, type)`.
+    ///
+    /// A qualified reference (`t.c`) matches only bindings with that qualifier.
+    /// An unqualified reference matches by name across all bindings and errors
+    /// if the name is ambiguous.
+    pub fn resolve(&self, column: &ColumnRef) -> Result<(usize, DataType)> {
+        let name_lower = column.name.to_ascii_lowercase();
+        let mut matches = self.bindings.iter().filter(|b| {
+            b.name.to_ascii_lowercase() == name_lower
+                && match &column.qualifier {
+                    Some(q) => b
+                        .qualifier
+                        .as_ref()
+                        .map(|bq| bq.eq_ignore_ascii_case(q))
+                        .unwrap_or(false),
+                    None => true,
+                }
+        });
+        let first = matches
+            .next()
+            .ok_or_else(|| Error::binder(format!("unknown column '{}'", 
+column.display_name())))?;
+        if matches.next().is_some() {
+            return Err(Error::binder(format!(
+                "column reference '{}' is ambiguous",
+                column.display_name()
+            )));
+        }
+        Ok((first.index, first.data_type))
+    }
+
+    /// All `(index, name, type)` triples, in row order — used to expand `*`.
+    pub fn columns(&self) -> Vec<(usize, String, DataType)> {
+        self.bindings
+            .iter()
+            .map(|b| (b.index, b.name.clone(), b.data_type))
+            .collect()
+    }
+
+    /// The columns belonging to a given qualifier, in row order — used to
+    /// expand `t.*`.
+    pub fn columns_for(&self, qualifier: &str) -> Result<Vec<(usize, String, 
+DataType)>> {
+        let cols: Vec<_> = self
+            .bindings
+            .iter()
+            .filter(|b| {
+                b.qualifier
+                    .as_ref()
+                    .map(|q| q.eq_ignore_ascii_case(qualifier))
+                    .unwrap_or(false)
+            })
+            .map(|b| (b.index, b.name.clone(), b.data_type))
+            .collect();
+        if cols.is_empty() {
+            return Err(Error::binder(format!(
+                "unknown table qualifier '{}'",
+                qualifier
+            )));
+        }
+        Ok(cols)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Field;
+
+    fn schema() -> Schema {
+        Schema::new(vec![
+            Field::new("id", DataType::Integer),
+            Field::new("name", DataType::Text),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn resolves_qualifi
+<output_tail>
+solve(&ColumnRef::qualified("u", "id")).is_err());
+    }
+
+    #[test]
+    fn detects_ambiguity_across_joined_scopes() {
+        let left = Scope::from_table("a", &schema(), 0);
+        let right = Scope::from_table("b", &schema(), 2);
+        let joined = left.concat(&right);
+        // 'id' is ambiguous unqualified...
+        assert!(joined.resolve(&ColumnRef::unqualified("id")).is_err());
+        // ...but resolvable when qualified.
+        assert_eq!(
+            joined.resolve(&ColumnRef::qualified("b", "id")).unwrap(),
+            (2, DataType::Integer)
+        );
+    }
+}
+======
+//! The binder: resolves an AST against a catalog into a typed [`LogicalPlan`].
+//!
+//! Binding performs name resolution (columns → positional indices), type
+//! checking (every node gets a [`DataType`]), and the lifting of aggregate
+//! calls out of projection/`HAVING` expressions into an 
+[`LogicalPlan::Aggregate`]
+//! node. Scalar and aggregate binding share one recursive core parameterized by
+//! an optional aggregate context.
+
+use crate::ast::expr::{is_aggregate_name, Expr};
+use crate::ast::statement::{FromClause, SelectItem, SelectStmt};
+use crate::error::{Error, Result};
+use crate::functions::{AggregateFn, ScalarFn};
+use crate::planner::binder_util::{
+    binary_result_type, check_comparable, derive_name, extend_project,
+    projection_item_has_aggregate, require_predicate, require_text_or_null, 
+schema_from,
+    unary_result_type, unify_result,
+};
+use crate::planner::bound::{BoundAggregate, BoundExpr};
+use crate::planner::logical::{LogicalPlan, SortKey};
+use crate::planner::scope::Scope;
+use crate::storage::Catalog;
+use crate::types::{DataType, Field, Schema};
+
+/// Binds AST statements against a catalog snapshot.
+pub struct Binder<'a> {
+    catalog: &'a Catalog,
+}
+
+/// Aggregate-binding context threaded through the expression core while binding
+/// a projection/`HAVING` under `GROUP BY`.
+struct AggCtx<'a> {
+    /// The `GROUP BY` expressions, matched structurally against subexpressions.
+    group_exprs: &'a [Expr],
+    /// Accumulated aggregate calls (grows as they are discovered).
+    aggregates: &'a mut Vec<BoundAggregate>,
+    /// Number of leading group columns in the aggregate output row.
+    group_count: usize,
+}
+
+impl<'a> Binder<'a> {
+    pub fn new(catalog: &'a Catalog) -> Binder<'a> {
+        Binder { catalog }
+    }
+
+    /// Bind a `SELECT` into a logical plan.
+    pub fn bind_select(&self, select: &SelectStmt) -> Result<LogicalPlan> {
+        let (mut plan, scope) = match &select.from {
+            None => (LogicalPlan::EmptyRow, Scope::empty()),
+            Some(from) => self.bind_from(from)?,
+        };
+
+        if let Some(pred) = &select.selection {
+            let predicate = self.bind_scalar(pred, &scope)?;
+            require_predicate("WHERE", &predicate)?;
+            plan = LogicalPlan::Filter {
+                input: Box::new(plan),
+                predicate,
+            };
+        }
+
+        let aggregating = !select.group_by.is_empty()
+            || select.projection.iter().any(projection_item_has_aggregate)
+            || select
+                .having
+                .as_ref()
+                .map(|h| h.contains_aggregate())
+                .unwrap_or(false);
+
+        if aggregating {
+            plan = self.bind_aggregate(plan, &scope, select)?;
+        } else {
+            if select.having.is_some() {
+                return Err(Error::binder(
+                    "HAVING requires GROUP BY or an aggregate function",
+                ));
+            }
+            let (expressions, aliases, schema) =
+                self.bind_projection(&select.projection, &scope)?;
+            plan = LogicalPlan::Project {
+                input: Box::new(plan),
+                expressions,
+                aliases,
+                schema,
+            };
+        }
+
+        // Columns visible to the caller (before any hidden ORDER BY columns).
+        let visible_count = plan.schema().len();
+        // Non-aggregate, non-distinct queries may ORDER BY input columns that
+        // are not projected; such keys are carried as hidden columns.
+        let order_input_scope = if !aggregating && !select.distinct {
+            Some(&scope)
+        } else {
+            None
+        };
+
+        if select.distinct {
+            plan = LogicalPlan::Distinct {
+                input: Box::new(plan),
+            };
+        }
+
+        if !select.order_by.is_empty() {
+            plan = self.build_sort(plan, select, order_input_scope, 
+visible_count)?;
+        }
+
+        if select.limit.is_some() || select.offset.is_some() {
+            plan = LogicalPlan::Limit {
+                input: Box::new(plan),
+                limit: select.limit,
+                offset: select.offset,
+            };
+        }
+
+        Ok(plan)
+    }
+
+    /// Bind a standalone scalar expression against an explicit scope (used by
+    /// `INSERT` value binding via an empty scope).
+    pub fn bind_scalar(&self, expr: &Expr, scope: &Scope) -> Result<BoundExpr> {
+
+<elided_chars>
+373
+<warning>
+Output too long.
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 5, $0.23):
+```
+sed -n 1,120p src/storage/table.rs; echo ==== COLUMN; sed -n 1,140p 
+src/storage/column.rs
+```
+
+```
+cat src/storage/catalog.rs; echo ==== binder_util require_predicate; grep -n 
+"require_predicate" -A 20 src/planner/binder_util.rs | head -40; echo ==== eval;
+sed -n 1,40p src/exec/eval.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+//! In-memory tables stored column-at-a-time.
+
+use crate::error::{Error, Result};
+use crate::storage::column::ColumnVector;
+use crate::storage::row::Row;
+use crate::types::{DataType, Field, Schema, Value};
+
+/// An in-memory relation: a [`Schema`] plus one [`ColumnVector`] per field.
+///
+/// Rows are appended through [`Table::insert_row`], which validates arity,
+/// types (with integer→float widening), and `NOT NULL` constraints. Reads are
+/// row-oriented via [`Table::iter_rows`], which materializes a [`Row`] per
+/// stored tuple.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Table {
+    name: String,
+    schema: Schema,
+    columns: Vec<ColumnVector>,
+    row_count: usize,
+}
+
+impl Table {
+    /// Create an empty table with the given name and schema.
+    pub fn new(name: impl Into<String>, schema: Schema) -> Table {
+        let columns = schema
+            .fields()
+            .iter()
+            .map(|f| ColumnVector::new(f.data_type()))
+            .collect();
+        Table {
+            name: name.into(),
+            schema,
+            columns,
+            row_count: 0,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    /// The number of rows currently stored.
+    pub fn row_count(&self) -> usize {
+        self.row_count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.row_count == 0
+    }
+
+    /// The number of columns.
+    pub fn width(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// Borrow a column by position.
+    pub fn column(&self, index: usize) -> Option<&ColumnVector> {
+        self.columns.get(index)
+    }
+
+    /// Insert one row, validating it against the schema.
+    ///
+    /// * arity must match the schema width,
+    /// * each value must match its column type (an `INTEGER` supplied for a
+    ///   `FLOAT` column is widened), and
+    /// * a `NULL` supplied for a `NOT NULL` column is rejected.
+    pub fn insert_row(&mut self, row: Row) -> Result<()> {
+        let values = row.into_values();
+        if values.len() != self.schema.len() {
+            return Err(Error::api(format!(
+                "table '{}' expects {} value(s) per row, got {}",
+                self.name,
+                self.schema.len(),
+                values.len()
+            )));
+        }
+        // Coerce and validate every value before mutating any column so a
+        // rejected row leaves the table unchanged.
+        let mut coerced = Vec::with_capacity(values.len());
+        for (value, field) in values.into_iter().zip(self.schema.fields()) {
+            coerced.push(coerce_for_field(value, field)?);
+        }
+        for (column, value) in self.columns.iter_mut().zip(coerced) {
+            column.push_unchecked(value);
+        }
+        self.row_count += 1;
+        Ok(())
+    }
+
+    /// Insert many rows, stopping at (and returning) the first invalid row. 
+Rows
+    /// already inserted before the failure remain.
+    pub fn insert_rows(&mut self, rows: impl IntoIterator<Item = Row>) -> 
+Result<usize> {
+        let mut n = 0;
+        for row in rows {
+            self.insert_row(row)?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
+    /// Materialize the row at `index`.
+    pub fn row(&self, index: usize) -> Option<Row> {
+        if index >= self.row_count {
+            return None;
+        }
+        let values = self
+            .columns
+            .iter()
+            .map(|c| c.get(index).cloned().unwrap_or(Value::Null))
+            .collect();
+        Some(Row::new(values))
+    }
+
+    /// Iterate over all rows, materializing each on demand.
+    pub fn iter_rows(&self) -> RowIter<'_> {
+        RowIter {
+==== COLUMN
+//! Columnar storage: a typed vector of values for one column.
+
+use crate::error::{Error, Result};
+use crate::types::{DataType, Value};
+
+/// A single column's worth of values, all sharing one declared [`DataType`]
+/// (or `NULL`). Storing data column-at-a-time is what makes scans and
+/// column-oriented aggregation cache-friendly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnVector {
+    data_type: DataType,
+    values: Vec<Value>,
+}
+
+impl ColumnVector {
+    /// An empty column of the given declared type.
+    pub fn new(data_type: DataType) -> ColumnVector {
+        ColumnVector {
+            data_type,
+            values: Vec::new(),
+        }
+    }
+
+    /// An empty column with capacity reserved for `cap` values.
+    pub fn with_capacity(data_type: DataType, cap: usize) -> ColumnVector {
+        ColumnVector {
+            data_type,
+            values: Vec::with_capacity(cap),
+        }
+    }
+
+    /// The declared type of the column.
+    pub fn data_type(&self) -> DataType {
+        self.data_type
+    }
+
+    /// The number of values stored.
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// Borrow the value at `index`.
+    pub fn get(&self, index: usize) -> Option<&Value> {
+        self.values.get(index)
+    }
+
+    /// Append a value, checking that it is either `NULL` or matches the 
+declared
+    /// type. Integers are *not* silently widened to floats here; the caller is
+    /// expected to have coerced already. Returns a `Type` error on mismatch.
+    pub fn push(&mut self, value: Value) -> Result<()> {
+        if !value.is_null() && value.data_type() != self.data_type {
+            return Err(Error::type_error(format!(
+                "column of type {} cannot hold value of type {}",
+                self.data_type,
+                value.data_type()
+            )));
+        }
+        self.values.push(value);
+        Ok(())
+    }
+
+    /// Append a value already known to match the column type (no validation).
+    pub fn push_unchecked(&mut self, value: Value) {
+        self.values.push(value);
+    }
+
+    /// Iterate over the stored values.
+    pub fn iter(&self) -> impl Iterator<Item = &Value> {
+        self.values.iter()
+    }
+
+    /// The number of `NULL`s in the column.
+    pub fn null_count(&self) -> usize {
+        self.values.iter().filter(|v| v.is_null()).count()
+    }
+
+    /// Collect the values at the given row positions into a new column of the
+    /// same type (used when a filter/sort reorders or drops rows).
+    pub fn take(&self, indices: &[usize]) -> ColumnVector {
+        let mut out = ColumnVector::with_capacity(self.data_type, 
+indices.len());
+        for &i in indices {
+            out.values
+                .push(self.values.get(i).cloned().unwrap_or(Value::Null));
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn push_type_checks() {
+        let mut c = ColumnVector::new(DataType::Integer);
+        assert!(c.push(Value::Integer(1)).is_ok());
+        assert!(c.push(Value::Null).is_ok());
+        assert!(c.push(Value::text("x")).is_err());
+        assert_eq!(c.len(), 2);
+        assert_eq!(c.null_count(), 1);
+    }
+
+    #[test]
+    fn take_reorders() {
+        let mut c = ColumnVector::new(DataType::Integer);
+        for i in 0..3 {
+            c.push(Value::Integer(i)).unwrap();
+        }
+        let t = c.take(&[2, 0]);
+        assert_eq!(t.get(0), Some(&Value::Integer(2)));
+        assert_eq!(t.get(1), Some(&Value::Integer(0)));
+    }
+}
+
+
+Tool:
+<returncode>
+0
+<output>
+//! The catalog: a namespace of tables keyed by case-insensitive name.
+
+use std::collections::BTreeMap;
+
+use crate::error::{Error, Result};
+use crate::storage::table::Table;
+use crate::types::Schema;
+
+/// An in-memory namespace of [`Table`]s.
+///
+/// Names are matched case-insensitively but the original spelling is preserved
+/// for display. A [`BTreeMap`] backs the store so [`Catalog::table_names`]
+/// returns names in a deterministic (sorted) order — important for reproducible
+/// output in tests and golden files.
+#[derive(Debug, Clone, Default)]
+pub struct Catalog {
+    tables: BTreeMap<String, Table>,
+}
+
+impl Catalog {
+    /// An empty catalog.
+    pub fn new() -> Catalog {
+        Catalog {
+            tables: BTreeMap::new(),
+        }
+    }
+
+    fn key(name: &str) -> String {
+        name.to_ascii_lowercase()
+    }
+
+    /// Number of tables.
+    pub fn len(&self) -> usize {
+        self.tables.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tables.is_empty()
+    }
+
+    /// Whether a table with `name` exists.
+    pub fn contains(&self, name: &str) -> bool {
+        self.tables.contains_key(&Self::key(name))
+    }
+
+    /// Create an empty table with the given schema. Errors if a table of that
+    /// name already exists.
+    pub fn create_table(&mut self, name: impl Into<String>, schema: Schema) -> 
+Result<()> {
+        let name = name.into();
+        let key = Self::key(&name);
+        if self.tables.contains_key(&key) {
+            return Err(Error::catalog(format!("table '{}' already exists", 
+name)));
+        }
+        self.tables.insert(key, Table::new(name, schema));
+        Ok(())
+    }
+
+    /// Insert a fully-built table, replacing any existing table of that name.
+    pub fn put_table(&mut self, table: Table) {
+        self.tables.insert(Self::key(table.name()), table);
+    }
+
+    /// Borrow a table by name, erroring if it does not exist.
+    pub fn table(&self, name: &str) -> Result<&Table> {
+        self.tables
+            .get(&Self::key(name))
+            .ok_or_else(|| Error::catalog(format!("unknown table '{}'", name)))
+    }
+
+    /// Mutably borrow a table by name, erroring if it does not exist.
+    pub fn table_mut(&mut self, name: &str) -> Result<&mut Table> {
+        let key = Self::key(name);
+        self.tables
+            .get_mut(&key)
+            .ok_or_else(|| Error::catalog(format!("unknown table '{}'", name)))
+    }
+
+    /// Look up a table's schema without borrowing the whole table.
+    pub fn schema_of(&self, name: &str) -> Result<Schema> {
+        self.table(name).map(|t| t.schema().clone())
+    }
+
+    /// Drop a table, erroring if it does not exist.
+    pub fn drop_table(&mut self, name: &str) -> Result<()> {
+        self.tables
+            .remove(&Self::key(name))
+            .map(|_| ())
+            .ok_or_else(|| Error::catalog(format!("unknown table '{}'", name)))
+    }
+
+    /// All table names in deterministic (case-insensitive sorted) order, using
+    /// each table's original spelling.
+    pub fn table_names(&self) -> Vec<String> {
+        self.tables.values().map(|t| t.name().to_string()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{DataType, Field};
+
+    fn schema() -> Schema {
+        Schema::new(vec![Field::new("id", DataType::Integer)]).unwrap()
+    }
+
+    #[test]
+    fn create_and_lookup_case_insensitive() {
+        let mut c = Catalog::new();
+        c.create_table("Users", schema()).unwrap();
+        assert!(c.contains("users"));
+        assert_eq!(c.table("USERS").unwrap().name(), "Users");
+    }
+
+    #[test]
+    fn duplicate_create_errors() {
+        let mut c = Catalog::new();
+        c.create_table("t", schema()).unwrap();
+        let err = c.create_table("T", schema()).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Catalog);
+    }
+
+    #[test]
+    fn drop_removes() {
+        let mut c = Catalog::new();
+        c.create_table("t", schema()).unwrap();
+        c.drop_table("t").unwrap();
+        assert!(!c.contains("t"));
+        assert!(c.drop_table("t").is_err());
+    }
+
+    #[test]
+    fn names_are_sorted() {
+        let mut c = Catalog::new();
+        c.create_table("beta", schema()).unwrap();
+        c.create_table("alpha", schema()).unwrap();
+        assert_eq!(c.table_names(), vec!["alpha", "beta"]);
+    }
+}
+==== binder_util require_predicate
+68:pub(crate) fn require_predicate(ctx: &str, expr: &BoundExpr) -> Result<()> {
+69-    match expr.data_type() {
+70-        DataType::Boolean | DataType::Null => Ok(()),
+71-        other => Err(Error::binder(format!(
+72-            "{} requires a boolean expression, got {}",
+73-            ctx, other
+74-        ))),
+75-    }
+76-}
+77-
+78-pub(crate) fn require_text_or_null(ctx: &str, dt: DataType) -> Result<()> {
+79-    if dt == DataType::Text || dt == DataType::Null {
+80-        Ok(())
+81-    } else {
+82-        Err(Error::binder(format!("{} requires TEXT, got {}", ctx, dt)))
+83-    }
+84-}
+85-
+86-pub(crate) fn check_comparable(ctx: &str, a: DataType, b: DataType) -> 
+Result<()> {
+87-    if a.comparable_with(b) {
+88-        Ok(())
+==== eval
+//! The expression evaluator: a [`BoundExpr`] applied to a [`Row`] yields a
+//! [`Value`], honoring SQL three-valued logic throughout.
+
+use std::cmp::Ordering;
+
+use crate::ast::operators::{BinaryOp, UnaryOp};
+use crate::error::{Error, Result};
+use crate::exec::predicate::{and_tv, as_tv_bool, like_match, not_tv, or_tv, 
+three_valued};
+use crate::planner::bound::BoundExpr;
+use crate::storage::Row;
+use crate::types::{DataType, Value};
+
+/// Evaluate `expr` against `row`.
+pub fn eval(expr: &BoundExpr, row: &Row) -> Result<Value> {
+    match expr {
+        BoundExpr::Literal(v) => Ok(v.clone()),
+
+        BoundExpr::Column { index, .. } => row
+            .get(*index)
+            .cloned()
+            .ok_or_else(|| Error::execution(format!("column index {} out of 
+range", index))),
+
+        BoundExpr::Binary {
+            op, left, right, ..
+        } => eval_binary(*op, left, right, row),
+
+        BoundExpr::Unary { op, expr, .. } => {
+            let v = eval(expr, row)?;
+            match op {
+                UnaryOp::Negate => v.neg(),
+                UnaryOp::Not => Ok(three_valued(not_tv(as_tv_bool(&v)?))),
+            }
+        }
+
+        BoundExpr::Cast { expr, data_type } => {
+            let v = eval(expr, row)?;
+            v.cast(*data_type)
+        }
+
+        BoundExpr::IsNull { expr, negated } => {
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 6, $0.32):
+```
+grep -rn "NOT NULL" tests/*.rs | head -30; echo ====; cat CHANGELOG.md; echo 
+==== ; ls tests/common; cat tests/common/*.rs | head -60
+```
+
+```
+grep -rn "Outcome" tests/*.rs | head -30; echo ==; git log --oneline | head -20;
+echo ==; grep -rn "update\|delete" docs/DESIGN.md | head -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+tests/aggregation.rs:63:         WHERE dept_id IS NOT NULL GROUP BY dept_id 
+ORDER BY dept_id",
+tests/aggregation.rs:75:        "SELECT dept_id FROM employees WHERE dept_id IS 
+NOT NULL \
+tests/aggregation.rs:86:        "SELECT dept_id FROM employees WHERE dept_id IS 
+NOT NULL \
+tests/aggregation.rs:133:        "SELECT GROUP_CONCAT(DISTINCT dept_id) AS d 
+FROM employees WHERE dept_id IS NOT NULL",
+tests/ddl_and_dml.rs:48:    db.execute("CREATE TABLE t (id INTEGER NOT NULL, 
+name TEXT)")
+tests/ddl_and_dml.rs:57:    db.execute("CREATE TABLE t (id INTEGER NOT 
+NULL)").unwrap();
+tests/ddl_and_dml.rs:58:    // Second row violates NOT NULL; nothing should be 
+inserted.
+tests/determinism.rs:19:               WHERE dept_id IS NOT NULL GROUP BY 
+dept_id";
+tests/determinism.rs:31:        "SELECT dept_id FROM employees WHERE dept_id IS 
+NOT NULL GROUP BY dept_id",
+tests/determinism.rs:40:        "SELECT DISTINCT dept_id FROM employees WHERE 
+dept_id IS NOT NULL",
+tests/expressions.rs:84:         WHERE dept_id IS NOT NULL GROUP BY dept_id 
+ORDER BY dept_id",
+tests/formatting.rs:49:        .query("SELECT dept_id, COUNT(*) AS headcount 
+FROM employees WHERE dept_id IS NOT NULL GROUP BY dept_id ORDER BY dept_id")
+tests/null_semantics.rs:30:            "SELECT COUNT(*) FROM employees WHERE 
+dept_id IS NOT NULL"
+tests/null_semantics.rs:57:    assert_eq!(scalar(&mut db, "SELECT NOT NULL"), 
+"NULL");
+tests/order_and_limit.rs:27:        "SELECT dept_id, salary FROM employees WHERE
+dept_id IS NOT NULL \
+====
+# Changelog
+
+All notable changes to this project are documented here. The format is loosely
+based on [Keep a Changelog](https://keepachangelog.com/).
+
+## [Unreleased]
+
+### Added
+- `EXPLAIN <select>` returns the optimized logical plan as a result set.
+- String concatenation operator `||`.
+- Scalar functions: `POWER`, `SQRT`, `SIGN`, `LTRIM`, `RTRIM`, `REVERSE`,
+  `REPEAT`, `GREATEST`, `LEAST`.
+- `ORDER BY` on input and non-projected columns (via hidden sort columns).
+- GitHub Actions CI (fmt, clippy, build, test) and rustfmt configuration.
+- Runnable examples under `examples/`.
+
+### Fixed
+- `NULLS FIRST` / `NULLS LAST` are now independent of `ASC` / `DESC`.
+
+## [0.6.0]
+
+### Added
+- Rule-based optimizer with constant folding and predicate pushdown.
+- `DISTINCT`, `HAVING`, and `LEFT JOIN`.
+- Aggregate functions `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` (with `DISTINCT`).
+- Scalar function library and `CASE` / `CAST` / `BETWEEN` / `IN` / `LIKE`.
+
+## [0.4.0]
+
+### Added
+- Binder and typed logical plan.
+- Pratt expression parser and SQL statement parser.
+
+## [0.2.0]
+
+### Added
+- Columnar storage, catalog, and the type system.
+- Initial crate scaffold and error model.
+====
+mod.rs
+//! Shared helpers for the integration tests.
+#![allow(dead_code)]
+
+use tanager::{Database, QueryResult, Value};
+
+/// A database seeded with a small employees/departments dataset used across the
+/// integration tests.
+pub fn seeded() -> Database {
+    let mut db = Database::new();
+    db.execute(
+        "CREATE TABLE departments (id INTEGER NOT NULL, name TEXT NOT NULL, 
+budget INTEGER)",
+    )
+    .unwrap();
+    db.execute(
+        "CREATE TABLE employees (\
+            id INTEGER NOT NULL, \
+            name TEXT NOT NULL, \
+            dept_id INTEGER, \
+            salary INTEGER, \
+            manager_id INTEGER)",
+    )
+    .unwrap();
+
+    db.execute(
+        "INSERT INTO departments (id, name, budget) VALUES \
+            (1, 'Engineering', 1000000), \
+            (2, 'Sales', 500000), \
+            (3, 'Research', 750000), \
+            (4, 'Facilities', NULL)",
+    )
+    .unwrap();
+
+    db.execute(
+        "INSERT INTO employees (id, name, dept_id, salary, manager_id) VALUES \
+            (1, 'Ada',      1, 160000, NULL), \
+            (2, 'Grace',    1, 150000, 1), \
+            (3, 'Linus',    1, 140000, 1), \
+            (4, 'Margaret', 2, 120000, NULL), \
+            (5, 'Dennis',   2, 130000, 4), \
+            (6, 'Ken',      3, 145000, NULL), \
+            (7, 'Barbara',  3, 135000, 6), \
+            (8, 'Tim',      NULL, 90000, NULL)",
+    )
+    .unwrap();
+
+    db
+}
+
+/// Run a query and return its rows as vectors of stringified cell values.
+pub fn rows_as_strings(result: &QueryResult) -> Vec<Vec<String>> {
+    result
+        .rows()
+        .iter()
+        .map(|row| row.values().iter().map(|v| v.to_string()).collect())
+        .collect()
+}
+
+/// Convenience: run `sql` against `db` and return stringified rows.
+pub fn query_strings(db: &mut Database, sql: &str) -> Vec<Vec<String>> {
+    let result = db.query(sql).unwrap();
+
+
+Tool:
+<returncode>
+0
+<output>
+tests/ddl_and_dml.rs:5:use tanager::{Database, ErrorKind, Outcome};
+tests/ddl_and_dml.rs:13:        Outcome::TableCreated("t".to_string())
+tests/ddl_and_dml.rs:18:        Outcome::Inserted(3)
+tests/ddl_and_dml.rs:108:        Outcome::TableDropped("t".to_string())
+==
+928c0b7 Add prelude module and split Value From-conversions into types::convert
+81843f0 Add Display impls for AST expressions
+7fc7dcb Extract conjunct/column utilities into optimizer::conjuncts
+57c3b9b Extract binder free helpers into binder_util
+0f85b6b Split scalar function helpers into scalar_num and scalar_string
+e6e1b20 Extract three-valued logic and LIKE matcher into exec::predicate
+78a9842 Split executor into per-operator modules
+08061e6 Add cargo-nextest config with a JUnit-reporting CI profile
+389857b Format recent additions with rustfmt
+fea0277 Expand crate-level documentation with a runnable example
+f027ef4 Add SQL lexical-robustness integration tests
+8b14481 Add text-function integration tests
+e6d9313 Add .gitattributes for consistent line endings
+f5f8176 Add execution-error integration tests
+b49c3ff Add parser API integration tests
+0535763 Add LIKE / IN / BETWEEN predicate integration tests
+2b96394 Add three-table join integration tests
+b863e7c Add expression-evaluation integration tests
+79e3dac Add limit-pushdown optimizer rule
+63530a3 Document the expanded function library in the README
+==
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 7, $0.45):
+```
+sed -n 115,200p src/planner/binder.rs; echo ==== ; grep -n "aggregate" 
+src/planner/binder.rs | head -40; echo ==== ; grep -rn "Outcome::" 
+src/bin/tanager.rs src/format.rs src/lib.rs examples/*.rs | head -30
+```
+
+```
+grep -n "Eq\|Dot\|Period" src/parser/token.rs | head -20; echo ====; sed -n 
+120,145p src/parser/parser.rs; echo ==== ; sed -n 40,80p tests/ddl_and_dml.rs; 
+echo ==; sed -n 1,60p src/planner/mod.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+        Ok(plan)
+    }
+
+    /// Bind a standalone scalar expression against an explicit scope (used by
+    /// `INSERT` value binding via an empty scope).
+    pub fn bind_scalar(&self, expr: &Expr, scope: &Scope) -> Result<BoundExpr> {
+        self.bind_core(expr, scope, &mut None)
+    }
+
+    // ---- FROM ----
+
+    fn bind_from(&self, from: &FromClause) -> Result<(LogicalPlan, Scope)> {
+        let base_schema = self.catalog.schema_of(&from.base.name)?;
+        let mut plan = LogicalPlan::Scan {
+            table: from.base.name.clone(),
+            schema: base_schema.clone(),
+        };
+        let mut scope = Scope::from_table(from.base.binding_name(), 
+&base_schema, 0);
+
+        for join in &from.joins {
+            let right_schema = self.catalog.schema_of(&join.relation.name)?;
+            let right_scope =
+                Scope::from_table(join.relation.binding_name(), &right_schema, 
+scope.len());
+            let combined = scope.concat(&right_scope);
+            let on = self.bind_scalar(&join.on, &combined)?;
+            require_predicate("JOIN ON", &on)?;
+            let out_schema = plan.schema().concat(&right_schema);
+            let right_plan = LogicalPlan::Scan {
+                table: join.relation.name.clone(),
+                schema: right_schema,
+            };
+            plan = LogicalPlan::Join {
+                left: Box::new(plan),
+                right: Box::new(right_plan),
+                on,
+                join_type: join.join_type,
+                schema: out_schema,
+            };
+            scope = combined;
+        }
+        Ok((plan, scope))
+    }
+
+    // ---- projection (non-aggregate) ----
+
+    fn bind_projection(
+        &self,
+        items: &[SelectItem],
+        scope: &Scope,
+    ) -> Result<(Vec<BoundExpr>, Vec<String>, Schema)> {
+        let mut exprs = Vec::new();
+        let mut names = Vec::new();
+        for item in items {
+            match item {
+                SelectItem::Wildcard => {
+                    for (index, name, data_type) in scope.columns() {
+                        exprs.push(BoundExpr::Column { index, data_type });
+                        names.push(name);
+                    }
+                }
+                SelectItem::QualifiedWildcard(qualifier) => {
+                    for (index, name, data_type) in 
+scope.columns_for(qualifier)? {
+                        exprs.push(BoundExpr::Column { index, data_type });
+                        names.push(name);
+                    }
+                }
+                SelectItem::Expr { expr, alias } => {
+                    let bound = self.bind_scalar(expr, scope)?;
+                    names.push(alias.clone().unwrap_or_else(|| 
+derive_name(expr)));
+                    exprs.push(bound);
+                }
+            }
+        }
+        if exprs.is_empty() {
+            return Err(Error::binder("SELECT must project at least one 
+column"));
+        }
+        let schema = schema_from(&names, &exprs);
+        Ok((exprs, names, schema))
+    }
+
+    // ---- aggregation ----
+
+    fn bind_aggregate(
+        &self,
+        input: LogicalPlan,
+        scope: &Scope,
+====
+4://! checking (every node gets a [`DataType`]), and the lifting of aggregate
+6://! node. Scalar and aggregate binding share one recursive core parameterized 
+by
+7://! an optional aggregate context.
+9:use crate::ast::expr::{is_aggregate_name, Expr};
+15:    projection_item_has_aggregate, require_predicate, require_text_or_null, 
+schema_from,
+34:    /// Accumulated aggregate calls (grows as they are discovered).
+35:    aggregates: &'a mut Vec<BoundAggregate>,
+36:    /// Number of leading group columns in the aggregate output row.
+62:            || select.projection.iter().any(projection_item_has_aggregate)
+66:                .map(|h| h.contains_aggregate())
+70:            plan = self.bind_aggregate(plan, &scope, select)?;
+74:                    "HAVING requires GROUP BY or an aggregate function",
+89:        // Non-aggregate, non-distinct queries may ORDER BY input columns 
+that
+158:    // ---- projection (non-aggregate) ----
+197:    fn bind_aggregate(
+211:        let mut aggregates: Vec<BoundAggregate> = Vec::new();
+219:                aggregates: &mut aggregates,
+227:                            "'*' cannot be combined with GROUP BY or 
+aggregate functions",
+243:        // Build the aggregate output schema: group columns then aggregate 
+columns.
+244:        let mut agg_fields = Vec::with_capacity(group_count + 
+aggregates.len());
+248:        for agg in &aggregates {
+256:            aggregates,
+283:    /// output columns; and, for non-aggregate non-distinct queries, a key 
+that
+371:        // In aggregate context, a subexpression that matches a GROUP BY key
+is a
+372:        // reference to that group column in the aggregate output row.
+389:                        "column '{}' must appear in GROUP BY or be used 
+inside an aggregate function",
+403:                if is_aggregate_name(name) {
+404:                    self.bind_aggregate_call(name, args, *distinct, *star, 
+scope, ctx)
+510:    fn bind_aggregate_call(
+522:                "aggregate function {} is not allowed in this context",
+547:            // and may not themselves contain aggregates.
+554:        let index = c.group_count + c.aggregates.len();
+555:        c.aggregates.push(BoundAggregate {
+583:                "DISTINCT is only valid inside aggregate functions",
+693:    fn binds_group_by_aggregate() {
+702:    fn rejects_non_grouped_column_in_aggregate_query() {
+703:        // name is neither grouped nor aggregated
+708:    fn having_wraps_filter_over_aggregate() {
+====
+src/bin/tanager.rs:48:        Outcome::Query(result) => println!("{}", 
+render_table(result)),
+src/bin/tanager.rs:49:        Outcome::Inserted(n) => println!("INSERT {}", n),
+src/bin/tanager.rs:50:        Outcome::TableCreated(name) => println!("CREATE 
+TABLE {}", name),
+src/bin/tanager.rs:51:        Outcome::TableDropped(name) => println!("DROP 
+TABLE {}", name),
+
+
+Tool:
+<returncode>
+0
+<output>
+6:#[derive(Debug, Clone, PartialEq)]
+22:    Dot,
+31:    Eq,
+32:    NotEq,
+34:    LtEq,
+36:    GtEq,
+53:            TokenKind::Dot => "`.`".to_string(),
+62:            TokenKind::Eq => "`=`".to_string(),
+63:            TokenKind::NotEq => "`<>`".to_string(),
+65:            TokenKind::LtEq => "`<=`".to_string(),
+67:            TokenKind::GtEq => "`>=`".to_string(),
+80:#[derive(Debug, Clone, PartialEq)]
+====
+    fn expect_identifier(&mut self) -> Result<String> {
+        match self.peek().clone() {
+            TokenKind::Word {
+                value,
+                keyword: None,
+            } => {
+                self.advance();
+                Ok(value)
+            }
+            other => Err(Error::parse(format!(
+                "expected an identifier, found {}",
+                other.describe()
+            ))
+            .at(self.position())),
+        }
+    }
+
+    /// True when the current token is a usable identifier (non-reserved word).
+    fn peek_is_identifier(&self) -> bool {
+        matches!(self.peek(), TokenKind::Word { keyword: None, .. })
+    }
+
+    // ---- program / statements ----
+
+    fn parse_program(&mut self) -> Result<Vec<Statement>> {
+        let mut stmts = Vec::new();
+====
+    db.execute("CREATE TABLE t (x FLOAT)").unwrap();
+    db.execute("INSERT INTO t VALUES (5)").unwrap();
+    assert_eq!(common::scalar(&mut db, "SELECT x FROM t"), "5.0");
+}
+
+#[test]
+fn not_null_violation_is_rejected() {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (id INTEGER NOT NULL, name TEXT)")
+        .unwrap();
+    let err = db.execute("INSERT INTO t VALUES (NULL, 'x')").unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Api);
+}
+
+#[test]
+fn insert_is_atomic_on_failure() {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (id INTEGER NOT NULL)").unwrap();
+    // Second row violates NOT NULL; nothing should be inserted.
+    let err = db
+        .execute("INSERT INTO t VALUES (1), (NULL), (3)")
+        .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Api);
+    assert_eq!(
+        db.query("SELECT COUNT(*) FROM t")
+            .unwrap()
+            .value(0, 0)
+            .unwrap()
+            .to_string(),
+        "0"
+    );
+}
+
+#[test]
+fn wrong_arity_insert_is_rejected() {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (a INTEGER, b INTEGER)").unwrap();
+    let err = db.execute("INSERT INTO t VALUES (1)").unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Api);
+}
+
+==
+//! Query planning: name/type binding and the logical plan.
+
+pub mod binder;
+mod binder_util;
+pub mod bound;
+pub mod logical;
+pub mod scope;
+
+pub use binder::Binder;
+pub use bound::{BoundAggregate, BoundExpr};
+pub use logical::{LogicalPlan, SortKey};
+pub use scope::Scope;
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 8, $0.53):
+```
+sed -n 505,530p src/planner/binder.rs; echo ====; sed -n 1,60p 
+src/bin/tanager.rs; echo ==; git branch --show-current; git status --porcelain
+```
+
+```
+grep -n "pub use\|pub mod" src/lib.rs; echo ==; cat src/prelude.rs | head -40; 
+echo ==; grep -rn "Row::new\|pub fn " src/storage/row.rs | head -30
+```
+
+Tool:
+<returncode>
+0
+<output>
+                else_result,
+            } => self.bind_case(operand, when_then, else_result, scope, ctx),
+        }
+    }
+
+    fn bind_aggregate_call(
+        &self,
+        name: &str,
+        args: &[Expr],
+        distinct: bool,
+        star: bool,
+        scope: &Scope,
+        ctx: &mut Option<AggCtx>,
+    ) -> Result<BoundExpr> {
+        let func = AggregateFn::from_name(name).unwrap();
+        let c = ctx.as_mut().ok_or_else(|| {
+            Error::binder(format!(
+                "aggregate function {} is not allowed in this context",
+                func.name()
+            ))
+        })?;
+
+        let (arg, arg_type) = if star {
+            if !func.allows_star() {
+                return Err(Error::binder(format!(
+                    "{}(*) is not supported",
+====
+//! `tanager` command-line runner.
+//!
+//! Usage:
+//!   tanager "SELECT 1 + 1"          run one or more `;`-separated statements
+//!   tanager < script.sql            read SQL from standard input
+//!
+//! `SELECT` results are printed as ASCII tables; other statements print a short
+//! status line. The process exits non-zero on the first error.
+
+use std::io::Read;
+
+use tanager::{render_table, Database, Outcome};
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let sql = if args.is_empty() {
+        let mut buf = String::new();
+        if std::io::stdin().read_to_string(&mut buf).is_err() {
+            eprintln!("tanager: failed to read standard input");
+            std::process::exit(2);
+        }
+        buf
+    } else {
+        args.join(" ")
+    };
+
+    if sql.trim().is_empty() {
+        eprintln!("tanager {}: no SQL provided", env!("CARGO_PKG_VERSION"));
+        std::process::exit(0);
+    }
+
+    let mut db = Database::new();
+    match db.execute_script(&sql) {
+        Ok(outcomes) => {
+            for outcome in outcomes {
+                print_outcome(&outcome);
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_outcome(outcome: &Outcome) {
+    match outcome {
+        Outcome::Query(result) => println!("{}", render_table(result)),
+        Outcome::Inserted(n) => println!("INSERT {}", n),
+        Outcome::TableCreated(name) => println!("CREATE TABLE {}", name),
+        Outcome::TableDropped(name) => println!("DROP TABLE {}", name),
+    }
+}
+==
+main
+
+
+Tool:
+<returncode>
+0
+<output>
+44:pub mod api;
+45:pub mod ast;
+46:pub mod error;
+47:pub mod exec;
+48:pub mod format;
+49:pub mod functions;
+50:pub mod optimizer;
+51:pub mod parser;
+52:pub mod planner;
+53:pub mod prelude;
+54:pub mod storage;
+55:pub mod types;
+57:pub use api::{Database, Outcome, QueryResult};
+58:pub use error::{Error, ErrorKind, Result};
+59:pub use format::render_table;
+60:pub use storage::{Catalog, Row, Table};
+61:pub use types::{DataType, Field, Schema, Value};
+==
+//! A convenience prelude re-exporting the types most commonly needed to embed
+//! the engine.
+//!
+//! ```
+//! use tanager::prelude::*;
+//!
+//! let mut db = Database::new();
+//! db.execute("CREATE TABLE t (id INTEGER)").unwrap();
+//! ```
+
+pub use crate::api::{Database, Outcome, QueryResult};
+pub use crate::error::{Error, ErrorKind, Result};
+pub use crate::format::render_table;
+pub use crate::types::{DataType, Field, Schema, Value};
+==
+16:    pub fn new(values: Vec<Value>) -> Row {
+21:    pub fn empty() -> Row {
+26:    pub fn len(&self) -> usize {
+30:    pub fn is_empty(&self) -> bool {
+35:    pub fn get(&self, index: usize) -> Option<&Value> {
+40:    pub fn values(&self) -> &[Value] {
+45:    pub fn into_values(self) -> Vec<Value> {
+51:    pub fn concat(&self, other: &Row) -> Row {
+59:    pub fn select(&self, indices: &[usize]) -> Row {
+93:        let a = Row::new(vec![Value::Integer(1), Value::text("x")]);
+94:        let b = Row::new(vec![Value::Boolean(true)]);
+102:        let r = Row::new(vec![Value::Integer(10), Value::Integer(20)]);
+111:        let r = Row::new(vec![Value::Integer(1), Value::Null, 
+Value::text("hi")]);
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 9, $0.57):
+```
+git checkout -b feat/update-delete && cat src/exec/predicate.rs | head -60; echo
+====; grep -n "Filter" -A 20 src/exec/executor.rs | head -50
+```
+
+Tool:
+<returncode>
+0
+<output>
+Switched to a new branch 'feat/update-delete'
+//! Three-valued boolean logic and the SQL `LIKE` matcher.
+//!
+//! These helpers back the evaluator's predicate handling. Keeping them here
+//! isolates SQL's `NULL`-as-unknown truth tables from the expression-walking
+//! code in [`crate::exec::eval`].
+
+use crate::error::{Error, Result};
+use crate::types::Value;
+
+/// Interpret a value as a three-valued boolean (`NULL` -> `None`).
+pub(crate) fn as_tv_bool(v: &Value) -> Result<Option<bool>> {
+    match v {
+        Value::Null => Ok(None),
+        Value::Boolean(b) => Ok(Some(*b)),
+        other => Err(Error::type_error(format!(
+            "expected boolean, got {}",
+            other.data_type()
+        ))),
+    }
+}
+
+/// Turn a three-valued boolean back into a [`Value`].
+pub(crate) fn three_valued(b: Option<bool>) -> Value {
+    match b {
+        Some(v) => Value::Boolean(v),
+        None => Value::Null,
+    }
+}
+
+/// Three-valued `AND`: `FALSE` dominates, then `NULL`.
+pub(crate) fn and_tv(a: Option<bool>, b: Option<bool>) -> Option<bool> {
+    match (a, b) {
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        (Some(true), Some(true)) => Some(true),
+        _ => None,
+    }
+}
+
+/// Three-valued `OR`: `TRUE` dominates, then `NULL`.
+pub(crate) fn or_tv(a: Option<bool>, b: Option<bool>) -> Option<bool> {
+    match (a, b) {
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        (Some(false), Some(false)) => Some(false),
+        _ => None,
+    }
+}
+
+/// Three-valued `NOT`.
+pub(crate) fn not_tv(a: Option<bool>) -> Option<bool> {
+    a.map(|v| !v)
+}
+
+/// SQL `LIKE` matcher: `%` matches any run (including empty), `_` matches
+/// exactly one character. Matching is over Unicode scalar values.
+pub(crate) fn like_match(text: &str, pattern: &str) -> bool {
+    let t: Vec<char> = text.chars().collect();
+    let p: Vec<char> = pattern.chars().collect();
+    like_rec(&t, &p)
+}
+
+====
+34:            LogicalPlan::Filter { input, predicate } => {
+35-                let rows = self.execute(input)?;
+36-                let mut out = Vec::new();
+37-                for row in rows {
+38-                    if eval(predicate, &row)?.is_truthy() {
+39-                        out.push(row);
+40-                    }
+41-                }
+42-                Ok(out)
+43-            }
+44-
+45-            LogicalPlan::Project {
+46-                input, expressions, ..
+47-            } => {
+48-                let rows = self.execute(input)?;
+49-                let mut out = Vec::with_capacity(rows.len());
+50-                for row in rows {
+51-                    let mut values = Vec::with_capacity(expressions.len());
+52-                    for e in expressions {
+53-                        values.push(eval(e, &row)?);
+54-                    }
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 10, $0.63):
+```
+cd . && python3 - <<'EOF'
+import re
+p='src/ast/statement.rs'
+s=open(p).read()
+s=s.replace("""pub enum Statement {
+    Select(SelectStmt),
+    Insert(InsertStmt),
+    CreateTable(CreateTableStmt),
+    DropTable(DropTableStmt),""","""pub enum Statement {
+    Select(SelectStmt),
+    Insert(InsertStmt),
+    Update(UpdateStmt),
+    Delete(DeleteStmt),
+    CreateTable(CreateTableStmt),
+    DropTable(DropTableStmt),""")
+s=s.replace("""#[cfg(test)]
+mod tests {""","""/// One `col = expr` pair in an `UPDATE ... SET` list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Assignment {
+    /// The assigned column. May be written qualified (`t.col`); the qualifier,
+    /// when present, must name the target table (or its alias).
+    pub column: ColumnRef,
+    /// The right-hand side, evaluated against the row as it was stored.
+    pub value: Expr,
+}
+
+/// An `UPDATE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateStmt {
+    /// The target table and its optional alias.
+    pub table: TableFactor,
+    /// The `SET` list, in written order.
+    pub assignments: Vec<Assignment>,
+    /// The `WHERE` predicate; `None` updates every row.
+    pub selection: Option<Expr>,
+}
+
+/// A `DELETE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeleteStmt {
+    /// The target table and its optional alias.
+    pub table: TableFactor,
+    /// The `WHERE` predicate; `None` deletes every row.
+    pub selection: Option<Expr>,
+}
+
+#[cfg(test)]
+mod tests {""")
+s=s.replace("use crate::ast::expr::Expr;","use crate::ast::expr::{ColumnRef, 
+Expr};")
+open(p,'w').write(s)
+EOF
+grep -n "ColumnRef" src/ast/expr.rs | head -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+8:pub struct ColumnRef {
+15:impl ColumnRef {
+16:    pub fn unqualified(name: impl Into<String>) -> ColumnRef {
+17:        ColumnRef {
+23:    pub fn qualified(qualifier: impl Into<String>, name: impl Into<String>) 
+-> ColumnRef {
+24:        ColumnRef {
+45:    Column(ColumnRef),
+120:        Expr::Column(ColumnRef::unqualified(name))
+257:        assert_eq!(ColumnRef::qualified("t", "c").display_name(), "t.c");
+258:        assert_eq!(ColumnRef::unqualified("c").display_name(), "c");
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 11, $0.69):
+Now the parser: keywords and statement parsing.
+
+```
+cd . && python3 - <<'EOF'
+p='src/parser/keyword.rs'
+s=open(p).read()
+s=s.replace("    Insert,\n    Into,\n    Values,","    Insert,\n    Into,\n    
+Values,\n    Update,\n    Set,\n    Delete,")
+s=s.replace('            "VALUES" => Keyword::Values,','            "VALUES" => 
+Keyword::Values,\n            "UPDATE" => Keyword::Update,\n            "SET" =>
+Keyword::Set,\n            "DELETE" => Keyword::Delete,')
+open(p,'w').write(s)
+
+p='src/parser/parser.rs'
+s=open(p).read()
+s=s.replace("""                Keyword::Insert => 
+Ok(Statement::Insert(self.parse_insert()?)),""",
+"""                Keyword::Insert => 
+Ok(Statement::Insert(self.parse_insert()?)),
+                Keyword::Update => Ok(Statement::Update(self.parse_update()?)),
+                Keyword::Delete => 
+Ok(Statement::Delete(self.parse_delete()?)),""")
+s=s.replace("""    // ---- expressions (Pratt) ----""",
+"""    // ---- UPDATE / DELETE ----
+
+    fn parse_update(&mut self) -> Result<UpdateStmt> {
+        self.expect_keyword(Keyword::Update)?;
+        let table = self.parse_table_factor()?;
+        self.expect_keyword(Keyword::Set)?;
+        let mut assignments = vec![self.parse_assignment()?];
+        while self.eat(&TokenKind::Comma) {
+            assignments.push(self.parse_assignment()?);
+        }
+        let selection = if self.eat_keyword(Keyword::Where) {
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
+        Ok(UpdateStmt {
+            table,
+            assignments,
+            selection,
+        })
+    }
+
+    /// One `col = expr` (or `alias.col = expr`) pair of a `SET` list.
+    fn parse_assignment(&mut self) -> Result<Assignment> {
+        let first = self.expect_identifier()?;
+        let column = if self.eat(&TokenKind::Dot) {
+            let name = self.expect_identifier()?;
+            ColumnRef::qualified(first, name)
+        } else {
+            ColumnRef::unqualified(first)
+        };
+        self.expect(&TokenKind::Eq)?;
+        let value = self.parse_expr(0)?;
+        Ok(Assignment { column, value })
+    }
+
+    fn parse_delete(&mut self) -> Result<DeleteStmt> {
+        self.expect_keyword(Keyword::Delete)?;
+        self.expect_keyword(Keyword::From)?;
+        let table = self.parse_table_factor()?;
+        let selection = if self.eat_keyword(Keyword::Where) {
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
+        Ok(DeleteStmt { table, selection })
+    }
+
+    // ---- expressions (Pratt) ----""")
+open(p,'w').write(s)
+EOF
+sed -n 1,20p src/parser/parser.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+//! The parser: a hand-written recursive-descent / Pratt parser that turns a
+//! token stream into [`Statement`]s.
+
+use crate::ast::expr::{ColumnRef, Expr};
+use crate::ast::operators::{BinaryOp, UnaryOp};
+use crate::ast::statement::{
+    ColumnDef, CreateTableStmt, DropTableStmt, FromClause, InsertStmt, Join, 
+JoinType, OrderByExpr,
+    SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
+};
+use crate::error::{Error, Result};
+use crate::parser::keyword::Keyword;
+use crate::parser::lexer::tokenize;
+use crate::parser::token::{Token, TokenKind};
+use crate::types::{DataType, Value};
+
+/// Parse a single statement, rejecting trailing input.
+pub fn parse_statement(sql: &str) -> Result<Statement> {
+    let mut stmts = parse_program(sql)?;
+    match stmts.len() {
+        1 => Ok(stmts.pop().unwrap()),
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 12, $0.74):
+```
+cd . && python3 - <<'EOF'
+p='src/parser/parser.rs'
+s=open(p).read()
+s=s.replace("""use crate::ast::statement::{
+    ColumnDef, CreateTableStmt, DropTableStmt, FromClause, InsertStmt, Join, 
+JoinType, OrderByExpr,
+    SelectItem, SelectStmt, SortDirection, Statement, TableFactor,
+};""","""use crate::ast::statement::{
+    Assignment, ColumnDef, CreateTableStmt, DeleteStmt, DropTableStmt, 
+FromClause, InsertStmt, Join,
+    JoinType, OrderByExpr, SelectItem, SelectStmt, SortDirection, Statement, 
+TableFactor,
+    UpdateStmt,
+};""")
+open(p,'w').write(s)
+EOF
+cargo build 2>&1 | tail -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+   |
+note: `Statement` defined here
+  --> src/ast/statement.rs:8:10
+   |
+ 8 | pub enum Statement {
+   |          ^^^^^^^^^
+...
+11 |     Update(UpdateStmt),
+   |     ------ not covered
+12 |     Delete(DeleteStmt),
+   |     ------ not covered
+   = note: the matched value is of type `Statement`
+help: ensure that all possible cases are being handled by adding a match arm 
+with a wildcard pattern, a match arm with multiple or-patterns as shown, or 
+multiple match arms
+   |
+103~             Statement::Explain(s) => 
+Ok(Outcome::Query(self.run_explain(&s)?)),
+104~             Statement::Update(_) | Statement::Delete(_) => todo!(),
+   |
+
+For more information about this error, try `rustc --explain E0004`.
+error: could not compile `tanager` (lib) due to 1 previous error
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 13, $0.80):
+```
+grep -n "index_of" -A 12 src/types/schema.rs | head -30; grep -n "pub fn 
+field\b\|pub fn fields\|pub fn is_nullable\|pub fn data_type" 
+src/types/schema.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+127:    pub fn index_of(&self, name: &str) -> Result<usize> {
+128-        let lower = name.to_ascii_lowercase();
+129-        let mut found = None;
+130-        for (i, f) in self.fields.iter().enumerate() {
+131-            if f.name().to_ascii_lowercase() == lower {
+132-                if found.is_some() {
+133-                    return Err(Error::binder(format!("column '{}' is 
+ambiguous", name)));
+134-                }
+135-                found = Some(i);
+136-            }
+137-        }
+138-        found.ok_or_else(|| Error::binder(format!("unknown column '{}'", 
+name)))
+139-    }
+--
+209:        assert_eq!(s.index_of("NAME").unwrap(), 1);
+210:        assert_eq!(s.index_of("score").unwrap(), 2);
+211:        assert!(s.index_of("missing").is_err());
+212-    }
+213-
+214-    #[test]
+215-    fn concat_appends_fields() {
+216-        let s = schema().concat(&schema());
+217-        assert_eq!(s.len(), 6);
+218-    }
+219-
+220-    #[test]
+221-    fn project_reorders() {
+222-        let s = schema().project(&[2, 0]).unwrap();
+223-        assert_eq!(s.field(0).unwrap().name(), "score");
+39:    pub fn data_type(&self) -> DataType {
+43:    pub fn is_nullable(&self) -> bool {
+102:    pub fn fields(&self) -> &[Field] {
+114:    pub fn field(&self, index: usize) -> Option<&Field> {
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 14, $0.86):
+Now I'll write the bound DML module and binder methods.
+
+```
+cd . && cat > src/planner/dml.rs <<'EOF'
+//! Bound (typed) forms of the row-mutating statements `UPDATE` and `DELETE`.
+//!
+//! Unlike a `SELECT`, a mutation is not a tree of operators: it names one 
+table,
+//! an optional predicate over that table's rows, and — for `UPDATE` — a list of
+//! column assignments resolved to positional indices. Binding resolves names,
+//! type-checks assignments against the target columns, and rejects predicates
+//! that are not boolean.
+
+use crate::planner::bound::BoundExpr;
+
+/// One resolved `SET` item: a target column position and the expression whose
+/// value lands there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundAssignment {
+    /// Position of the assigned column in the table's schema.
+    pub column: usize,
+    /// The right-hand side, evaluated against the row *as stored*.
+    pub value: BoundExpr,
+}
+
+/// A bound `UPDATE`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundUpdate {
+    /// The target table, as named in the catalog.
+    pub table: String,
+    /// Assignments in written order; no column appears twice.
+    pub assignments: Vec<BoundAssignment>,
+    /// The `WHERE` predicate; `None` matches every row.
+    pub predicate: Option<BoundExpr>,
+}
+
+/// A bound `DELETE`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundDelete {
+    /// The target table, as named in the catalog.
+    pub table: String,
+    /// The `WHERE` predicate; `None` matches every row.
+    pub predicate: Option<BoundExpr>,
+}
+EOF
+python3 - <<'EOF'
+p='src/planner/mod.rs'
+s=open(p).read()
+s=s.replace("pub mod bound;","pub mod bound;\npub mod dml;")
+s=s.replace("pub use bound::{BoundAggregate, BoundExpr};","pub use 
+bound::{BoundAggregate, BoundExpr};\npub use dml::{BoundAssignment, BoundDelete,
+BoundUpdate};")
+open(p,'w').write(s)
+EOF
+cat src/planner/mod.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+//! Query planning: name/type binding and the logical plan.
+
+pub mod binder;
+mod binder_util;
+pub mod bound;
+pub mod dml;
+pub mod logical;
+pub mod scope;
+
+pub use binder::Binder;
+pub use bound::{BoundAggregate, BoundExpr};
+pub use dml::{BoundAssignment, BoundDelete, BoundUpdate};
+pub use logical::{LogicalPlan, SortKey};
+pub use scope::Scope;
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 15, $0.90):
+```
+sed -n 1,70p src/planner/binder_util.rs; echo ==; grep -n "pub fn" 
+src/types/datatype.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+//! Free helper functions used by the binder: naming, schema building, and the
+//! type rules for operators and predicates.
+
+use crate::ast::expr::Expr;
+use crate::ast::operators::{BinaryOp, UnaryOp};
+use crate::ast::statement::SelectItem;
+use crate::error::{Error, Result};
+use crate::planner::bound::BoundExpr;
+use crate::planner::logical::LogicalPlan;
+use crate::types::{DataType, Field, Schema};
+
+pub(crate) fn projection_item_has_aggregate(item: &SelectItem) -> bool {
+    match item {
+        SelectItem::Expr { expr, .. } => expr.contains_aggregate(),
+        _ => false,
+    }
+}
+
+/// Derive an output column name for an unaliased projection expression.
+pub(crate) fn derive_name(expr: &Expr) -> String {
+    match expr {
+        Expr::Column(cref) => cref.name.clone(),
+        Expr::Function { name, .. } => name.to_lowercase(),
+        Expr::Cast { expr, .. } => derive_name(expr),
+        _ => "expr".to_string(),
+    }
+}
+
+/// Append hidden columns to a `Project` node (used to carry ORDER BY keys that
+/// are not part of the visible output).
+pub(crate) fn extend_project(
+    plan: LogicalPlan,
+    mut extra_exprs: Vec<BoundExpr>,
+    mut extra_names: Vec<String>,
+) -> Result<LogicalPlan> {
+    match plan {
+        LogicalPlan::Project {
+            input,
+            mut expressions,
+            mut aliases,
+            ..
+        } => {
+            expressions.append(&mut extra_exprs);
+            aliases.append(&mut extra_names);
+            let schema = schema_from(&aliases, &expressions);
+            Ok(LogicalPlan::Project {
+                input,
+                expressions,
+                aliases,
+                schema,
+            })
+        }
+        _ => Err(Error::binder(
+            "internal error: ORDER BY hidden columns require a projection",
+        )),
+    }
+}
+
+pub(crate) fn schema_from(names: &[String], exprs: &[BoundExpr]) -> Schema {
+    let fields = names
+        .iter()
+        .zip(exprs)
+        .map(|(n, e)| Field::new(n.clone(), e.data_type()))
+        .collect();
+    Schema::new_unchecked(fields)
+}
+
+pub(crate) fn require_predicate(ctx: &str, expr: &BoundExpr) -> Result<()> {
+    match expr.data_type() {
+        DataType::Boolean | DataType::Null => Ok(()),
+==
+27:    pub fn sql_name(self) -> &'static str {
+38:    pub fn is_numeric(self) -> bool {
+48:    pub fn arithmetic_result(self, other: DataType) -> Option<DataType> {
+62:    pub fn unify(self, other: DataType) -> Option<DataType> {
+76:    pub fn comparable_with(self, other: DataType) -> bool {
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 16, $0.98):
+Now add the binder methods for UPDATE/DELETE.
+
+```
+cd . && python3 - <<'EOF'
+p='src/planner/binder_util.rs'
+s=open(p).read()
+s=s.replace("""pub(crate) fn require_text_or_null""","""/// The type rule for 
+storing a value into a column: exact match, `INTEGER` into
+/// a `FLOAT` column, or an untyped `NULL` (whose `NOT NULL` legality can only 
+be
+/// decided per row, at execution time).
+pub(crate) fn require_assignable(field: &Field, actual: DataType) -> Result<()> 
+{
+    let expected = field.data_type();
+    let ok = actual == expected
+        || actual == DataType::Null
+        || (actual == DataType::Integer && expected == DataType::Float);
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::type_error(format!(
+            "column '{}' expects {}, got {}",
+            field.name(),
+            expected,
+            actual
+        )))
+    }
+}
+
+pub(crate) fn require_text_or_null""")
+open(p,'w').write(s)
+
+p='src/planner/binder.rs'
+s=open(p).read()
+s=s.replace("""use crate::ast::statement::{FromClause, SelectItem, 
+SelectStmt};""",
+"""use crate::ast::statement::{DeleteStmt, FromClause, SelectItem, SelectStmt, 
+UpdateStmt};""")
+s=s.replace("""    binary_result_type, check_comparable, derive_name, 
+extend_project,
+    projection_item_has_aggregate, require_predicate, require_text_or_null, 
+schema_from,
+    unary_result_type, unify_result,
+};""","""    binary_result_type, check_comparable, derive_name, extend_project,
+    projection_item_has_aggregate, require_assignable, require_predicate, 
+require_text_or_null,
+    schema_from, unary_result_type, unify_result,
+};""")
+s=s.replace("""use crate::planner::bound::{BoundAggregate, BoundExpr};""",
+"""use crate::planner::bound::{BoundAggregate, BoundExpr};
+use crate::planner::dml::{BoundAssignment, BoundDelete, BoundUpdate};""")
+s=s.replace("""    // ---- FROM ----""","""    /// Bind an `UPDATE`: resolve the
+target table, its `SET` targets and value
+    /// expressions, and the optional `WHERE` predicate.
+    pub fn bind_update(&self, stmt: &UpdateStmt) -> Result<BoundUpdate> {
+        let table = self.catalog.table(&stmt.table.name)?;
+        let name = table.name().to_string();
+        let schema = table.schema().clone();
+        let scope = Scope::from_table(stmt.table.binding_name(), &schema, 0);
+
+        let mut assignments: Vec<BoundAssignment> = 
+Vec::with_capacity(stmt.assignments.len());
+        for assignment in &stmt.assignments {
+            // A qualified target (`t.c` / `alias.c`) must name this table.
+            if let Some(qualifier) = &assignment.column.qualifier {
+                if !qualifier.eq_ignore_ascii_case(stmt.table.binding_name()) {
+                    return Err(Error::binder(format!(
+                        "unknown table qualifier '{}' in SET",
+                        qualifier
+                    )));
+                }
+            }
+            let column = schema.index_of(&assignment.column.name)?;
+            if assignments.iter().any(|a| a.column == column) {
+                return Err(Error::binder(format!(
+                    "column '{}' is assigned more than once in SET",
+                    assignment.column.name
+                )));
+            }
+            let value = self.bind_scalar(&assignment.value, &scope)?;
+            let field = schema
+                .field(column)
+                .expect("column index came from this schema");
+            require_assignable(field, value.data_type())?;
+            assignments.push(BoundAssignment { column, value });
+        }
+
+        let predicate = self.bind_selection(stmt.selection.as_ref(), &scope)?;
+        Ok(BoundUpdate {
+            table: name,
+            assignments,
+            predicate,
+        })
+    }
+
+    /// Bind a `DELETE`: resolve the target table and the optional predicate.
+    pub fn bind_delete(&self, stmt: &DeleteStmt) -> Result<BoundDelete> {
+        let table = self.catalog.table(&stmt.table.name)?;
+        let name = table.name().to_string();
+        let schema = table.schema().clone();
+        let scope = Scope::from_table(stmt.table.binding_name(), &schema, 0);
+        let predicate = self.bind_selection(stmt.selection.as_ref(), &scope)?;
+        Ok(BoundDelete {
+            table: name,
+            predicate,
+        })
+    }
+
+    /// Bind an optional `WHERE` clause, requiring a boolean result.
+    fn bind_selection(&self, selection: Option<&Expr>, scope: &Scope) -> 
+Result<Option<BoundExpr>> {
+        match selection {
+            None => Ok(None),
+            Some(expr) => {
+                let bound = self.bind_scalar(expr, scope)?;
+                require_predicate("WHERE", &bound)?;
+                Ok(Some(bound))
+            }
+        }
+    }
+
+    // ---- FROM ----""")
+open(p,'w').write(s)
+EOF
+cargo build 2>&1 | grep -E "^(error|warning: unused)" -A 8 | head -40
+```
+
+Tool:
+<returncode>
+0
+<output>
+error[E0004]: non-exhaustive patterns: `Statement::Update(_)` and 
+`Statement::Delete(_)` not covered
+  --> src/api.rs:98:15
+   |
+98 |         match stmt {
+   |               ^^^^ patterns `Statement::Update(_)` and 
+`Statement::Delete(_)` not covered
+   |
+note: `Statement` defined here
+  --> src/ast/statement.rs:8:10
+   |
+--
+error: could not compile `tanager` (lib) due to 1 previous error
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 17, $1.05):
+```
+cd . && python3 - <<'EOF'
+p='src/storage/column.rs'
+s=open(p).read()
+s=s.replace("""    /// Iterate over the stored values.""","""    /// Overwrite 
+the value at `index`, checking that it is either `NULL` or
+    /// matches the declared type. Integers are *not* widened here; the caller 
+is
+    /// expected to have coerced already.
+    pub fn set(&mut self, index: usize, value: Value) -> Result<()> {
+        if !value.is_null() && value.data_type() != self.data_type {
+            return Err(Error::type_error(format!(
+                "column of type {} cannot hold value of type {}",
+                self.data_type,
+                value.data_type()
+            )));
+        }
+        let slot = self.values.get_mut(index).ok_or_else(|| {
+            Error::execution(format!("row index {} is out of range for column", 
+index))
+        })?;
+        *slot = value;
+        Ok(())
+    }
+
+    /// Iterate over the stored values.""")
+s=s.replace("""    #[test]
+    fn take_reorders() {""","""    #[test]
+    fn set_overwrites_in_place() {
+        let mut c = ColumnVector::new(DataType::Integer);
+        c.push(Value::Integer(1)).unwrap();
+        c.set(0, Value::Integer(7)).unwrap();
+        assert_eq!(c.get(0), Some(&Value::Integer(7)));
+        assert!(c.set(0, Value::text("x")).is_err());
+        assert!(c.set(9, Value::Integer(1)).is_err());
+        assert_eq!(c.get(0), Some(&Value::Integer(7)));
+    }
+
+    #[test]
+    fn take_reorders() {""")
+open(p,'w').write(s)
+EOF
+cargo build 2>&1 | grep -E "^error" -A6 | head -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+error[E0004]: non-exhaustive patterns: `Statement::Update(_)` and 
+`Statement::Delete(_)` not covered
+  --> src/api.rs:98:15
+   |
+98 |         match stmt {
+   |               ^^^^ patterns `Statement::Update(_)` and 
+`Statement::Delete(_)` not covered
+   |
+note: `Statement` defined here
+--
+error: could not compile `tanager` (lib) due to 1 previous error
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 18, $1.16):
+Now the Table methods for updating and deleting rows.
+
+```
+cd . && python3 - <<'EOF'
+p='src/storage/table.rs'
+s=open(p).read()
+s=s.replace("""    pub fn insert_row(&mut self, row: Row) -> Result<()> {
+        let values = row.into_values();
+        if values.len() != self.schema.len() {
+            return Err(Error::api(format!(
+                "table '{}' expects {} value(s) per row, got {}",
+                self.name,
+                self.schema.len(),
+                values.len()
+            )));
+        }
+        // Coerce and validate every value before mutating any column so a
+        // rejected row leaves the table unchanged.
+        let mut coerced = Vec::with_capacity(values.len());
+        for (value, field) in values.into_iter().zip(self.schema.fields()) {
+            coerced.push(coerce_for_field(value, field)?);
+        }
+        for (column, value) in self.columns.iter_mut().zip(coerced) {
+            column.push_unchecked(value);
+        }
+        self.row_count += 1;
+        Ok(())
+    }""","""    pub fn insert_row(&mut self, row: Row) -> Result<()> {
+        // Coerce and validate every value before mutating any column so a
+        // rejected row leaves the table unchanged.
+        let coerced = self.coerce_row(row)?;
+        for (column, value) in 
+self.columns.iter_mut().zip(coerced.into_values()) {
+            column.push_unchecked(value);
+        }
+        self.row_count += 1;
+        Ok(())
+    }
+
+    /// Validate `row` against this table's schema and return the storable form
+    /// of it, widening `INTEGER`s destined for `FLOAT` columns.
+    ///
+    /// Nothing is stored: callers use this to build and check candidate rows
+    /// before touching any column, which is what makes `INSERT`, `UPDATE` and
+    /// `DELETE` all-or-nothing.
+    pub fn coerce_row(&self, row: Row) -> Result<Row> {
+        let values = row.into_values();
+        if values.len() != self.schema.len() {
+            return Err(Error::api(format!(
+                "table '{}' expects {} value(s) per row, got {}",
+                self.name,
+                self.schema.len(),
+                values.len()
+            )));
+        }
+        let mut coerced = Vec::with_capacity(values.len());
+        for (value, field) in values.into_iter().zip(self.schema.fields()) {
+            coerced.push(coerce_for_field(value, field)?);
+        }
+        Ok(Row::new(coerced))
+    }
+
+    /// Overwrite the row at `index` in place, keeping its stored position.
+    ///
+    /// The row is validated exactly as an insert would be. Returns `true` when
+    /// the stored values actually changed.
+    pub fn update_row(&mut self, index: usize, row: Row) -> Result<bool> {
+        if index >= self.row_count {
+            return Err(Error::execution(format!(
+                "row index {} is out of range for table '{}'",
+                index, self.name
+            )));
+        }
+        let coerced = self.coerce_row(row)?;
+        let changed = self
+            .columns
+            .iter()
+            .zip(coerced.values())
+            .any(|(column, value)| column.get(index) != Some(value));
+        for (column, value) in 
+self.columns.iter_mut().zip(coerced.into_values()) {
+            column.set(index, value)?;
+        }
+        Ok(changed)
+    }
+
+    /// Remove the rows at the given positions, leaving the survivors in their
+    /// stored order. Positions may be given in any order; duplicates and
+    /// out-of-range positions are ignored. Returns the number of rows removed.
+    pub fn delete_rows(&mut self, indices: &[usize]) -> usize {
+        let mut doomed = vec![false; self.row_count];
+        for &i in indices {
+            if i < self.row_count {
+                doomed[i] = true;
+            }
+        }
+        let keep: Vec<usize> = (0..self.row_count).filter(|&i| 
+!doomed[i]).collect();
+        let removed = self.row_count - keep.len();
+        if removed == 0 {
+            return 0;
+        }
+        for column in &mut self.columns {
+            *column = column.take(&keep);
+        }
+        self.row_count = keep.len();
+        removed
+    }""")
+s=s.replace("""    #[test]
+    fn rejects_bad_arity() {""","""    #[test]
+    fn update_row_replaces_in_place() {
+        let mut t = people();
+        t.insert_row(Row::new(vec![
+            Value::Integer(1),
+            Value::text("ada"),
+            Value::Float(9.5),
+        ]))
+        .unwrap();
+        t.insert_row(Row::new(vec![
+            Value::Integer(2),
+            Value::text("grace"),
+            Value::Float(8.0),
+        ]))
+        .unwrap();
+        // an INTEGER widens into the FLOAT column, as on insert
+        let changed = t
+            .update_row(
+                0,
+                Row::new(vec![Value::Integer(1), Value::text("Ada"), 
+Value::Integer(10)]),
+            )
+            .unwrap();
+        assert!(changed);
+        assert_eq!(t.row_count(), 2);
+        let rows = t.to_rows();
+        assert_eq!(rows[0].get(1), Some(&Value::text("Ada")));
+        assert_eq!(rows[0].get(2), Some(&Value::Float(10.0)));
+        assert_eq!(rows[1].get(1), Some(&Value::text("grace")));
+        // rewriting identical values reports no change
+        assert!(!t.update_row(1, rows[1].clone()).unwrap());
+    }
+
+    #[test]
+    fn update_row_rejects_bad_value_without_writing() {
+        let mut t = people();
+        t.insert_row(Row::new(vec![
+            Value::Integer(1),
+            Value::text("ada"),
+            Value::Float(9.5),
+        ]))
+        .unwrap();
+        let err = t
+            .update_row(
+                0,
+                Row::new(vec![Value::Integer(2), Value::text("x"), 
+Value::text("y")]),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Type);
+        assert_eq!(t.to_rows()[0].get(1), Some(&Value::text("ada")));
+        assert!(t.update_row(9, t.row(0).unwrap()).is_err());
+    }
+
+    #[test]
+    fn delete_rows_keeps_survivor_order() {
+        let mut t = people();
+        for i in 0..4 {
+            t.insert_row(Row::new(vec![
+                Value::Integer(i),
+                Value::text(format!("n{}", i)),
+                Value::Float(i as f64),
+            ]))
+            .unwrap();
+        }
+        assert_eq!(t.delete_rows(&[2, 0, 2, 99]), 2);
+        assert_eq!(t.row_count(), 2);
+        let ids: Vec<String> = t
+            .to_rows()
+            .iter()
+            .map(|r| r.get(0).unwrap().to_string())
+            .collect();
+        assert_eq!(ids, vec!["1", "3"]);
+        assert_eq!(t.delete_rows(&[]), 0);
+    }
+
+    #[test]
+    fn rejects_bad_arity() {""")
+open(p,'w').write(s)
+EOF
+cargo build 2>&1 | grep -E "^error" -A6 | head -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+error[E0004]: non-exhaustive patterns: `Statement::Update(_)` and 
+`Statement::Delete(_)` not covered
+  --> src/api.rs:98:15
+   |
+98 |         match stmt {
+   |               ^^^^ patterns `Statement::Update(_)` and 
+`Statement::Delete(_)` not covered
+   |
+note: `Statement` defined here
+--
+error: could not compile `tanager` (lib) due to 1 previous error
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 19, $1.27):
+```
+cd . && python3 - <<'EOF'
+p='src/api.rs'
+s=open(p).read()
+s=s.replace("""use crate::ast::statement::{CreateTableStmt, DropTableStmt, 
+InsertStmt, SelectStmt, Statement};""",
+"""use crate::ast::statement::{
+    CreateTableStmt, DeleteStmt, DropTableStmt, InsertStmt, SelectStmt, 
+Statement, UpdateStmt,
+};""")
+s=s.replace("""use crate::planner::scope::Scope;
+use crate::planner::Binder;""","""use crate::planner::bound::BoundExpr;
+use crate::planner::scope::Scope;
+use crate::planner::Binder;""")
+s=s.replace("""    /// `INSERT` added this many rows.
+    Inserted(usize),""","""    /// `INSERT` added this many rows.
+    Inserted(usize),
+    /// `UPDATE` left this many rows holding different values.
+    Updated(usize),
+    /// `DELETE` removed this many rows.
+    Deleted(usize),""")
+s=s.replace("""            Statement::Insert(i) => self.exec_insert(i),""",
+"""            Statement::Insert(i) => self.exec_insert(i),
+            Statement::Update(u) => self.exec_update(u),
+            Statement::Delete(d) => self.exec_delete(d),""")
+s=s.replace("""    fn run_select(&self, select: &SelectStmt) -> 
+Result<QueryResult> {""",
+"""    /// `UPDATE`: build and validate every candidate row first, then write 
+the
+    /// matched rows where they already sit. A row that cannot be computed or
+    /// stored leaves the table untouched.
+    fn exec_update(&mut self, stmt: UpdateStmt) -> Result<Outcome> {
+        let bound = Binder::new(&self.catalog).bind_update(&stmt)?;
+        let table = self.catalog.table(&bound.table)?;
+
+        let mut pending: Vec<(usize, Row)> = Vec::new();
+        for (index, row) in table.iter_rows().enumerate() {
+            if !row_matches(bound.predicate.as_ref(), &row)? {
+                continue;
+            }
+            // Right-hand sides see the stored row, not the effects of earlier
+            // assignments in the same SET list.
+            let mut values = row.values().to_vec();
+            for assignment in &bound.assignments {
+                values[assignment.column] = 
+crate::exec::eval::eval(&assignment.value, &row)?;
+            }
+            pending.push((index, table.coerce_row(Row::new(values))?));
+        }
+
+        let table = self.catalog.table_mut(&bound.table)?;
+        let mut updated = 0;
+        for (index, row) in pending {
+            if table.update_row(index, row)? {
+                updated += 1;
+            }
+        }
+        Ok(Outcome::Updated(updated))
+    }
+
+    /// `DELETE`: collect the matched row positions, then drop them, survivors
+    /// keeping their stored order.
+    fn exec_delete(&mut self, stmt: DeleteStmt) -> Result<Outcome> {
+        let bound = Binder::new(&self.catalog).bind_delete(&stmt)?;
+        let table = self.catalog.table(&bound.table)?;
+
+        let mut matched = Vec::new();
+        for (index, row) in table.iter_rows().enumerate() {
+            if row_matches(bound.predicate.as_ref(), &row)? {
+                matched.push(index);
+            }
+        }
+
+        let table = self.catalog.table_mut(&bound.table)?;
+        Ok(Outcome::Deleted(table.delete_rows(&matched)))
+    }
+
+    fn run_select(&self, select: &SelectStmt) -> Result<QueryResult> {""")
+s=s.replace("""/// A materialized result set""","""/// Whether `row` is matched 
+by an optional `WHERE` predicate: a missing
+/// predicate matches every row, and a present one matches only where it
+/// evaluates to `TRUE` (`FALSE` and unknown alike leave the row alone).
+fn row_matches(predicate: Option<&BoundExpr>, row: &Row) -> Result<bool> {
+    match predicate {
+        None => Ok(true),
+        Some(expr) => Ok(crate::exec::eval::eval(expr, row)?.is_truthy()),
+    }
+}
+
+/// A materialized result set""")
+open(p,'w').write(s)
+
+p='src/bin/tanager.rs'
+s=open(p).read()
+s=s.replace("""        Outcome::Inserted(n) => println!("INSERT {}", n),""",
+"""        Outcome::Inserted(n) => println!("INSERT {}", n),
+        Outcome::Updated(n) => println!("UPDATE {}", n),
+        Outcome::Deleted(n) => println!("DELETE {}", n),""")
+open(p,'w').write(s)
+EOF
+cargo build 2>&1 | tail -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+   Compiling tanager v0.6.0 (/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.11s
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 20, $1.41):
+Now let me write a reproduction/verification script exercising the spec.
+
+```
+cd . && mkdir -p /tmp/t && cat > examples/update_delete.rs <<'EOF'
+//! `UPDATE` and `DELETE`: matched rows change or disappear in place.
+
+use tanager::{Database, Outcome};
+
+fn main() {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (id INTEGER NOT NULL, a INTEGER, b INTEGER)")
+        .unwrap();
+    db.execute("INSERT INTO t VALUES (1, 10, 20), (2, 30, 40), (3, NULL, 60)")
+        .unwrap();
+
+    // Swap two columns: right-hand sides read the row as it was stored.
+    assert_eq!(
+        db.execute("UPDATE t SET a = b, b = a WHERE id = 1").unwrap(),
+        Outcome::Updated(1)
+    );
+    println!("{}", tanager::render_table(&db.query("SELECT * FROM 
+t").unwrap()));
+
+    // Unknown predicates leave rows alone.
+    assert_eq!(
+        db.execute("DELETE FROM t WHERE a > 100").unwrap(),
+        Outcome::Deleted(0)
+    );
+    assert_eq!(
+        db.execute("DELETE FROM t x WHERE x.id = 2").unwrap(),
+        Outcome::Deleted(1)
+    );
+    println!("{}", tanager::render_table(&db.query("SELECT * FROM 
+t").unwrap()));
+}
+EOF
+cat > /tmp/t/check.rs <<'EOF'
+use tanager::{Database, ErrorKind, Outcome};
+
+fn strings(db: &mut Database, sql: &str) -> Vec<Vec<String>> {
+    db.query(sql)
+        .unwrap()
+        .rows()
+        .iter()
+        .map(|r| r.values().iter().map(|v| v.to_string()).collect())
+        .collect()
+}
+
+fn seeded() -> Database {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (id INTEGER NOT NULL, a INTEGER, b INTEGER, f 
+FLOAT, s TEXT)")
+        .unwrap();
+    db.execute(
+        "INSERT INTO t VALUES (1, 10, 20, 1.5, 'x'), (2, 30, 40, 2.5, 'y'), (3, 
+NULL, 60, 3.5, 'z')",
+    )
+    .unwrap();
+    db
+}
+
+fn main() {
+    // 1. no WHERE: every row
+    let mut db = seeded();
+    assert_eq!(db.execute("UPDATE t SET a = 0").unwrap(), Outcome::Updated(3));
+    assert_eq!(strings(&mut db, "SELECT a FROM t"), vec![vec!["0"], vec!["0"], 
+vec!["0"]]);
+
+    // 2. rows already equal are not counted
+    assert_eq!(db.execute("UPDATE t SET a = 0").unwrap(), Outcome::Updated(0));
+
+    // 3. WHERE keeps only TRUE
+    let mut db = seeded();
+    assert_eq!(db.execute("UPDATE t SET b = 99 WHERE a > 15").unwrap(), 
+Outcome::Updated(1));
+    assert_eq!(strings(&mut db, "SELECT id, b FROM t"),
+        vec![vec!["1","20"], vec!["2","99"], vec!["3","60"]]);
+
+    // 4. swap
+    let mut db = seeded();
+    db.execute("UPDATE t SET a = b, b = a WHERE id = 2").unwrap();
+    assert_eq!(strings(&mut db, "SELECT a, b FROM t WHERE id = 2"), 
+vec![vec!["40","30"]]);
+
+    // 5. alias qualifies SET and WHERE
+    let mut db = seeded();
+    assert_eq!(db.execute("UPDATE t AS e SET e.a = e.b + 1 WHERE e.id = 
+1").unwrap(), Outcome::Updated(1));
+    assert_eq!(strings(&mut db, "SELECT a FROM t WHERE id = 1"), 
+vec![vec!["21"]]);
+
+    // 6. integer widens into FLOAT column
+    let mut db = seeded();
+    db.execute("UPDATE t SET f = 7 WHERE id = 1").unwrap();
+    assert_eq!(strings(&mut db, "SELECT f FROM t WHERE id = 1"), 
+vec![vec!["7.0"]]);
+
+    // 7. nothing else converts
+    let mut db = seeded();
+    let e = db.execute("UPDATE t SET a = 'nope'").unwrap_err();
+    assert_eq!(e.kind(), ErrorKind::Type, "{:?}", e);
+    assert_eq!(strings(&mut db, "SELECT a FROM t WHERE id = 1"), 
+vec![vec!["10"]]);
+    let e = db.execute("UPDATE t SET s = 1").unwrap_err();
+    assert_eq!(e.kind(), ErrorKind::Type, "{:?}", e);
+
+    // 8. NOT NULL refuses NULL
+    let mut db = seeded();
+    let e = db.execute("UPDATE t SET id = NULL WHERE id = 1").unwrap_err();
+    println!("not-null kind: {:?} {}", e.kind(), e);
+    let e = db.execute("UPDATE t SET id = a / 10 WHERE id = 3").unwrap_err(); //
+a is NULL
+    println!("not-null via expr: {:?} {}", e.kind(), e);
+    assert_eq!(strings(&mut db, "SELECT COUNT(*) FROM t"), vec![vec!["3"]]);
+
+    // 9. atomicity: one bad row aborts everything
+    let mut db = seeded();
+    let e = db.execute("UPDATE t SET b = 10 / (a - 10)").unwrap_err();
+    assert_eq!(e.kind(), ErrorKind::Execution, "{:?}", e);
+    assert_eq!(strings(&mut db, "SELECT id, b FROM t"),
+        vec![vec!["1","20"], vec!["2","40"], vec!["3","60"]]);
+
+    // 10. DELETE
+    let mut db = seeded();
+    assert_eq!(db.execute("DELETE FROM t WHERE a = 30").unwrap(), 
+Outcome::Deleted(1));
+    assert_eq!(strings(&mut db, "SELECT id FROM t"), vec![vec!["1"], 
+vec!["3"]]);
+    assert_eq!(db.execute("DELETE FROM t WHERE a > 1000").unwrap(), 
+Outcome::Deleted(0));
+    // unknown predicate keeps the row
+    assert_eq!(db.execute("DELETE FROM t WHERE a = NULL").unwrap(), 
+Outcome::Deleted(0));
+    assert_eq!(db.execute("DELETE FROM t").unwrap(), Outcome::Deleted(2));
+    assert_eq!(strings(&mut db, "SELECT COUNT(*) FROM t"), vec![vec!["0"]]);
+
+    // 11. errors
+    let mut db = seeded();
+    assert_eq!(db.execute("DELETE FROM nope").unwrap_err().kind(), 
+ErrorKind::Catalog);
+    assert_eq!(db.execute("UPDATE nope SET a = 1").unwrap_err().kind(), 
+ErrorKind::Catalog);
+    assert_eq!(db.execute("UPDATE t SET zz = 1").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("UPDATE t SET a = zz").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("DELETE FROM t WHERE zz = 1").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("UPDATE t SET a = 1 WHERE a").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("DELETE FROM t WHERE a").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("UPDATE t SET a = COUNT(*)").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("DELETE FROM t WHERE SUM(a) > 1").unwrap_err().kind(),
+ErrorKind::Binder);
+    assert_eq!(db.execute("UPDATE t SET a = 1, a = 2").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("UPDATE t AS e SET x.a = 1").unwrap_err().kind(), 
+ErrorKind::Binder);
+
+    // 12. other tables untouched
+    let mut db = seeded();
+    db.execute("CREATE TABLE u (i INTEGER)").unwrap();
+    db.execute("INSERT INTO u VALUES (1), (2)").unwrap();
+    db.execute("DELETE FROM t").unwrap();
+    assert_eq!(strings(&mut db, "SELECT COUNT(*) FROM u"), vec![vec!["2"]]);
+
+    // 13. update via script / case-insensitive keywords
+    let mut db = seeded();
+    let out = db.execute_script("update T set A = 5 where id = 1; delete from t 
+WHERE id = 2").unwrap();
+    assert_eq!(out, vec![Outcome::Updated(1), Outcome::Deleted(1)]);
+    assert_eq!(strings(&mut db, "SELECT id, a FROM t"), vec![vec!["1","5"], 
+vec!["3","NULL"]]);
+
+    // 14. SET to NULL on nullable column
+    let mut db = seeded();
+    assert_eq!(db.execute("UPDATE t SET a = NULL").unwrap(), 
+Outcome::Updated(2));
+
+    println!("all good");
+}
+EOF
+mkdir -p examples && cargo build --examples 2>&1 | tail -3 && cargo run -q 
+--example update_delete
+```
+
+Tool:
+<returncode>
+0
+<output>
+   Compiling tanager v0.6.0 (/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.58s
+id | a    | b
+---+------+---
+1  | 20   | 10
+2  | 30   | 40
+3  | NULL | 60
+(3 rows)
+id | a    | b
+---+------+---
+1  | 20   | 10
+3  | NULL | 60
+(2 rows)
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 21, $1.47):
+```
+cd . && cp /tmp/t/check.rs examples/_check.rs && cargo run -q --example _check 
+2>&1 | tail -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+not-null kind: Api api error: column 'id' is NOT NULL but a NULL was supplied
+not-null via expr: Api api error: column 'id' is NOT NULL but a NULL was 
+supplied
+all good
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 22, $1.54):
+```
+cd . && grep -rniE "\b(set|update|delete)\b" tests/*.rs examples/*.rs 
+src/bin/*.rs docs/*.md | grep -v "_check\|update_delete" | head -20; echo ====; 
+cargo test 2>&1 | tail -25
+```
+
+Tool:
+<returncode>
+0
+<output>
+tests/errors.rs:116:    // execute() of a DDL is fine, but query() requires a 
+result set.
+tests/formatting.rs:1://! Integration tests for result-set rendering.
+src/bin/tanager.rs:50:        Outcome::Updated(n) => println!("UPDATE {}", n),
+src/bin/tanager.rs:51:        Outcome::Deleted(n) => println!("DELETE {}", n),
+docs/DESIGN.md:3:This document describes how a SQL string becomes a result set 
+inside tanager, and
+docs/DESIGN.md:67:persistence, transactions, indexes, subqueries, or set 
+operations. Execution is
+====
+test trailing_semicolon_is_allowed ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+
+     Running tests/text_functions.rs 
+(target/debug/deps/text_functions-9f59796cfce434fc)
+
+running 6 tests
+test concat_builds_labels ... ok
+test instr_over_column ... ok
+test length_and_substr_over_column ... ok
+test replace_and_reverse ... ok
+test upper_lower_over_column ... ok
+test trim_variants ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+
+   Doc-tests tanager
+
+running 3 tests
+test src/api.rs - api::Database (line 18) ... ok
+test src/lib.rs - (line 10) ... ok
+test src/prelude.rs - prelude (line 4) ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.44s
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 23, $1.59):
+```
+cd . && cargo test 2>&1 | grep -E "^test result|FAILED|failures" | head -30
+```
+
+Tool:
+<returncode>
+0
+<output>
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.01s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.01s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.01s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.01s
+test result_schema_exposes_column_types ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.44s
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 24, $1.65):
+```
+cd . && grep -n "Statement\|impl fmt::Display" src/ast/display.rs | head -20; 
+grep -rn "Statement::" src/ --include=*.rs | grep -v "api.rs\|parser.rs" | head
+```
+
+Tool:
+<returncode>
+0
+<output>
+11:impl fmt::Display for Expr {
+100:    use crate::ast::statement::{SelectItem, Statement};
+105:            Statement::Select(s) => match &s.projection[0] {
+src/ast/display.rs:105:            Statement::Select(s) => match 
+&s.projection[0] {
+src/exec/executor.rs:149:            Statement::Select(s) => 
+Binder::new(c).bind_select(&s).unwrap(),
+src/planner/binder.rs:738:            Statement::Select(s) => 
+Binder::new(&c).bind_select(&s),
+src/planner/binder.rs:807:            Statement::Select(s) => 
+Binder::new(&c).bind_select(&s).unwrap(),
+src/optimizer/optimizer.rs💯            Statement::Select(s) => 
+Binder::new(&c).bind_select(&s).unwrap(),
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 25, $1.69):
+```
+cd . && sed -n 715,760p src/planner/binder.rs; echo ====; sed -n 855,880p 
+src/parser/parser.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+    use crate::ast::statement::Statement;
+    use crate::parser::parse_statement;
+
+    fn catalog() -> Catalog {
+        let mut c = Catalog::new();
+        c.create_table(
+            "emp",
+            Schema::new(vec![
+                Field::new("id", DataType::Integer),
+                Field::new("name", DataType::Text),
+                Field::new("dept", DataType::Text),
+                Field::new("salary", DataType::Integer),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+        c
+    }
+
+    fn plan(sql: &str) -> Result<LogicalPlan> {
+        let c = catalog();
+        let stmt = parse_statement(sql).unwrap();
+        match stmt {
+            Statement::Select(s) => Binder::new(&c).bind_select(&s),
+            _ => panic!("expected select"),
+        }
+    }
+
+    #[test]
+    fn binds_projection_and_filter() {
+        let p = plan("SELECT name FROM emp WHERE salary > 100").unwrap();
+        assert_eq!(p.node_name(), "Project");
+        assert_eq!(p.schema().len(), 1);
+    }
+
+    #[test]
+    fn rejects_unknown_column() {
+        assert!(plan("SELECT nope FROM emp").is_err());
+    }
+
+    #[test]
+    fn rejects_type_mismatch_in_arithmetic() {
+        assert!(plan("SELECT name + 1 FROM emp").is_err());
+    }
+
+    #[test]
+====
+    #[test]
+    fn parses_between_without_eating_outer_and() {
+        // x BETWEEN 1 AND 10 AND y  ==  (x BETWEEN 1 AND 10) AND y
+        let e = expr("x BETWEEN 1 AND 10 AND y");
+        assert!(matches!(
+            e,
+            Expr::Binary {
+                op: BinaryOp::And,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_full_select() {
+        let s = parse_statement(
+            "SELECT a, b AS bee, t.* FROM t JOIN u ON t.id = u.id \
+             WHERE a > 1 GROUP BY a HAVING COUNT(*) > 2 ORDER BY a DESC LIMIT 5 
+OFFSET 1",
+        )
+        .unwrap();
+        match s {
+            Statement::Select(s) => {
+                assert_eq!(s.projection.len(), 3);
+                assert_eq!(s.from.as_ref().unwrap().joins.len(), 1);
+                assert!(s.selection.is_some());
+                assert_eq!(s.group_by.len(), 1);
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 26, $1.79):
+Now add unit tests to the parser and binder, plus an integration test file.
+
+```
+cd . && python3 - <<'EOF'
+p='src/parser/parser.rs'
+s=open(p).read()
+s=s.replace("""    #[test]
+    fn rejects_trailing_tokens() {""","""    #[test]
+    fn parses_update_with_alias_and_where() {
+        let s = parse_statement("UPDATE t AS e SET a = 1, e.b = a + 1 WHERE e.id
+= 3").unwrap();
+        match s {
+            Statement::Update(u) => {
+                assert_eq!(u.table.name, "t");
+                assert_eq!(u.table.binding_name(), "e");
+                assert_eq!(u.assignments.len(), 2);
+                assert_eq!(u.assignments[0].column.qualifier, None);
+                assert_eq!(u.assignments[0].column.name, "a");
+                assert_eq!(u.assignments[1].column.qualifier.as_deref(), 
+Some("e"));
+                assert!(u.selection.is_some());
+            }
+            other => panic!("expected update, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_delete_without_where() {
+        let s = parse_statement("DELETE FROM t").unwrap();
+        match s {
+            Statement::Delete(d) => {
+                assert_eq!(d.table.name, "t");
+                assert!(d.selection.is_none());
+            }
+            other => panic!("expected delete, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_update_and_delete() {
+        assert!(parse_statement("UPDATE t SET a").is_err());
+        assert!(parse_statement("UPDATE t WHERE a = 1").is_err());
+        assert!(parse_statement("UPDATE t SET a = 1,").is_err());
+        assert!(parse_statement("DELETE t").is_err());
+        assert!(parse_statement("DELETE FROM t WHERE").is_err());
+    }
+
+    #[test]
+    fn rejects_trailing_tokens() {""")
+open(p,'w').write(s)
+
+p='src/planner/binder.rs'
+s=open(p).read()
+s=s.replace("""    #[test]
+    fn binds_projection_and_filter() {""","""    fn update(sql: &str) -> 
+Result<crate::planner::dml::BoundUpdate> {
+        let c = catalog();
+        match parse_statement(sql).unwrap() {
+            Statement::Update(u) => Binder::new(&c).bind_update(&u),
+            _ => panic!("expected update"),
+        }
+    }
+
+    fn delete(sql: &str) -> Result<crate::planner::dml::BoundDelete> {
+        let c = catalog();
+        match parse_statement(sql).unwrap() {
+            Statement::Delete(d) => Binder::new(&c).bind_delete(&d),
+            _ => panic!("expected delete"),
+        }
+    }
+
+    #[test]
+    fn binds_update_targets_by_position() {
+        let u = update("UPDATE emp e SET e.salary = salary + 1, name = 'x' WHERE
+e.id = 1").unwrap();
+        assert_eq!(u.table, "emp");
+        assert_eq!(u.assignments.len(), 2);
+        assert_eq!(u.assignments[0].column, 3);
+        assert_eq!(u.assignments[1].column, 1);
+        assert!(u.predicate.is_some());
+    }
+
+    #[test]
+    fn binds_delete_without_predicate() {
+        let d = delete("DELETE FROM emp").unwrap();
+        assert_eq!(d.table, "emp");
+        assert!(d.predicate.is_none());
+    }
+
+    #[test]
+    fn rejects_bad_update_and_delete() {
+        use crate::error::ErrorKind;
+        // unknown table
+        assert_eq!(
+            delete("DELETE FROM nope").unwrap_err().kind(),
+            ErrorKind::Catalog
+        );
+        // unknown column, in the SET target and in an expression
+        assert_eq!(
+            update("UPDATE emp SET nope = 1").unwrap_err().kind(),
+            ErrorKind::Binder
+        );
+        assert_eq!(
+            update("UPDATE emp SET id = nope").unwrap_err().kind(),
+            ErrorKind::Binder
+        );
+        // non-boolean WHERE
+        assert_eq!(
+            delete("DELETE FROM emp WHERE salary").unwrap_err().kind(),
+            ErrorKind::Binder
+        );
+        // aggregates are not allowed
+        assert_eq!(
+            update("UPDATE emp SET salary = MAX(salary)").unwrap_err().kind(),
+            ErrorKind::Binder
+        );
+        // one column assigned twice
+        assert_eq!(
+            update("UPDATE emp SET id = 1, id = 2").unwrap_err().kind(),
+            ErrorKind::Binder
+        );
+        // a qualifier that does not name the target
+        assert_eq!(
+            update("UPDATE emp e SET x.id = 1").unwrap_err().kind(),
+            ErrorKind::Binder
+        );
+        // a value the column cannot hold
+        assert_eq!(
+            update("UPDATE emp SET id = 'x'").unwrap_err().kind(),
+            ErrorKind::Type
+        );
+    }
+
+    #[test]
+    fn binds_projection_and_filter() {""")
+open(p,'w').write(s)
+EOF
+cargo test --lib 2>&1 | grep -E "^error|test result|FAILED" -A5 | head -30
+```
+
+Tool:
+<returncode>
+0
+<output>
+test result: ok. 129 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.01s
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 27, $1.84):
+```
+cd . && sed -n 1,40p tests/ddl_and_dml.rs; sed -n 55,80p tests/common/mod.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+//! Integration tests for CREATE TABLE, INSERT, and DROP TABLE.
+
+mod common;
+
+use tanager::{Database, ErrorKind, Outcome};
+
+#[test]
+fn create_insert_select_roundtrip() {
+    let mut db = Database::new();
+    assert_eq!(
+        db.execute("CREATE TABLE t (id INTEGER, name TEXT)")
+            .unwrap(),
+        Outcome::TableCreated("t".to_string())
+    );
+    assert_eq!(
+        db.execute("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+            .unwrap(),
+        Outcome::Inserted(3)
+    );
+    let result = db.query("SELECT id, name FROM t ORDER BY id").unwrap();
+    assert_eq!(result.row_count(), 3);
+    assert_eq!(result.value(2, 1).unwrap().to_string(), "c");
+}
+
+#[test]
+fn insert_with_explicit_columns_fills_missing_with_null() {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (a INTEGER, b TEXT, c INTEGER)")
+        .unwrap();
+    db.execute("INSERT INTO t (c, a) VALUES (99, 1)").unwrap();
+    let result = db.query("SELECT a, b, c FROM t").unwrap();
+    assert_eq!(result.value(0, 0).unwrap().to_string(), "1");
+    assert_eq!(result.value(0, 1).unwrap().to_string(), "NULL");
+    assert_eq!(result.value(0, 2).unwrap().to_string(), "99");
+}
+
+#[test]
+fn insert_widens_integer_into_float_column() {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (x FLOAT)").unwrap();
+        .collect()
+}
+
+/// Convenience: run `sql` against `db` and return stringified rows.
+pub fn query_strings(db: &mut Database, sql: &str) -> Vec<Vec<String>> {
+    let result = db.query(sql).unwrap();
+    rows_as_strings(&result)
+}
+
+/// Extract a single scalar cell (row 0, column 0) as a string.
+pub fn scalar(db: &mut Database, sql: &str) -> String {
+    db.query(sql).unwrap().value(0, 0).unwrap().to_string()
+}
+
+/// Assert two integer values are equal, unwrapping through the Value.
+pub fn assert_int(value: &Value, expected: i64) {
+    assert_eq!(value, &Value::Integer(expected), "value mismatch");
+}
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 28, $1.99):
+```
+cd . && cat > tests/update_delete.rs <<'EOF'
+//! Integration tests for UPDATE and DELETE.
+
+mod common;
+
+use common::{query_strings, scalar};
+use tanager::{Database, ErrorKind, Outcome};
+
+/// A small table with a NOT NULL key, nullable integers, a float and a text.
+fn seeded() -> Database {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE t (id INTEGER NOT NULL, a INTEGER, b INTEGER, f 
+FLOAT, s TEXT)")
+        .unwrap();
+    db.execute(
+        "INSERT INTO t VALUES \
+            (1, 10, 20, 1.5, 'x'), \
+            (2, 30, 40, 2.5, 'y'), \
+            (3, NULL, 60, 3.5, 'z')",
+    )
+    .unwrap();
+    db
+}
+
+#[test]
+fn update_without_where_touches_every_row() {
+    let mut db = seeded();
+    assert_eq!(
+        db.execute("UPDATE t SET b = 0").unwrap(),
+        Outcome::Updated(3)
+    );
+    assert_eq!(
+        query_strings(&mut db, "SELECT b FROM t"),
+        vec![vec!["0"], vec!["0"], vec!["0"]]
+    );
+}
+
+#[test]
+fn update_counts_only_rows_that_actually_change() {
+    let mut db = seeded();
+    db.execute("UPDATE t SET b = 0").unwrap();
+    // Everything already holds 0, so no row comes out different.
+    assert_eq!(
+        db.execute("UPDATE t SET b = 0").unwrap(),
+        Outcome::Updated(0)
+    );
+}
+
+#[test]
+fn update_where_keeps_false_and_unknown_rows() {
+    let mut db = seeded();
+    // Row 3 has a NULL `a`, so the predicate is unknown there, and row 1 is 
+FALSE.
+    assert_eq!(
+        db.execute("UPDATE t SET b = 99 WHERE a > 15").unwrap(),
+        Outcome::Updated(1)
+    );
+    assert_eq!(
+        query_strings(&mut db, "SELECT id, b FROM t"),
+        vec![
+            vec!["1", "20"],
+            vec!["2", "99"],
+            vec!["3", "60"],
+        ]
+    );
+}
+
+#[test]
+fn assignments_read_the_row_as_stored() {
+    let mut db = seeded();
+    db.execute("UPDATE t SET a = b, b = a WHERE id = 2").unwrap();
+    assert_eq!(
+        query_strings(&mut db, "SELECT a, b FROM t WHERE id = 2"),
+        vec![vec!["40", "30"]]
+    );
+}
+
+#[test]
+fn alias_qualifies_set_and_where() {
+    let mut db = seeded();
+    assert_eq!(
+        db.execute("UPDATE t AS e SET e.a = e.b + 1 WHERE e.id = 1")
+            .unwrap(),
+        Outcome::Updated(1)
+    );
+    assert_eq!(scalar(&mut db, "SELECT a FROM t WHERE id = 1"), "21");
+}
+
+#[test]
+fn update_widens_integer_into_float_column() {
+    let mut db = seeded();
+    db.execute("UPDATE t SET f = 7 WHERE id = 1").unwrap();
+    assert_eq!(scalar(&mut db, "SELECT f FROM t WHERE id = 1"), "7.0");
+}
+
+#[test]
+fn update_rejects_values_the_column_cannot_hold() {
+    let mut db = seeded();
+    let err = db.execute("UPDATE t SET a = 'nope'").unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Type);
+    // ... and nothing moved.
+    assert_eq!(scalar(&mut db, "SELECT a FROM t WHERE id = 1"), "10");
+    assert_eq!(
+        db.execute("UPDATE t SET s = 1").unwrap_err().kind(),
+        ErrorKind::Type
+    );
+}
+
+#[test]
+fn update_refuses_null_in_not_null_column() {
+    let mut db = seeded();
+    assert!(db.execute("UPDATE t SET id = NULL WHERE id = 1").is_err());
+    // A NULL arising from an expression is refused just the same (`a` is NULL).
+    assert!(db.execute("UPDATE t SET id = a + 1 WHERE id = 3").is_err());
+    assert_eq!(scalar(&mut db, "SELECT COUNT(*) FROM t"), "3");
+    assert_eq!(
+        query_strings(&mut db, "SELECT id FROM t"),
+        vec![vec!["1"], vec!["2"], vec!["3"]]
+    );
+}
+
+#[test]
+fn update_is_atomic_when_one_row_cannot_be_computed() {
+    let mut db = seeded();
+    // Row 1 divides by zero; rows are all built before anything is written.
+    let err = db.execute("UPDATE t SET b = 10 / (a - 10)").unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Execution);
+    assert_eq!(
+        query_strings(&mut db, "SELECT id, b FROM t"),
+        vec![
+            vec!["1", "20"],
+            vec!["2", "40"],
+            vec!["3", "60"],
+        ]
+    );
+}
+
+#[test]
+fn update_writes_rows_where_they_sit() {
+    let mut db = seeded();
+    db.execute("UPDATE t SET s = 'moved' WHERE id = 1").unwrap();
+    assert_eq!(
+        query_strings(&mut db, "SELECT id, s FROM t"),
+        vec![
+            vec!["1", "moved"],
+            vec!["2", "y"],
+            vec!["3", "z"],
+        ]
+    );
+}
+
+#[test]
+fn delete_removes_matched_rows_and_keeps_order() {
+    let mut db = seeded();
+    assert_eq!(
+        db.execute("DELETE FROM t WHERE a = 30").unwrap(),
+        Outcome::Deleted(1)
+    );
+    assert_eq!(
+        query_strings(&mut db, "SELECT id FROM t"),
+        vec![vec!["1"], vec!["3"]]
+    );
+}
+
+#[test]
+fn delete_without_where_empties_the_table() {
+    let mut db = seeded();
+    assert_eq!(db.execute("DELETE FROM t").unwrap(), Outcome::Deleted(3));
+    assert_eq!(scalar(&mut db, "SELECT COUNT(*) FROM t"), "0");
+    assert!(db.has_table("t"));
+    // A second DELETE finds nothing to remove.
+    assert_eq!(db.execute("DELETE FROM t").unwrap(), Outcome::Deleted(0));
+}
+
+#[test]
+fn delete_keeps_false_and_unknown_rows() {
+    let mut db = seeded();
+    assert_eq!(
+        db.execute("DELETE FROM t WHERE a = NULL").unwrap(),
+        Outcome::Deleted(0)
+    );
+    assert_eq!(
+        db.execute("DELETE FROM t x WHERE x.a > 1000").unwrap(),
+        Outcome::Deleted(0)
+    );
+    assert_eq!(scalar(&mut db, "SELECT COUNT(*) FROM t"), "3");
+}
+
+#[test]
+fn delete_is_atomic_when_the_predicate_errors() {
+    let mut db = seeded();
+    let err = db.execute("DELETE FROM t WHERE 10 / (a - 10) > 0").unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Execution);
+    assert_eq!(scalar(&mut db, "SELECT COUNT(*) FROM t"), "3");
+}
+
+#[test]
+fn mutations_leave_other_tables_alone() {
+    let mut db = seeded();
+    db.execute("CREATE TABLE u (i INTEGER)").unwrap();
+    db.execute("INSERT INTO u VALUES (1), (2)").unwrap();
+    db.execute("DELETE FROM t").unwrap();
+    db.execute("UPDATE t SET a = 1").unwrap();
+    assert_eq!(scalar(&mut db, "SELECT COUNT(*) FROM u"), "2");
+    assert_eq!(scalar(&mut db, "SELECT SUM(i) FROM u"), "3");
+}
+
+#[test]
+fn insert_after_delete_appends_at_the_end() {
+    let mut db = seeded();
+    db.execute("DELETE FROM t WHERE id = 1").unwrap();
+    db.execute("INSERT INTO t VALUES (4, 1, 2, 3.5, 'w')")
+        .unwrap();
+    assert_eq!(
+        query_strings(&mut db, "SELECT id FROM t"),
+        vec![vec!["2"], vec!["3"], vec!["4"]]
+    );
+}
+
+#[test]
+fn unknown_table_is_a_catalog_error() {
+    let mut db = seeded();
+    assert_eq!(
+        db.execute("DELETE FROM nope").unwrap_err().kind(),
+        ErrorKind::Catalog
+    );
+    assert_eq!(
+        db.execute("UPDATE nope SET a = 1").unwrap_err().kind(),
+        ErrorKind::Catalog
+    );
+}
+
+#[test]
+fn binder_rejects_bad_names_predicates_and_set_lists() {
+    let mut db = seeded();
+    for sql in [
+        "UPDATE t SET nope = 1",
+        "UPDATE t SET a = nope",
+        "DELETE FROM t WHERE nope = 1",
+        "UPDATE t SET a = 1 WHERE a",
+        "DELETE FROM t WHERE s",
+        "UPDATE t SET a = COUNT(*)",
+        "DELETE FROM t WHERE SUM(a) > 1",
+        "UPDATE t SET a = 1, a = 2",
+        "UPDATE t AS e SET x.a = 1",
+    ] {
+        assert_eq!(
+            db.execute(sql).unwrap_err().kind(),
+            ErrorKind::Binder,
+            "expected a binder error for `{}`",
+            sql
+        );
+    }
+    assert_eq!(scalar(&mut db, "SELECT COUNT(*) FROM t"), "3");
+}
+
+#[test]
+fn mutations_are_not_result_sets() {
+    let mut db = seeded();
+    assert!(db.query("DELETE FROM t").is_err());
+    // ... but the statement still ran through execute().
+    assert!(db.execute("UPDATE t SET a = 1").is_ok());
+}
+
+#[test]
+fn script_runs_mutations_in_order() {
+    let mut db = seeded();
+    let outcomes = db
+        .execute_script("update T set A = 5 where id = 1; delete from t WHERE id
+= 2")
+        .unwrap();
+    assert_eq!(outcomes, vec![Outcome::Updated(1), Outcome::Deleted(1)]);
+    assert_eq!(
+        query_strings(&mut db, "SELECT id, a FROM t"),
+        vec![vec!["1", "5"], vec!["3", "NULL"]]
+    );
+}
+EOF
+cargo test --test update_delete 2>&1 | tail -20
+```
+
+Tool:
+<returncode>
+0
+<output>
+test binder_rejects_bad_names_predicates_and_set_lists ... ok
+test delete_keeps_false_and_unknown_rows ... ok
+test delete_removes_matched_rows_and_keeps_order ... ok
+test delete_without_where_empties_the_table ... ok
+test insert_after_delete_appends_at_the_end ... ok
+test mutations_are_not_result_sets ... ok
+test mutations_leave_other_tables_alone ... ok
+test script_runs_mutations_in_order ... ok
+test unknown_table_is_a_catalog_error ... ok
+test update_counts_only_rows_that_actually_change ... ok
+test update_is_atomic_when_one_row_cannot_be_computed ... ok
+test update_refuses_null_in_not_null_column ... ok
+test update_rejects_values_the_column_cannot_hold ... ok
+test update_where_keeps_false_and_unknown_rows ... ok
+test update_widens_integer_into_float_column ... ok
+test update_without_where_touches_every_row ... ok
+test update_writes_rows_where_they_sit ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.00s
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 29, $2.07):
+```
+cd . && rm examples/_check.rs && cat tests/cli.rs | head -60; sed -n 1,45p 
+src/lib.rs; ls examples
+```
+
+Tool:
+<returncode>
+0
+<output>
+//! Integration tests that drive the compiled `tanager` binary.
+
+use std::process::Command;
+
+/// Path to the binary under test, provided by Cargo.
+fn bin() -> &'static str {
+    env!("CARGO_BIN_EXE_tanager")
+}
+
+fn run(args: &[&str]) -> (String, String, bool) {
+    let output = Command::new(bin())
+        .args(args)
+        .output()
+        .expect("failed to run tanager binary");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.success(),
+    )
+}
+
+#[test]
+fn runs_a_script_from_arguments() {
+    let (stdout, _stderr, ok) = run(&["CREATE TABLE t (id INTEGER, name TEXT); \
+         INSERT INTO t VALUES (1, 'ada'), (2, 'grace'); \
+         SELECT name FROM t ORDER BY id DESC"]);
+    assert!(ok);
+    assert!(stdout.contains("CREATE TABLE t"));
+    assert!(stdout.contains("INSERT 2"));
+    // grace (id 2) comes before ada (id 1) under DESC.
+    let grace = stdout.find("grace").unwrap();
+    let ada = stdout.find("ada").unwrap();
+    assert!(grace < ada, "output was:\n{}", stdout);
+}
+
+#[test]
+fn reports_row_count() {
+    let (stdout, _stderr, ok) = run(&["SELECT 1 + 1 AS answer"]);
+    assert!(ok);
+    assert!(stdout.contains("answer"));
+    assert!(stdout.contains('2'));
+    assert!(stdout.trim_end().ends_with("(1 row)"));
+}
+
+#[test]
+fn exits_nonzero_on_error() {
+    let (_stdout, stderr, ok) = run(&["SELECT * FROM does_not_exist"]);
+    assert!(!ok);
+    assert!(stderr.contains("error"));
+}
+//! # tanager
+//!
+//! `tanager` is an embeddable, in-memory analytical SQL query engine. It parses
+//! a SQL subset, binds and type-checks it against an in-memory catalog, applies
+//! a small set of rule-based optimizations, and executes the resulting plan 
+over
+//! columnar tables — all with zero external dependencies.
+//!
+//! # Quick start
+//!
+//! ```
+//! use tanager::Database;
+//!
+//! let mut db = Database::new();
+//! db.execute("CREATE TABLE t (id INTEGER, name TEXT, dept TEXT)").unwrap();
+//! db.execute(
+//!     "INSERT INTO t VALUES (1, 'Ada', 'eng'), (2, 'Grace', 'eng'), (3, 'Tim',
+'ops')",
+//! )
+//! .unwrap();
+//!
+//! // Aggregate with grouping and ordering.
+//! let result = db
+//!     .query("SELECT dept, COUNT(*) AS n FROM t GROUP BY dept ORDER BY n 
+DESC")
+//!     .unwrap();
+//! assert_eq!(result.columns(), vec!["dept", "n"]);
+//! assert_eq!(result.value(0, 0).unwrap().to_string(), "eng");
+//! assert_eq!(result.value(0, 1).unwrap().to_string(), "2");
+//!
+//! // Render a result set as an aligned table.
+//! let one = db.query("SELECT name FROM t WHERE id = 3").unwrap();
+//! assert!(tanager::render_table(&one).contains("Tim"));
+//! ```
+//!
+//! The crate is organized as a pipeline of stages, each in its own module:
+//!
+//! * [`types`] — logical types, runtime [`Value`]s, and [`Schema`]s.
+//! * [`storage`] — in-memory columnar tables and the catalog.
+//! * [`ast`] — the abstract syntax tree produced by the parser.
+//! * [`parser`] — the lexer and Pratt parser.
+//! * [`planner`] — name/type binding and the logical plan.
+//! * [`optimizer`] — rule-based logical-plan rewrites.
+//! * [`exec`] — expression evaluation and physical operators.
+//! * [`functions`] — the scalar and aggregate function registry.
+
+pub mod api;
+pub mod ast;
+basic.rs
+joins.rs
+report.rs
+update_delete.rs
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 30, $2.16):
+Now update docs: README grammar, features, CHANGELOG, CLI test, DESIGN.
+
+```
+cd . && python3 - <<'EOF'
+p='README.md'
+s=open(p).read()
+s=s.replace("""statement   := select | insert | create_table | drop_table""",
+"""statement   := select | insert | update | delete | create_table | 
+drop_table""")
+s=s.replace("""insert      := INSERT INTO table [ ( col {, col} ) ] VALUES tuple
+{, tuple}""",
+"""insert      := INSERT INTO table [ ( col {, col} ) ] VALUES tuple {, tuple}
+update      := UPDATE table [alias] SET col = expr {, col = expr} [WHERE expr]
+delete      := DELETE FROM table [alias] [WHERE expr]""")
+s=s.replace("""- **DDL / DML** — `CREATE TABLE` (with `NOT NULL` and `IF NOT 
+EXISTS`),
+  `DROP TABLE`, and multi-row `INSERT` with optional column lists. Inserts are
+  atomic: a row that violates a type or `NOT NULL` constraint rejects the whole
+  statement.""",
+"""- **DDL / DML** — `CREATE TABLE` (with `NOT NULL` and `IF NOT EXISTS`),
+  `DROP TABLE`, and multi-row `INSERT` with optional column lists. Inserts are
+  atomic: a row that violates a type or `NOT NULL` constraint rejects the whole
+  statement.
+- **Row mutation** — `UPDATE ... SET ... [WHERE]` and `DELETE FROM ... [WHERE]`,
+  both matching only rows whose predicate is `TRUE` and both atomic: every
+  candidate row is built and checked before a single column is touched. `SET`
+  right-hand sides read the row as it was stored, so `SET a = b, b = a` swaps 
+two
+  columns; updated rows stay where they sit and deletions preserve the order of
+  the survivors.""")
+open(p,'w').write(s)
+
+p='CHANGELOG.md'
+s=open(p).read()
+s=s.replace("""### Added
+- `EXPLAIN <select>` returns the optimized logical plan as a result set.""",
+"""### Added
+- `UPDATE table [alias] SET col = expr {, col = expr} [WHERE expr]` and
+  `DELETE FROM table [alias] [WHERE expr]`, reported as the new `Outcome`
+  variants `Updated(n)` and `Deleted(n)`. Both are atomic, match only rows whose
+  predicate is `TRUE`, and evaluate `SET` right-hand sides against the stored
+  row.
+- `EXPLAIN <select>` returns the optimized logical plan as a result set.""")
+open(p,'w').write(s)
+
+p='src/lib.rs'
+s=open(p).read()
+s=s.replace("""//! // Render a result set as an aligned table.""",
+"""//! // Mutate rows in place; `UPDATE` and `DELETE` report how many rows 
+moved.
+//! use tanager::Outcome;
+//! assert_eq!(db.execute("UPDATE t SET dept = 'sre' WHERE id = 3").unwrap(), 
+Outcome::Updated(1));
+//! assert_eq!(db.execute("DELETE FROM t WHERE dept = 'sre'").unwrap(), 
+Outcome::Deleted(1));
+//!
+//! // Render a result set as an aligned table.""")
+open(p,'w').write(s)
+
+p='tests/cli.rs'
+s=open(p).read()
+s=s.replace("""#[test]
+fn exits_nonzero_on_error() {""","""#[test]
+fn prints_update_and_delete_counts() {
+    let (stdout, _stderr, ok) = run(&["CREATE TABLE t (id INTEGER); \\
+         INSERT INTO t VALUES (1), (2), (3); \\
+         UPDATE t SET id = id + 10 WHERE id > 1; \\
+         DELETE FROM t WHERE id = 1"]);
+    assert!(ok, "output was:\\n{}", stdout);
+    assert!(stdout.contains("UPDATE 2"), "output was:\\n{}", stdout);
+    assert!(stdout.contains("DELETE 1"), "output was:\\n{}", stdout);
+}
+
+#[test]
+fn exits_nonzero_on_error() {""")
+open(p,'w').write(s)
+EOF
+sed -n 1,80p docs/DESIGN.md
+```
+
+Tool:
+<returncode>
+0
+<output>
+# tanager design notes
+
+This document describes how a SQL string becomes a result set inside tanager, 
+and
+the invariants each stage relies on.
+
+## Pipeline
+
+```
+text → tokens → AST → LogicalPlan → optimized LogicalPlan → rows
+        lexer   parser   binder        optimizer               executor
+```
+
+Each stage has a single, well-defined output type and does not reach back into 
+an
+earlier stage:
+
+1. **Lexer** (`parser::lexer`) turns text into `Token`s, tracking byte offsets 
+so
+   later errors can point at a position. It recognizes keywords, so the parser
+   never re-classifies identifiers.
+2. **Parser** (`parser::parser`) is recursive-descent for statements and Pratt 
+for
+   expressions. Operator precedence lives in `BinaryOp::binding_power`, so 
+adding
+   an operator is a localized change.
+3. **Binder** (`planner::binder`) resolves names to positional column indices,
+   type-checks every node, and lifts aggregate calls into an `Aggregate` 
+operator.
+   Its output — a `LogicalPlan` of `BoundExpr`s — is fully typed and contains no
+   names, only indices.
+4. **Optimizer** (`optimizer`) applies pure `OptimizerRule`s to a fixpoint. 
+Rules
+   rewrite a plan into an equivalent plan; they never change results.
+5. **Executor** (`exec`) walks the plan and materializes rows. Evaluation of a
+   `BoundExpr` against a `Row` lives in `exec::eval`.
+
+## Key invariants
+
+- **Positional binding.** After the binder, a column reference is an index into
+  the operator's input row. A join's output row is *left columns then right
+  columns*; the binder assigns right-side indices with that offset, and 
+predicate
+  pushdown re-bases them when moving a conjunct into the right input.
+- **Three-valued logic.** Comparisons return `Option<bool>` (`None` = `NULL`).
+  Predicate contexts keep a row only when the predicate is exactly `TRUE`.
+  Aggregates ignore `NULL`; `GROUP BY`/`DISTINCT` treat `NULL` keys as equal.
+- **Determinism.** Grouping and `DISTINCT` preserve first-seen input order (an
+  ordered map plus an insertion-ordered vector); sorting is stable. Division and
+  modulo by zero are errors, never `NaN`/`inf`. This is what lets the reference
+  tests assert on exact output.
+- **Aggregate output layout.** An `Aggregate` node outputs group columns first,
+  then one column per aggregate. Projection and `HAVING` above it reference 
+those
+  columns positionally, which is why the binder can express `HAVING SUM(x) > 1`
+  even when `SUM(x)` is not projected.
+- **ORDER BY resolution.** Keys resolve by position, then against output 
+columns,
+  then (for non-aggregate non-distinct queries) against input columns, in which
+  case they ride along as hidden projection columns that a final projection
+  strips after the sort.
+
+## Adding a feature
+
+- **A scalar function**: add a `ScalarFn` variant, its name mapping, its
+  `return_type` (arity + argument typing), and its `eval`. Nothing else changes.
+- **An aggregate**: add an `AggregateFn` variant, its `return_type`, and its
+  accumulator behavior in `Accumulator`.
+- **An operator**: add a `BinaryOp`/`UnaryOp` variant with a `binding_power`, a
+  lexer token if it needs new punctuation, a parser mapping, a binder type rule,
+  and an evaluator arm.
+- **A plan rewrite**: implement `OptimizerRule` and add it to `Optimizer::new`.
+
+## Deliberate non-goals
+
+tanager is a teaching-grade analytical engine, not a storage engine. There is no
+persistence, transactions, indexes, subqueries, or set operations. Execution is
+fully materializing, which keeps operators simple at the cost of memory on very
+large inputs.
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 31, $2.25):
+```
+cd . && python3 - <<'EOF'
+p='docs/DESIGN.md'
+s=open(p).read()
+s=s.replace("""## Key invariants""","""## Row mutation (`UPDATE` / `DELETE`)
+
+A mutation is not a plan: there is nothing to optimize and no rows to return, so
+the binder produces a flat `BoundUpdate` / `BoundDelete` (`planner::dml`) — a
+table name, an optional predicate, and, for `UPDATE`, `SET` targets resolved to
+column positions — and `api::Database` applies it directly to the stored table.
+
+Both statements work in two passes, which is what makes them all-or-nothing:
+
+1. Scan the table, keeping the positions of rows whose predicate is exactly
+   `TRUE`, and (for `UPDATE`) build each candidate row and validate it against
+   the schema with `Table::coerce_row`. Any evaluation or storage failure aborts
+   here, before a single column has been touched.
+2. Apply: `Table::delete_rows` compacts the columns, keeping survivors in stored
+   order, while `Table::update_row` overwrites values in place so an updated row
+   keeps its position.
+
+`SET` right-hand sides are evaluated against the row *as stored*, never against
+the partially assigned row, so `SET a = b, b = a` swaps two columns. `UPDATE`
+reports the number of rows whose values actually differ afterwards, so an
+assignment that rewrites identical values counts as no change.
+
+## Key invariants""")
+s=s.replace("""- **A plan rewrite**: implement `OptimizerRule` and add it to 
+`Optimizer::new`.""",
+"""- **A plan rewrite**: implement `OptimizerRule` and add it to 
+`Optimizer::new`.
+- **A statement**: add an AST node and a `Statement` variant, a parser entry in
+  `parse_statement`, a binder entry point, an `Outcome` variant if it does not
+  return rows, and an `api::Database` arm that applies it.""")
+open(p,'w').write(s)
+EOF
+cargo fmt && cargo clippy --all-targets 2>&1 | grep -E "^(warning|error)" | sort
+| uniq -c | head
+```
+
+Tool:
+<returncode>
+1
+<output>
+error: 'cargo-fmt' is not installed for the toolchain 
+'1.92.0-x86_64-unknown-linux-gnu'.
+To install, run `rustup component add rustfmt`
+
+Stack backtrace:
+   0: anyhow::kind::Adhoc::new
+   1: anyhow::__private::format_err.3753
+   2: rustup::toolchain::distributable::DistributableToolchain::recursion_error
+   3: rustup::toolchain::Toolchain::create_command
+   4: rustup::toolchain::Toolchain::command
+   5: rustup::cli::proxy_mode::main::{{closure}}::{{closure}}
+   6: rustup_init::run_rustup_inner::{{closure}}::{{closure}}
+   7: rustup_init::run_rustup::{{closure}}::{{closure}}
+   8: rustup_init::main::{{closure}}
+   9: rustup_init::main
+  10: std::sys::backtrace::__rust_begin_short_backtrace
+  11: main
+  12: <unknown>
+  13: __libc_start_main
+  14: <unknown>
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 32, $2.31):
+```
+cd . && cargo clippy --all-targets 2>&1 | tail -3; cat rustfmt.toml; for f in 
+src/api.rs src/planner/binder.rs src/planner/dml.rs src/storage/table.rs 
+src/storage/column.rs src/parser/parser.rs src/parser/keyword.rs 
+src/ast/statement.rs src/planner/binder_util.rs tests/update_delete.rs 
+examples/update_delete.rs tests/cli.rs src/lib.rs; do awk -v F="$f" 'length>100 
+{print F": "FNR": "length}' $f; done
+```
+
+Tool:
+<returncode>
+0
+<output>
+  12: <unknown>
+  13: __libc_start_main
+  14: <unknown>
+edition = "2021"
+max_width = 100
+src/planner/binder.rs: 457: 102
+src/planner/binder.rs: 761: 101
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 33, $2.36):
+```
+cd . && sed -n 455,459p src/planner/binder.rs; sed -n 759,763p 
+src/planner/binder.rs; grep -n "" examples/update_delete.rs | awk -F: 
+'length($0)-length($1)-1>100'
+```
+
+Tool:
+<returncode>
+0
+<output>
+                if ctx.is_some() {
+                    return Err(Error::binder(format!(
+                        "column '{}' must appear in GROUP BY or be used inside 
+an aggregate function",
+                        cref.display_name()
+                    )));
+    #[test]
+    fn binds_update_targets_by_position() {
+        let u = update("UPDATE emp e SET e.salary = salary + 1, name = 'x' WHERE
+e.id = 1").unwrap();
+        assert_eq!(u.table, "emp");
+        assert_eq!(u.assignments.len(), 2);
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 34, $2.44):
+```
+cd . && python3 - <<'EOF'
+p='src/planner/binder.rs'
+s=open(p).read()
+s=s.replace("""        let u = update("UPDATE emp e SET e.salary = salary + 1, 
+name = 'x' WHERE e.id = 1").unwrap();""",
+"""        let u =
+            update("UPDATE emp e SET e.salary = salary + 1, name = 'x' WHERE 
+e.id = 1").unwrap();""")
+s=s.replace("""            update("UPDATE emp SET salary = 
+MAX(salary)").unwrap_err().kind(),""",
+"""            update("UPDATE emp SET salary = MAX(salary)")
+                .unwrap_err()
+                .kind(),""")
+s=s.replace("""            update("UPDATE emp SET id = 1, id = 
+2").unwrap_err().kind(),""",
+"""            update("UPDATE emp SET id = 1, id = 2").unwrap_err().kind(),""")
+open(p,'w').write(s)
+p='tests/update_delete.rs'
+s=open(p).read()
+s=s.replace("""    let err = db.execute("DELETE FROM t WHERE 10 / (a - 10) > 
+0").unwrap_err();""",
+"""    let err = db
+        .execute("DELETE FROM t WHERE 10 / (a - 10) > 0")
+        .unwrap_err();""")
+s=s.replace("""        vec![
+            vec!["1", "20"],
+            vec!["2", "99"],
+            vec!["3", "60"],
+        ]""","""        vec![vec!["1", "20"], vec!["2", "99"], vec!["3", 
+"60"]]""")
+s=s.replace("""        vec![
+            vec!["1", "20"],
+            vec!["2", "40"],
+            vec!["3", "60"],
+        ]""","""        vec![vec!["1", "20"], vec!["2", "40"], vec!["3", 
+"60"]]""")
+s=s.replace("""        vec![
+            vec!["1", "moved"],
+            vec!["2", "y"],
+            vec!["3", "z"],
+        ]""","""        vec![vec!["1", "moved"], vec!["2", "y"], vec!["3", 
+"z"]]""")
+open(p,'w').write(s)
+p='examples/update_delete.rs'
+s=open(p).read()
+s=s.replace("""    println!("{}", tanager::render_table(&db.query("SELECT * FROM
+t").unwrap()));""",
+"""    let all = db.query("SELECT * FROM t").unwrap();
+    println!("{}", tanager::render_table(&all));""")
+open(p,'w').write(s)
+EOF
+cargo test 2>&1 | grep -E "test result: FAILED|failures:|^error" -A5 | head -20;
+cargo test 2>&1 | grep -c "test result: ok"
+```
+
+Tool:
+<returncode>
+0
+<output>
+failures:
+
+---- src/lib.rs - (line 10) stdout ----
+Test executable failed (exit status: 101).
+
+stderr:
+--
+failures:
+    src/lib.rs - (line 10)
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; 
+finished in 0.46s
+
+error: doctest failed, to rerun pass `--doc`
+26
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 35, $2.50):
+```
+cd . && cargo test --doc 2>&1 | grep -A 20 "lib.rs - (line 10) stdout"
+```
+
+Tool:
+<returncode>
+0
+<output>
+---- src/lib.rs - (line 10) stdout ----
+Test executable failed (exit status: 101).
+
+stderr:
+
+thread 'main' (4312) panicked at src/lib.rs:29:1:
+assertion failed: tanager::render_table(&one).contains("Tim")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at 
+/rustc/ded5c06cf21d2b93bffd5d884aa6e96934ee4234/library/std/src/panicking.rs:698
+:5
+   1: core::panicking::panic_fmt
+             at 
+/rustc/ded5c06cf21d2b93bffd5d884aa6e96934ee4234/library/core/src/panicking.rs:80
+:14
+   2: core::panicking::panic
+             at 
+/rustc/ded5c06cf21d2b93bffd5d884aa6e96934ee4234/library/core/src/panicking.rs:15
+0:5
+   3: rust_out::main::_doctest_main_src_lib_rs_10_0
+   4: rust_out::main
+   5: core::ops::function::FnOnce::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose 
+backtrace.
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 36, $2.57):
+```
+cd . && python3 - <<'EOF'
+p='src/lib.rs'
+s=open(p).read()
+s=s.replace("""//! // Mutate rows in place; `UPDATE` and `DELETE` report how 
+many rows moved.
+//! use tanager::Outcome;
+//! assert_eq!(db.execute("UPDATE t SET dept = 'sre' WHERE id = 3").unwrap(), 
+Outcome::Updated(1));
+//! assert_eq!(db.execute("DELETE FROM t WHERE dept = 'sre'").unwrap(), 
+Outcome::Deleted(1));
+//!
+//! // Render a result set as an aligned table.""","""//! // Render a result set
+as an aligned table.""")
+s=s.replace("""//! assert!(tanager::render_table(&one).contains("Tim"));
+//! ```""","""//! assert!(tanager::render_table(&one).contains("Tim"));
+//!
+//! // Mutate rows in place; `UPDATE` and `DELETE` report how many rows moved.
+//! use tanager::Outcome;
+//! let moved = db.execute("UPDATE t SET dept = 'sre' WHERE id = 3").unwrap();
+//! assert_eq!(moved, Outcome::Updated(1));
+//! let gone = db.execute("DELETE FROM t WHERE dept = 'sre'").unwrap();
+//! assert_eq!(gone, Outcome::Deleted(1));
+//! assert_eq!(db.query("SELECT COUNT(*) FROM t").unwrap().value(0, 
+0).unwrap().to_string(), "2");
+//! ```""")
+open(p,'w').write(s)
+EOF
+cargo test 2>&1 | grep -E "FAILED|failures:|^error" -A5 | head -20; cargo test 
+2>&1 | grep -E "test result: ok" | wc -l
+```
+
+Tool:
+<returncode>
+0
+<output>
+27
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 37, $2.67):
+```
+cd . && cat > examples/_scratch.rs <<'EOF'
+use tanager::{Database, ErrorKind, Outcome};
+fn s(db: &mut Database, q: &str) -> String { 
+db.query(q).unwrap().value(0,0).map(|v| v.to_string()).unwrap_or_default() }
+fn main() {
+    let mut db = Database::new();
+    db.execute("CREATE TABLE T (Id INTEGER, F FLOAT, S TEXT)").unwrap();
+    // empty table
+    assert_eq!(db.execute("UPDATE t SET id = 1").unwrap(), Outcome::Updated(0));
+    assert_eq!(db.execute("DELETE FROM T").unwrap(), Outcome::Deleted(0));
+    // static type check even when empty
+    assert_eq!(db.execute("UPDATE t SET id = 'x'").unwrap_err().kind(), 
+ErrorKind::Type);
+    db.execute("INSERT INTO t VALUES (1, 1.0, 'a'), (2, 2.0, 'b')").unwrap();
+    // case-insensitive table name, expressions, functions, CASE, CAST
+    assert_eq!(db.execute("UPDATE T SET S = UPPER(s) || '!', f = f * 2 WHERE id 
+<= 2").unwrap(), Outcome::Updated(2));
+    assert_eq!(s(&mut db, "SELECT S FROM t WHERE id = 1"), "A!");
+    assert_eq!(s(&mut db, "SELECT f FROM t WHERE id = 2"), "4.0");
+    assert_eq!(db.execute("UPDATE t SET id = CASE WHEN id = 1 THEN 10 ELSE id 
+END").unwrap(), Outcome::Updated(1));
+    assert_eq!(db.execute("UPDATE t SET id = CAST('7' AS INTEGER) WHERE id = 
+2").unwrap(), Outcome::Updated(1));
+    // alias without AS, IN / BETWEEN / LIKE predicates
+    assert_eq!(db.execute("DELETE FROM t x WHERE x.id IN (7, 99)").unwrap(), 
+Outcome::Deleted(1));
+    assert_eq!(db.execute("UPDATE t y SET y.s = 'z' WHERE y.s LIKE 
+'A%'").unwrap(), Outcome::Updated(1));
+    // qualifying by table name when an alias exists is rejected; by table name 
+without alias works
+    assert_eq!(db.execute("UPDATE t SET t.id = 3").unwrap(), 
+Outcome::Updated(1));
+    assert!(db.execute("UPDATE t a SET t.id = 3").is_err());
+    // predicate must be boolean even if constant
+    assert_eq!(db.execute("DELETE FROM t WHERE 1").unwrap_err().kind(), 
+ErrorKind::Binder);
+    assert_eq!(db.execute("DELETE FROM t WHERE NULL").unwrap(), 
+Outcome::Deleted(0));
+    assert_eq!(db.execute("DELETE FROM t WHERE TRUE").unwrap(), 
+Outcome::Deleted(1));
+    // parse errors
+    for bad in ["UPDATE", "UPDATE t", "UPDATE t SET", "DELETE", "DELETE FROM", 
+"UPDATE t SET a = 1 EXTRA"] {
+        assert_eq!(db.execute(bad).unwrap_err().kind(), ErrorKind::Parse, "{}", 
+bad);
+    }
+    println!("scratch ok");
+}
+EOF
+cargo run -q --example _scratch
+```
+
+Tool:
+<returncode>
+0
+<output>
+scratch ok
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 38, $2.75):
+```
+cd . && rm examples/_scratch.rs && cargo run -q --example update_delete && git 
+status --porcelain && git add -A && git commit -q -m "$(printf 'Add UPDATE and 
+DELETE statements\n\nFill the gap in the supported grammar:\n\n    UPDATE table 
+[alias] SET col = expr {, col = expr} [WHERE expr]\n    DELETE FROM table 
+[alias] [WHERE expr]\n\nWith no WHERE every row matches; with one, only rows 
+whose predicate is\nexactly TRUE, so FALSE and unknown rows stay put. A written 
+alias qualifies\ncolumns in both SET and WHERE.\n\nSET right-hand sides read the
+stored row, not the effects of earlier\nassignments, so SET a = b, b = a swaps 
+two columns. Values land under the\nrules INSERT already follows: INTEGER widens
+into a FLOAT column, nothing\nelse converts, and a NOT NULL column refuses NULL 
+however it arose. Every\ncandidate row is built and checked before a column is 
+touched, so a row that\ncannot be computed or stored ends the statement with the
+table as it was, and\nno other table is affected.\n\nDELETE drops matched rows, 
+survivors keeping stored order; UPDATE rewrites\nmatched rows where they already
+sit. Database::execute answers two new\nOutcome variants, Deleted(n) and 
+Updated(n), the latter counting only rows\nthat hold different values 
+afterwards.\n\nErrors stay in the engine categories: Catalog for a missing 
+table, Binder for\nan unknown column, a non-boolean WHERE, an aggregate call, or
+a column\nassigned twice in a SET list, and Type for a value the column cannot 
+hold.\n')" && git log --stat -1 | head -30
+```
+
+Tool:
+<returncode>
+128
+<output>
+id | a    | b
+---+------+---
+1  | 20   | 10
+2  | 30   | 40
+3  | NULL | 60
+(3 rows)
+id | a    | b
+---+------+---
+1  | 20   | 10
+3  | NULL | 60
+(2 rows)
+ M CHANGELOG.md
+ M README.md
+ M docs/DESIGN.md
+ M src/api.rs
+ M src/ast/statement.rs
+ M src/bin/tanager.rs
+ M src/lib.rs
+ M src/parser/keyword.rs
+ M src/parser/parser.rs
+ M src/planner/binder.rs
+ M src/planner/binder_util.rs
+ M src/planner/mod.rs
+ M src/storage/column.rs
+ M src/storage/table.rs
+ M tests/cli.rs
+?? examples/update_delete.rs
+?? src/planner/dml.rs
+?? tests/update_delete.rs
+Author identity unknown
+
+*** Please tell me who you are.
+
+Run
+
+  git config --global user.email "you@example.com"
+  git config --global user.name "Your Name"
+
+to set your account's default identity.
+Omit --global to set the identity only in this repository.
+
+fatal: unable to auto-detect email address (got 'root@79b1bc772c0f.(none)')
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 39, $2.83):
+```
+cd . && git config user.email "dev@tanager.local" && git config user.name 
+"tanager dev" && git commit -q -m "$(printf 'Add UPDATE and DELETE 
+statements\n\nFill the gap in the supported grammar:\n\n    UPDATE table [alias]
+SET col = expr {, col = expr} [WHERE expr]\n    DELETE FROM table [alias] [WHERE
+expr]\n\nWith no WHERE every row matches; with one, only rows whose predicate 
+is\nexactly TRUE, so FALSE and unknown rows stay put. A written alias 
+qualifies\ncolumns in both SET and WHERE.\n\nSET right-hand sides read the 
+stored row, not the effects of earlier\nassignments, so SET a = b, b = a swaps 
+two columns. Values land under the\nrules INSERT already follows: INTEGER widens
+into a FLOAT column, nothing\nelse converts, and a NOT NULL column refuses NULL 
+however it arose. Every\ncandidate row is built and checked before a column is 
+touched, so a row that\ncannot be computed or stored ends the statement with the
+table as it was, and\nno other table is affected.\n\nDELETE drops matched rows, 
+survivors keeping stored order; UPDATE rewrites\nmatched rows where they already
+sit. Database::execute answers two new\nOutcome variants, Deleted(n) and 
+Updated(n), the latter counting only rows\nthat hold different values 
+afterwards.\n\nErrors stay in the engine categories: Catalog for a missing 
+table, Binder for\nan unknown column, a non-boolean WHERE, an aggregate call, or
+a column\nassigned twice in a SET list, and Type for a value the column cannot 
+hold.\n')" && git log --stat -1 | head -30 && git status --porcelain
+```
+
+Tool:
+<returncode>
+0
+<output>
+commit 73b3452bbf49156db373fc5f85fabd1377365b23
+Author: tanager dev <dev@tanager.local>
+Date:   Sat Sep 5 23:34:35 2026 +0000
+
+    Add UPDATE and DELETE statements
+    
+    Fill the gap in the supported grammar:
+    
+        UPDATE table [alias] SET col = expr {, col = expr} [WHERE expr]
+        DELETE FROM table [alias] [WHERE expr]
+    
+    With no WHERE every row matches; with one, only rows whose predicate is
+    exactly TRUE, so FALSE and unknown rows stay put. A written alias qualifies
+    columns in both SET and WHERE.
+    
+    SET right-hand sides read the stored row, not the effects of earlier
+    assignments, so SET a = b, b = a swaps two columns. Values land under the
+    rules INSERT already follows: INTEGER widens into a FLOAT column, nothing
+    else converts, and a NOT NULL column refuses NULL however it arose. Every
+    candidate row is built and checked before a column is touched, so a row that
+    cannot be computed or stored ends the statement with the table as it was, 
+and
+    no other table is affected.
+    
+    DELETE drops matched rows, survivors keeping stored order; UPDATE rewrites
+    matched rows where they already sit. Database::execute answers two new
+    Outcome variants, Deleted(n) and Updated(n), the latter counting only rows
+    that hold different values afterwards.
+    
+    Errors stay in the engine categories: Catalog for a missing table, Binder 
+for
+    an unknown column, a non-boolean WHERE, an aggregate call, or a column
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 40, $2.89):
+```
+cd . && git branch --show-current && cargo test 2>&1 | grep -E "^test result" | 
+awk '{s+=$4; f+=$6} END {print "passed:", s, "failed:", f}'
+```
+
+Tool:
+<returncode>
+0
+<output>
+feat/update-delete
+passed: 333 failed: 0
+
+────────────────────────────────────────────────────────────────────────────────
+
+[harness] (step 41, $2.97):
+All 333 tests pass on the new `feat/update-delete` branch, and everything is 
+committed.
+
+**What I implemented**
+
+- **AST** (`src/ast/statement.rs`): `Statement::Update`/`Delete`, `UpdateStmt` 
+(table factor + `Assignment` list + selection), `DeleteStmt`, `Assignment { 
+column: ColumnRef, value: Expr }`.
+- **Parser** (`keyword.rs`, `parser.rs`): reserved `UPDATE`, `SET`, `DELETE`; 
+`parse_update`, `parse_assignment` (accepts `col` or `alias.col`), 
+`parse_delete`, both with optional alias and optional `WHERE`.
+- **Binder** (`planner/dml.rs`, `binder.rs`, `binder_util.rs`): 
+`bind_update`/`bind_delete` produce flat `BoundUpdate`/`BoundDelete` (table, 
+positional assignments, optional predicate). Errors: Catalog for a missing 
+table; Binder for unknown column, foreign qualifier, non-boolean `WHERE` 
+(`require_predicate`), aggregate calls (scalar context), or a column assigned 
+twice; Type via new `require_assignable` (exact type, `INTEGER`→`FLOAT`, or 
+untyped `NULL`).
+- **Storage** (`storage/table.rs`, `column.rs`): `Table::coerce_row` (validation
+split out of `insert_row`), `Table::update_row` (in-place overwrite, reports 
+whether values changed), `Table::delete_rows` (compacts columns, survivors keep 
+order), `ColumnVector::set`.
+- **API** (`api.rs`): `Outcome::Updated(usize)` / `Deleted(usize)`; 
+`exec_update` builds and validates every candidate row (RHS read from the stored
+row, so `SET a = b, b = a` swaps) before writing anything, `exec_delete` 
+collects matched positions then removes them; `row_matches` keeps only `TRUE` 
+rows, so `FALSE`/unknown stay put. One uncomputable/unstorable row aborts with 
+the table as it was, and no other table is touched.
+- **CLI/docs/tests**: `UPDATE n` / `DELETE n` status lines, README grammar + 
+feature bullet, CHANGELOG, DESIGN notes, a runnable example, plus unit tests 
+(parser, binder, storage) and a 20-case integration suite 
+`tests/update_delete.rs` and a CLI test.
+
+```
+echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+```
+
+Tool:
+<returncode>
+-1
+<output>
+
+<exception_info>
+action was not executed
+
+Exit:
+
+Saved trajectory to '/logs/agent/[harness].trajectory.json'

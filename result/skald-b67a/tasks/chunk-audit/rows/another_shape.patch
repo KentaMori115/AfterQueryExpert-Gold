@@ -1,0 +1,567 @@
+diff --git a/README.md b/README.md
+index 378711f..646ff3f 100644
+--- a/README.md
++++ b/README.md
+@@ -27,17 +27,18 @@ high-level Rust in its hot paths.
+ 5. The skald language
+ 6. Bytecode format
+ 7. Opcode reference
+-8. The value model
+-9. Memory management
+-10. The virtual machine
+-11. Embedding skald
+-12. Standard library reference
+-13. Data-structure subsystem
+-14. Utility subsystem
+-15. JSON subsystem
+-16. Testing
+-17. Design notes
+-18. Frequently asked questions
++8. Chunk audit
++9. The value model
++10. Memory management
++11. The virtual machine
++12. Embedding skald
++13. Standard library reference
++14. Data-structure subsystem
++15. Utility subsystem
++16. JSON subsystem
++17. Testing
++18. Design notes
++19. Frequently asked questions
+ 
+ ---
+ 
+@@ -108,6 +109,7 @@ skald/
+     heap.rs                reference-counted object heap
+     gc.rs                  tri-color mark-and-sweep collector
+     bytecode.rs            binary chunk format and loader
++    verify/                static audit of a loaded chunk
+     lexer.rs               tokenizer for the surface language
+     vm.rs                  stack-based bytecode interpreter
+     json.rs                JSON parser, serializer, validator
+@@ -138,7 +140,7 @@ The skald binary is a small driver over the library:
+ skald run <file.skc>       execute a compiled bytecode chunk
+ skald lex <file>           tokenize a source file and print a token count
+ skald json <file>          parse a JSON file and report validity
+-skald validate <file>      validate a bytecode chunk header
++skald validate <file>      load a chunk and audit its code
+ ```
+ 
+ ---
+@@ -301,6 +303,98 @@ undefined behavior.
+ 
+ ---
+ 
++## Chunk audit
++
++Loading a chunk proves its shape, not its contents. `chunk_load` reads the
++header, the pool and one descriptor per function, and stops there: the code
++those descriptors carry is a byte string it never opens. So an image that loads
++can still hold a byte that is not an opcode, a jump landing between two
++instructions, a call passing three arguments to a function taking two, or a
++body whose stack depth depends on which branch ran. The interpreter meets those
++one at a time, on whichever path execution takes, and answers with a status
++that says what went wrong but not where.
++
++`verify::chunk_verify` reads the image ahead of time instead:
++
++```
++use skald::bytecode::chunk_load;
++use skald::verify::chunk_verify;
++
++let chunk = chunk_load(&bytes).expect("loads");
++for flaw in chunk_verify(&chunk) {
++    println!("function {} at {}: {:?}", flaw.func, flaw.offset, flaw.kind);
++}
++```
++
++Every flaw names a function, the offset of an opcode byte inside it, and one of
++eight kinds:
++
++```
++  Opcode      a byte that is not an opcode at all
++  Truncated   operands running past the end of the code
++  Constant    a constant index past the pool, or a dict key that is not a string
++  Local       a local slot at or past the count the frame will hold
++  Function    a function index past the function table
++  Arity       a call passing arguments the callee does not declare
++  Jump        a target outside the body, or between two instructions
++  Depth       the value stack under- or overflows, or two paths disagree
++```
++
++A body is read from its first byte forward, so an unknown or truncated
++instruction ends the walk there: nothing after it is known to be code. Every
++other check reads one decoded instruction, and reports at most the first thing
++wrong with it, in the order above.
++
++The stack reading is the part that cannot be done a body at a time. There is
++one value stack for the whole program: entering a function takes its arguments
++off whatever the caller was holding and leaves the rest where it sits, so a
++callee begins as deep as its caller left it. Working that out means reading the
++callers first, and what they leave depends on reading their callers, so the
++audit settles the starting depths by iteration and then reads each body from
++the depth it found. A function no reachable call names is read from an empty
++stack, which is how the interpreter enters the entry function and the only
++reading available for one nothing arrives at. Two calls arriving at different
++depths is itself worth reporting: the body is then correct for one caller and
++wrong for the other.
++
++Inside a body, depths travel along every edge, which is how a branch that
++leaves one value and a branch that leaves two are caught meeting. A call is a
++special case in both directions: returning from a frame drains the value stack
++and pushes the result, so whatever the caller had is gone and the depth after
++any call is one.
++
++A short flawed image and what comes back:
++
++```
++  offset  bytes             what it is
++  ------  ----------------  -------------------------------------------
++  0       04                PUSH_NULL
++  1       1F 01 00          JMP_FALSE, over one byte
++  4       C3                a byte no opcode uses
++  5       01                HALT
++```
++
++```
++  0 4 opcode      the byte the walk stopped at
++```
++
++The jump is fine: it lands on the halt, which begins an instruction. The byte
++before it is not, and the walk ends there, so the stack is never read.
++
++The audit is advisory. Nothing in the loader or the interpreter consults it,
++and a chunk it finds nothing wrong with is not thereby safe: type errors,
++division by zero and runaway recursion are all run-time facts. What it removes
++is the class of faults that are visible in the image itself.
++
++Nor does it read past what a chunk records. An invocation's target is a value
++rather than an operand, so a function reached only through a closure has no
++call the audit can read a starting depth from, and it is read from empty like
++any other function nothing arrives at. A body that is only correct given a
++caller the audit cannot see is reported, which is one reason the report is
++advice rather than a gate.
++
++---
++
+ ## The value model
+ 
+ A Value (see value.rs) is a tagged union of four cases:
+@@ -1051,6 +1145,14 @@ referenced by raw pointer and lifetimes are managed by hand through reference co
+ Preserving that model keeps the port faithful and the object representation compact, at
+ the cost of concentrating the unsafe reasoning in the heap and collector modules.
+ 
++Why is the chunk audit advisory rather than a gate? Refusing to run an image
++the audit dislikes would make the engine less useful, not safer: the audit
++reads every path a body has, including ones execution never takes, and it reads
++a function nothing calls as if it were entered with an empty stack, which is a
++convention rather than a fact. An embedder that wants a gate can make one out of it in a
++line. Wiring it into the loader would take that choice away, and would put a
++whole-image analysis in front of every chunk that loads.
++
+ Why so many self-contained utilities? A scripting engine needs a broad standard library.
+ Implementing these directly, rather than pulling in dependencies, keeps the build
+ hermetic, deterministic, and free of network access, which is a hard requirement
+diff --git a/src/bin/skald.rs b/src/bin/skald.rs
+index 8523799..1582eae 100644
+--- a/src/bin/skald.rs
++++ b/src/bin/skald.rs
+@@ -4,7 +4,7 @@
+ //!   skald run <file.skc>      execute a compiled bytecode chunk
+ //!   skald lex <file>          tokenise a source file and print a token count
+ //!   skald json <file>         parse a JSON file and report validity
+-//!   skald validate <file>     validate a bytecode chunk header
++//!   skald validate <file>     load a chunk and audit its code
+ //!
+ //! The driver reads whole files into memory and never touches the network.
+ 
+@@ -73,7 +73,16 @@ fn cmd_validate(path: &str) -> ExitCode {
+                 chunk.funcs.len(),
+                 chunk.entry_idx
+             );
+-            ExitCode::SUCCESS
++            let flaws = skald::verify::chunk_verify(&chunk);
++            if flaws.is_empty() {
++                println!("skald: audit clean");
++                return ExitCode::SUCCESS;
++            }
++            for flaw in &flaws {
++                println!("{} {} {:?}", flaw.func, flaw.offset, flaw.kind);
++            }
++            println!("skald: {} flaws", flaws.len());
++            ExitCode::FAILURE
+         }
+         None => {
+             println!("skald: malformed chunk");
+diff --git a/src/lib.rs b/src/lib.rs
+index ce132c1..09b9038 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -18,4 +18,5 @@ pub mod stdlib;
+ pub mod symbol;
+ pub mod util;
+ pub mod value;
++pub mod verify;
+ pub mod vm;
+diff --git a/src/verify.rs b/src/verify.rs
+new file mode 100644
+index 0000000..c21f29b
+--- /dev/null
++++ b/src/verify.rs
+@@ -0,0 +1,355 @@
++//! Static audit of a loaded chunk, written to the same contract from a
++//! different shape: one file, no submodules, a table driven decoder, and a
++//! depth walk that keeps its state in a map instead of a matrix. Nothing here
++//! shares a private name with the reference.
++
++use crate::bytecode::*;
++use crate::vm::VM_STACK_MAX;
++use std::collections::{BTreeMap, BTreeSet};
++
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum FlawKind {
++    Opcode,
++    Truncated,
++    Constant,
++    Local,
++    Function,
++    Arity,
++    Jump,
++    Depth,
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct Flaw {
++    pub func: u16,
++    pub offset: u16,
++    pub kind: FlawKind,
++}
++
++fn width(op: u8) -> Option<usize> {
++    Some(match op {
++        OP_LOAD | OP_STORE | OP_NEW_OBJ | OP_INVOKE => 1,
++        OP_PUSH_CONST | OP_DICT_SET | OP_DICT_GET => 2,
++        OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL => 2,
++        OP_CALL | OP_NEW_CLOSURE => 3,
++        OP_PUSH_INT => 4,
++        OP_NOP | OP_HALT | OP_PUSH_NULL | OP_POP | OP_DUP => 0,
++        OP_ARRAY_PUSH | OP_ARRAY_GET | OP_ARRAY_LEN | OP_RETURN => 0,
++        OP_ADD | OP_SUB | OP_MUL | OP_DIV | OP_MOD | OP_EQ | OP_LT | OP_LE => 0,
++        OP_NOT | OP_NEG | OP_CONCAT | OP_PRINT | OP_TYPE_OF => 0,
++        OP_INCREF | OP_DECREF | OP_GC => 0,
++        _ => return None,
++    })
++}
++
++/// offset -> length, plus the offset the walk gave up at.
++type Walk = (BTreeMap<usize, usize>, Option<(usize, FlawKind)>);
++
++fn walk(code: &[u8]) -> Walk {
++    let mut seen = BTreeMap::new();
++    let mut at = 0usize;
++    while at < code.len() {
++        let Some(w) = width(code[at]) else {
++            return (seen, Some((at, FlawKind::Opcode)));
++        };
++        if at + 1 + w > code.len() {
++            return (seen, Some((at, FlawKind::Truncated)));
++        }
++        seen.insert(at, 1 + w);
++        at += 1 + w;
++    }
++    (seen, None)
++}
++
++fn u16_at(code: &[u8], at: usize) -> u16 {
++    code[at] as u16 | ((code[at + 1] as u16) << 8)
++}
++
++fn takes_and_leaves(code: &[u8], at: usize) -> (u16, i32, bool, bool) {
++    // (reads, delta, ends the path, resets to one)
++    match code[at] {
++        OP_HALT | OP_RETURN => (0, 0, true, false),
++        OP_PUSH_CONST | OP_PUSH_INT | OP_PUSH_NULL | OP_LOAD => (0, 1, false, false),
++        OP_NEW_OBJ | OP_NEW_CLOSURE => (0, 1, false, false),
++        OP_DUP => (1, 1, false, false),
++        OP_POP | OP_STORE | OP_PRINT | OP_DECREF => (1, -1, false, false),
++        OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL => (1, -1, false, false),
++        OP_NOT | OP_NEG | OP_ARRAY_LEN | OP_TYPE_OF | OP_DICT_GET => (1, 0, false, false),
++        OP_INCREF => (1, 0, false, false),
++        OP_ARRAY_PUSH | OP_DICT_SET => (2, -1, false, false),
++        OP_ARRAY_GET => (2, -1, false, false),
++        OP_ADD | OP_SUB | OP_MUL | OP_DIV | OP_MOD => (2, -1, false, false),
++        OP_EQ | OP_LT | OP_LE | OP_CONCAT => (2, -1, false, false),
++        OP_CALL => (code[at + 3] as u16, 0, false, true),
++        OP_INVOKE => (code[at + 1] as u16 + 1, 0, false, true),
++        _ => (0, 0, false, false),
++    }
++}
++
++fn stack_flaw(code: &[u8], steps: &BTreeMap<usize, usize>, entry: i32) -> Option<u16> {
++    let ceiling = VM_STACK_MAX as i32;
++    let mut arrivals: BTreeMap<usize, BTreeSet<i32>> = BTreeMap::new();
++    let Some(first) = steps.keys().next().copied() else {
++        return None;
++    };
++    let mut queue = vec![(first, entry)];
++    arrivals.entry(first).or_default().insert(entry);
++    while let Some((at, depth)) = queue.pop() {
++        let Some(len) = steps.get(&at).copied() else {
++            continue;
++        };
++        let (reads, delta, ends, resets) = takes_and_leaves(code, at);
++        if ends || depth < reads as i32 {
++            continue;
++        }
++        let after = if resets { 1 } else { depth + delta };
++        if after > ceiling {
++            continue;
++        }
++        let mut go = |target: i64, queue: &mut Vec<(usize, i32)>, arrivals: &mut BTreeMap<usize, BTreeSet<i32>>| {
++            if target < 0 || target as usize == code.len() {
++                return;
++            }
++            let target = target as usize;
++            if !steps.contains_key(&target) {
++                return;
++            }
++            if arrivals.entry(target).or_default().insert(after) {
++                queue.push((target, after));
++            }
++        };
++        let next = at + len;
++        if code[at] != OP_JMP {
++            go(next as i64, &mut queue, &mut arrivals);
++        }
++        if matches!(code[at], OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL) {
++            let hop = u16_at(code, at + 1) as i16 as i64;
++            go(next as i64 + hop, &mut queue, &mut arrivals);
++        }
++    }
++    for (at, depths) in arrivals.iter() {
++        if depths.len() > 1 {
++            return Some(*at as u16);
++        }
++        let depth = *depths.iter().next().unwrap();
++        let (reads, delta, ends, resets) = takes_and_leaves(code, *at);
++        if ends {
++            continue;
++        }
++        if depth < reads as i32 {
++            return Some(*at as u16);
++        }
++        if !resets && depth + delta > ceiling {
++            return Some(*at as u16);
++        }
++    }
++    None
++}
++
++
++/// Slots each frame holds, widened by one wherever a closure names it.
++fn slots(chunk: &Chunk, walks: &[Walk]) -> Vec<u16> {
++    let mut out: Vec<u16> = chunk
++        .funcs
++        .iter()
++        .map(|f| f.param_count as u16 + f.local_count as u16)
++        .collect();
++    let mut widened = vec![false; out.len()];
++    for (i, (steps, _)) in walks.iter().enumerate() {
++        let code = &chunk.funcs[i].code;
++        for at in steps.keys() {
++            if code[*at] == OP_NEW_CLOSURE {
++                let target = u16_at(code, at + 1) as usize;
++                if target < widened.len() {
++                    widened[target] = true;
++                }
++            }
++        }
++    }
++    for (i, wide) in widened.into_iter().enumerate() {
++        if wide {
++            out[i] += 1;
++        }
++    }
++    out
++}
++
++/// Every call this body reaches, as (function, depth the callee starts at).
++fn reachable_calls(code: &[u8], steps: &BTreeMap<usize, usize>, entry: i32) -> Vec<(usize, i32)> {
++    let mut seen: BTreeMap<usize, BTreeSet<i32>> = BTreeMap::new();
++    let Some(first) = steps.keys().next().copied() else {
++        return Vec::new();
++    };
++    let mut queue = vec![(first, entry)];
++    seen.entry(first).or_default().insert(entry);
++    let mut out = Vec::new();
++    while let Some((at, depth)) = queue.pop() {
++        let Some(len) = steps.get(&at).copied() else { continue };
++        let (reads, delta, ends, resets) = takes_and_leaves(code, at);
++        if ends || depth < reads as i32 {
++            continue;
++        }
++        if code[at] == OP_CALL {
++            out.push((u16_at(code, at + 1) as usize, depth - reads as i32));
++        }
++        let after = if resets { 1 } else { depth + delta };
++        if after > VM_STACK_MAX as i32 {
++            continue;
++        }
++        let mut hand = |target: i64, queue: &mut Vec<(usize, i32)>, seen: &mut BTreeMap<usize, BTreeSet<i32>>| {
++            if target < 0 || !steps.contains_key(&(target as usize)) {
++                return;
++            }
++            if seen.entry(target as usize).or_default().insert(after) {
++                queue.push((target as usize, after));
++            }
++        };
++        let next = at + len;
++        if code[at] != OP_JMP {
++            hand(next as i64, &mut queue, &mut seen);
++        }
++        if matches!(code[at], OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL) {
++            let hop = u16_at(code, at + 1) as i16 as i64;
++            hand(next as i64 + hop, &mut queue, &mut seen);
++        }
++    }
++    out.sort_unstable();
++    out.dedup();
++    out
++}
++
++/// The depth every function starts from, or `None` where calls disagree.
++fn starting_depths(chunk: &Chunk, walks: &[Walk]) -> Vec<Option<i32>> {
++    let count = chunk.funcs.len();
++    let mut named = vec![false; count];
++    for (i, (steps, _)) in walks.iter().enumerate() {
++        let code = &chunk.funcs[i].code;
++        for at in steps.keys() {
++            if code[*at] == OP_CALL {
++                let target = u16_at(code, at + 1) as usize;
++                if target < count {
++                    named[target] = true;
++                }
++            }
++        }
++    }
++    let mut found: Vec<BTreeSet<i32>> = vec![BTreeSet::new(); count];
++    found[chunk.entry_idx as usize].insert(0);
++    for (i, is_named) in named.iter().enumerate() {
++        if !is_named {
++            found[i].insert(0);
++        }
++    }
++    loop {
++        loop {
++            let mut moved = false;
++            for i in 0..count {
++                if found[i].len() != 1 || walks[i].1.is_some() {
++                    continue;
++                }
++                let from = *found[i].iter().next().unwrap();
++                for (target, depth) in reachable_calls(&chunk.funcs[i].code, &walks[i].0, from) {
++                    if target < count && found[target].insert(depth) {
++                        moved = true;
++                    }
++                }
++            }
++            if !moved {
++                break;
++            }
++        }
++        let stranded: Vec<usize> = (0..count).filter(|i| found[*i].is_empty()).collect();
++        if stranded.is_empty() {
++            break;
++        }
++        for i in stranded {
++            found[i].insert(0);
++        }
++    }
++    found
++        .into_iter()
++        .map(|set| if set.len() == 1 { Some(*set.iter().next().unwrap()) } else { None })
++        .collect()
++}
++
++/// Audit every function of a loaded chunk.
++pub fn chunk_verify(chunk: &Chunk) -> Vec<Flaw> {
++    let walks: Vec<Walk> = chunk.funcs.iter().map(|f| walk(&f.code)).collect();
++    let room = slots(chunk, &walks);
++    let starts = starting_depths(chunk, &walks);
++    let mut out = Vec::new();
++    for (i, (steps, stopped)) in walks.iter().enumerate() {
++        let code = &chunk.funcs[i].code;
++        let mut here: Vec<Flaw> = Vec::new();
++        let mut note = |at: usize, kind: FlawKind, here: &mut Vec<Flaw>| {
++            here.push(Flaw {
++                func: i as u16,
++                offset: at as u16,
++                kind,
++            })
++        };
++        for (at, len) in steps.iter() {
++            let at = *at;
++            match code[at] {
++                OP_NEW_OBJ if code[at + 1] > 2 => note(at, FlawKind::Opcode, &mut here),
++                OP_PUSH_CONST if u16_at(code, at + 1) as usize >= chunk.constants.len() => {
++                    note(at, FlawKind::Constant, &mut here)
++                }
++                OP_DICT_SET | OP_DICT_GET => {
++                    let key = u16_at(code, at + 1) as usize;
++                    if !matches!(chunk.constants.get(key), Some(Constant::Str(_))) {
++                        note(at, FlawKind::Constant, &mut here);
++                    }
++                }
++                OP_LOAD | OP_STORE if code[at + 1] as u16 >= room[i] => {
++                    note(at, FlawKind::Local, &mut here)
++                }
++                OP_NEW_CLOSURE => {
++                    if code[at + 3] as u16 >= room[i] {
++                        note(at, FlawKind::Local, &mut here);
++                    } else if u16_at(code, at + 1) as usize >= chunk.funcs.len() {
++                        note(at, FlawKind::Function, &mut here);
++                    }
++                }
++                OP_CALL => match chunk.funcs.get(u16_at(code, at + 1) as usize) {
++                    None => note(at, FlawKind::Function, &mut here),
++                    Some(callee) if code[at + 3] != callee.param_count => {
++                        note(at, FlawKind::Arity, &mut here)
++                    }
++                    Some(_) => {}
++                },
++                OP_JMP | OP_JMP_TRUE | OP_JMP_FALSE | OP_JMP_NULL => {
++                    let hop = u16_at(code, at + 1) as i16 as i64;
++                    let target = (at + len) as i64 + hop;
++                    let ok = target >= 0
++                        && (target as usize == code.len()
++                            || steps.contains_key(&(target as usize)));
++                    if !ok {
++                        note(at, FlawKind::Jump, &mut here);
++                    }
++                }
++                _ => {}
++            }
++        }
++        match stopped {
++            Some((at, kind)) => note(*at, *kind, &mut here),
++            None => {
++                // A stack flaw is the last kind taken, so an offset that has
++                // already answered keeps the answer it gave.
++                let at = match starts[i] {
++                    None => Some(0),
++                    Some(entry) => stack_flaw(code, steps, entry).map(|o| o as usize),
++                };
++                if let Some(at) = at {
++                    if !here.iter().any(|f: &Flaw| f.offset == at as u16) {
++                        note(at, FlawKind::Depth, &mut here);
++                    }
++                }
++            }
++        }
++        here.sort_by_key(|f| f.offset);
++        out.extend(here);
++    }
++    out
++}

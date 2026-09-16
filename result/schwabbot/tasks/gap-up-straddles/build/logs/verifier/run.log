@@ -1,0 +1,287 @@
++ suite -> /verify/reports/base.xml (5 file(s))
+[publish] child runs as nobody (uid 65534)
+[runner] unittest from /usr/local/lib/python3.12/unittest/__init__.py
+[runner] django 5.1.5 from /usr/local/lib/python3.12/site-packages/django/__init__.py
+[runner] framework guard: 1086 decision points
+refresh token is expired: -86400.000868
+INITIAL ORDER SENDING...
+{'orderLegCollection': [{'instrument': {'symbol': 'XSP   260326C00600000'}, 'quantity': 1}, {'instrument': {'symbol': 'XSP   260326P00600000'}, 'quantity': 1}], 'price': 5.78}
+https://api.schwabapi.com/trader/v1/accounts/offline-account/orders/OFFLINE-1005
+Cancelled the order OFFLINE-1005 on the account trader
+INITIAL ORDER SENDING...
+{'orderLegCollection': [{'instrument': {'symbol': 'XSP   260326C00600000'}, 'quantity': 1}, {'instrument': {'symbol': 'XSP   260326P00600000'}, 'quantity': 1}], 'price': 5.78}
+INITIAL ORDER SENDING...
+{'orderLegCollection': [{'instrument': {'symbol': 'XSP   260326C00600000'}, 'quantity': 1}, {'instrument': {'symbol': 'XSP   260326P00600000'}, 'quantity': 1}], 'price': 5.78}
+getting order status: OFFLINE-1007
+INITIAL ORDER SENDING...
+{'orderLegCollection': [{'instrument': {'symbol': 'XSP   260326C00600000'}, 'quantity': 1}, {'instrument': {'symbol': 'XSP   260326P00600000'}, 'quantity': 1}], 'price': 5.78}
+getting order status: OFFLINE-1008
+INITIAL ORDER SENDING...
+{'orderLegCollection': [{'instrument': {'symbol': 'XSP   260326C00600000'}, 'quantity': 1}, {'instrument': {'symbol': 'XSP   260326P00600000'}, 'quantity': 1}], 'price': 5.78}
+Invalid user: missing-user
+auth expired or not performed
+auth expired or not performed
+auth expired or not performed
+auth expired or not performed
+[runner] emitted 62 verdict(s)
+[publish] wrote /verify/reports/base.xml: 62 case(s), 0 declared id(s) added as failed, child rc 0
++ suite exit 0
++ suite -> /verify/reports/new.xml (2 file(s))
+[publish] child runs as nobody (uid 65534)
+[runner] unittest from /usr/local/lib/python3.12/unittest/__init__.py
+[runner] django 5.1.5 from /usr/local/lib/python3.12/site-packages/django/__init__.py
+[runner] framework guard: 1086 decision points
+/usr/local/lib/python3.12/site-packages/authlib/integrations/httpx_client/assertion_client.py:5: AuthlibDeprecationWarning: The httpx module is deprecated; please use httpx2 instead.
+  from ._compat import httpx2
+[runner] test_wind_down (unittest.loader._FailedTest.test_wind_down)
+ImportError: Failed to import test module: test_wind_down
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/tests/test_wind_down.py", line 12, in <module>
+    from Engine.straddle import buyback_order, closing_legs, exit_plan
+ModuleNotFoundError: No module named 'Engine.straddle'
+
+
+[runner] test_a_plain_order_books_nothing_underneath (tests.test_paper_targets.PaperTargetBookingTests.test_a_plain_order_books_nothing_underneath)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 107, in test_a_plain_order_books_nothing_underneath
+    self.assertEqual(offline.paper_child_orders(order_id), [])
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_a_third_target_is_booked_like_the_others (tests.test_paper_targets.PaperTargetBookingTests.test_a_third_target_is_booked_like_the_others)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 123, in test_a_third_target_is_booked_like_the_others
+    self.assertEqual(len(offline.paper_child_orders(order_id)), 3)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_an_entry_with_no_target_books_nothing_underneath (tests.test_paper_targets.PaperTargetBookingTests.test_an_entry_with_no_target_books_nothing_underneath)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 103, in test_an_entry_with_no_target_books_nothing_underneath
+    self.assertEqual(offline.paper_child_orders(order_id), [])
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_an_id_nobody_booked_holds_nothing (tests.test_paper_targets.PaperTargetBookingTests.test_an_id_nobody_booked_holds_nothing)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 119, in test_an_id_nobody_booked_holds_nothing
+    self.assertEqual(offline.paper_child_orders('OFFLINE-9999'), [])
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_entry_and_target_are_both_reachable_by_id (tests.test_paper_targets.PaperTargetBookingTests.test_entry_and_target_are_both_reachable_by_id)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 127, in test_entry_and_target_are_both_reachable_by_id
+    child = offline.paper_child_orders(order_id)[0]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_every_target_on_an_entry_is_booked (tests.test_paper_targets.PaperTargetBookingTests.test_every_target_on_an_entry_is_booked)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 94, in test_every_target_on_an_entry_is_booked
+    self.assertEqual(len(offline.paper_child_orders(order_id)), 2)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_targets_do_not_share_an_id (tests.test_paper_targets.PaperTargetBookingTests.test_targets_do_not_share_an_id)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 98, in test_targets_do_not_share_an_id
+    ids = {child['order_id'] for child in offline.paper_child_orders(order_id)}
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_caller_hears_only_about_the_entry (tests.test_paper_targets.PaperTargetBookingTests.test_the_caller_hears_only_about_the_entry)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 68, in test_the_caller_hears_only_about_the_entry
+    child = offline.paper_child_orders(order_id)[0]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_target_belongs_to_whoever_sent_the_entry (tests.test_paper_targets.PaperTargetBookingTests.test_the_target_belongs_to_whoever_sent_the_entry)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 134, in test_the_target_belongs_to_whoever_sent_the_entry
+    child = offline.paper_child_orders(order_id)[0]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_target_has_an_id_of_its_own (tests.test_paper_targets.PaperTargetBookingTests.test_the_target_has_an_id_of_its_own)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 88, in test_the_target_has_an_id_of_its_own
+    child = offline.paper_child_orders(order_id)[0]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_target_is_booked_under_the_entry (tests.test_paper_targets.PaperTargetBookingTests.test_the_target_is_booked_under_the_entry)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 76, in test_the_target_is_booked_under_the_entry
+    children = offline.paper_child_orders(order_id)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_target_is_working_rather_than_filled (tests.test_paper_targets.PaperTargetBookingTests.test_the_target_is_working_rather_than_filled)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 81, in test_the_target_is_working_rather_than_filled
+    child = offline.paper_child_orders(order_id)[0]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_two_users_targets_do_not_mix (tests.test_paper_targets.PaperTargetBookingTests.test_two_users_targets_do_not_mix)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 112, in test_two_users_targets_do_not_mix
+    my_children = [c['order_id'] for c in offline.paper_child_orders(mine)]
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_one_entry_does_not_pull_another_entry_target (tests.test_paper_targets.PaperTargetCancelTests.test_one_entry_does_not_pull_another_entry_target)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 142, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_pulling_an_entry_pulls_every_target_on_it (tests.test_paper_targets.PaperTargetCancelTests.test_pulling_an_entry_pulls_every_target_on_it)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 142, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_pulling_an_entry_twice_is_still_cancelled (tests.test_paper_targets.PaperTargetCancelTests.test_pulling_an_entry_twice_is_still_cancelled)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 142, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_pulling_the_entry_pulls_the_target (tests.test_paper_targets.PaperTargetCancelTests.test_pulling_the_entry_pulls_the_target)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 142, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_pulling_the_entry_still_reports_the_entry_cancelled (tests.test_paper_targets.PaperTargetCancelTests.test_pulling_the_entry_still_reports_the_entry_cancelled)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 142, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_pulling_the_target_leaves_the_entry_alone (tests.test_paper_targets.PaperTargetCancelTests.test_pulling_the_target_leaves_the_entry_alone)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 142, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_pulling_the_target_reports_the_target_cancelled (tests.test_paper_targets.PaperTargetCancelTests.test_pulling_the_target_reports_the_target_cancelled)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 142, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_a_pulled_target_is_reported_pulled (tests.test_paper_targets.PaperTargetSummaryTests.test_a_pulled_target_is_reported_pulled)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_a_target_holds_nothing_underneath_itself (tests.test_paper_targets.PaperTargetSummaryTests.test_a_target_holds_nothing_underneath_itself)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_a_target_is_not_an_order_of_its_own (tests.test_paper_targets.PaperTargetSummaryTests.test_a_target_is_not_an_order_of_its_own)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_a_target_reads_like_any_other_row (tests.test_paper_targets.PaperTargetSummaryTests.test_a_target_reads_like_any_other_row)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_an_entry_with_no_target_reports_none (tests.test_paper_targets.PaperTargetSummaryTests.test_an_entry_with_no_target_reports_none)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_an_entry_with_two_targets_reports_both (tests.test_paper_targets.PaperTargetSummaryTests.test_an_entry_with_two_targets_reports_both)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_another_users_entry_is_not_reported (tests.test_paper_targets.PaperTargetSummaryTests.test_another_users_entry_is_not_reported)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_each_entry_reports_its_own_target (tests.test_paper_targets.PaperTargetSummaryTests.test_each_entry_reports_its_own_target)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_other_user_gets_their_own_row_and_target (tests.test_paper_targets.PaperTargetSummaryTests.test_the_other_user_gets_their_own_row_and_target)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_reported_target_carries_its_own_id (tests.test_paper_targets.PaperTargetSummaryTests.test_the_reported_target_carries_its_own_id)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_reported_target_carries_its_own_state (tests.test_paper_targets.PaperTargetSummaryTests.test_the_reported_target_carries_its_own_state)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_row_reported_is_the_entry (tests.test_paper_targets.PaperTargetSummaryTests.test_the_row_reported_is_the_entry)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_the_target_is_reported_inside_the_entry (tests.test_paper_targets.PaperTargetSummaryTests.test_the_target_is_reported_inside_the_entry)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] test_two_entries_report_two_rows (tests.test_paper_targets.PaperTargetSummaryTests.test_two_entries_report_two_rows)
+Traceback (most recent call last):
+  File "/app/tests/test_paper_targets.py", line 193, in setUp
+    self.child_id = offline.paper_child_orders(self.order_id)[0]['order_id']
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'Engine.offline' has no attribute 'paper_child_orders'
+
+[runner] emitted 35 verdict(s)
+[publish] wrote /verify/reports/new.xml: 111 case(s), 76 declared id(s) added as failed, child rc 0
++ suite exit 0

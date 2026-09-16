@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/site-sheet"
+
+[metadata]
+task_id = "site-sheet"
+display_title = "Site sheets with hard boundaries, houses and fallout judged where it lands"
+display_description = "Read a surveyed site sheet (audience line, hard and soft boundaries, noise sensitive houses) into the show commands, judge fallout from where the wind carries the casing, and judge noise at every house against its own limit."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/WpqTJpXGevrGEFj3lf8N"
+base_commit_hash = "cbfb245b02c044e160ca8346fc17ce78eb374ddc"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-portfire-wpqtjp:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

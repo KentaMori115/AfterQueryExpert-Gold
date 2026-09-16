@@ -1,0 +1,19 @@
+# Two trains through Ashcombe at once, one each way. Neither has anything to do
+# with the other, which is the point: a double track station should let them
+# pass without either being held.
+
+scenario "a down and an up train together" {
+    step 2
+    until 500
+}
+
+at 0  train 1A05 on D1 at 60 length 100 speed 30
+at 0  book 1A05 express "A1(M)" "A3(M)"
+
+at 20 train 2B10 on U5 at 500 length 100 speed 30 facing backward
+at 20 book 2B10 stopper "A2(M)" "A4(M)"
+
+expect train 1A05 gone
+expect train 2B10 gone
+expect signal A1 shows R
+expect section AD1 clear

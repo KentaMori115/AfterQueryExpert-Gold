@@ -1,0 +1,850 @@
++ env HOME=/tmp/runner-home setpriv --reuid=nobody --regid=nogroup --clear-groups npx vitest run --config /tmp/arenaflow-graded.config.ts --reporter=basic --reporter=junit --outputFile.junit=/verify-pipes/new.fifo
+
+ RUN  v3.2.7 /app
+
+ DEPRECATED  'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}
+ ❯ .verifier-canary/canary.test.ts (1 test | 1 failed) 10ms
+   × verifier canary > never passes 9ms
+     → expected 1 to be 2 // Object.is equality
+ ❯ tests/engine/prize-desk.test.ts (35 tests | 30 failed) 51ms
+   × taking one reward back > revokes it and keeps the record 15ms
+     → service.revokeReward is not a function
+   × taking one reward back > records it on the reward's own stream 2ms
+     → service.revokeReward is not a function
+   × taking one reward back > needs a reason 1ms
+     → service.revokeReward is not a function
+   × taking one reward back > refuses a reward nobody granted 1ms
+     → service.revokeReward is not a function
+   × taking one reward back > refuses the same reward twice 1ms
+     → service.revokeReward is not a function
+   × taking one reward back > refuses a prize somebody already took 1ms
+     → service.revokeReward is not a function
+   × taking a payout back > recalls every reward the tournament still holds 1ms
+     → service.recallRewards is not a function
+   × taking a payout back > takes nothing back when one prize has been claimed 1ms
+     → service.recallRewards is not a function
+   × taking a payout back > has nothing to do twice over 1ms
+     → service.recallRewards is not a function
+   × taking a payout back > needs a reason of its own 1ms
+     → service.recallRewards is not a function
+   ✓ paying a tournament again > refuses while the payout still stands 1ms
+   × paying a tournament again > still refuses when only part of the payout came back 1ms
+     → service.revokeReward is not a function
+   × paying a tournament again > mints a second round once the payout is recalled 1ms
+     → service.recallRewards is not a function
+   × paying a tournament again > leaves the round it replaced where it was 1ms
+     → service.recallRewards is not a function
+   × paying a tournament again > counts on to a third round 1ms
+     → service.recallRewards is not a function
+   × paying a tournament again > pays the same tiers the config always paid 1ms
+     → service.recallRewards is not a function
+   ✓ claim windows > lets a prize be taken inside the window 1ms
+   ✓ claim windows > counts the deadline itself as inside 1ms
+   × claim windows > refuses one millisecond later 5ms
+     → expected 'no-failure' to be 'ILLEGAL_STATE' // Object.is equality
+   ✓ claim windows > never closes when the config sets no window 2ms
+   × claim windows > refuses a prize that came back 1ms
+     → service.revokeReward is not a function
+   ✓ claim windows > refuses a reward nobody granted 1ms
+   × closing out what nobody came for > revokes everything past its deadline 1ms
+     → service.expireClaims is not a function
+   × closing out what nobody came for > leaves a prize somebody took 1ms
+     → service.expireClaims is not a function
+   × closing out what nobody came for > does nothing before the deadline 3ms
+     → service.expireClaims is not a function
+   × closing out what nobody came for > does nothing at all without a window 0ms
+     → service.expireClaims is not a function
+   × reading the payout back > states one round with what it handed out 1ms
+     → service.payoutStatement is not a function
+   × reading the payout back > states nothing at all before a tournament pays 0ms
+     → service.payoutStatement is not a function
+   × reading the payout back > shows a recalled round standing at nothing 1ms
+     → service.recallRewards is not a function
+   × reading the payout back > keeps both rounds, oldest first 1ms
+     → service.recallRewards is not a function
+   × reading the payout back > splits what was paid from what is owed 1ms
+     → service.payoutStatement is not a function
+   × what a player is owed > counts a granted prize as waiting 0ms
+     → service.rewardBalance is not a function
+   × what a player is owed > counts a taken prize as paid 0ms
+     → service.rewardBalance is not a function
+   × what a player is owed > counts a recalled prize as neither 0ms
+     → service.recallRewards is not a function
+   × what a player is owed > refuses a player nobody created 1ms
+     → service.rewardBalance is not a function
+ ❯ tests/engine/payout-surfaces.test.ts (15 tests | 14 failed) 34ms
+   × payouts over http > takes a prize on request 14ms
+     → expected 404 to be 200 // Object.is equality
+   × payouts over http > turns a closed window into a conflict 2ms
+     → expected 404 to be 409 // Object.is equality
+   ✓ payouts over http > has nothing to hand a reward nobody granted 1ms
+   × payouts over http > revokes one reward and refuses a claimed one 1ms
+     → expected 404 to be 200 // Object.is equality
+   × payouts over http > turns a missing reason into a bad request 1ms
+     → expected 404 to be 400 // Object.is equality
+   × payouts over http > recalls a whole payout 1ms
+     → expected 404 to be 200 // Object.is equality
+   × payouts over http > refuses a recall over a claimed prize 1ms
+     → expected 404 to be 409 // Object.is equality
+   × payouts over http > closes out what nobody came for 1ms
+     → expected 404 to be 200 // Object.is equality
+   × payouts over http > states the payout round by round 1ms
+     → expected 404 to be 200 // Object.is equality
+   × payouts over http > answers a player's balance 1ms
+     → expected 404 to be 200 // Object.is equality
+   × payouts through the sdk > recalls, pays again, and reads both rounds back 2ms
+     → sdk.rewards.recall is not a function
+   × payouts from the command line > offers the commands the desk needs 3ms
+     → expected [ 'help', 'version', …(11) ] to include 'rewards:claim'
+   × payouts from the command line > prints them in its help 3ms
+     → expected 'arenaflow <command> [--flag value]\n\…' to contain 'rewards:recall'
+   × payouts from the command line > insists on a reason when a payout is recalled 1ms
+     → expected '{\n  "error": "unknown command: rewar…' to contain '--reason'
+   × payouts from the command line > insists on a player when a balance is read 1ms
+     → expected '{\n  "error": "unknown command: rewar…' to contain '--player'
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 45 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .verifier-canary/canary.test.ts > verifier canary > never passes
+AssertionError: expected 1 to be 2 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+ ❯ .verifier-canary/canary.test.ts:5:15
+      3| describe("verifier canary", () => {
+      4|   it("never passes", () => {
+      5|     expect(1).toBe(2);
+       |               ^
+      6|   });
+      7| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > takes a prize on request
+AssertionError: expected 404 to be 200 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:51:29
+     49|     const { router, rewards } = desk(1000);
+     50|     const response = await router.handle("POST", `/rewards/${rewards[0…
+     51|     expect(response.status).toBe(200);
+       |                             ^
+     52|     expect(response.body).toMatchObject({ id: rewards[0]!.id, status: …
+     53|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > turns a closed window into a conflict
+AssertionError: expected 404 to be 409 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 409[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:58:29
+     56|     const { router, rewards } = desk(1000);
+     57|     const response = await router.handle("POST", `/rewards/${rewards[0…
+     58|     expect(response.status).toBe(409);
+       |                             ^
+     59|   });
+     60| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > revokes one reward and refuses a claimed one
+AssertionError: expected 404 to be 200 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:72:28
+     70|       reason: "flagged by review",
+     71|     });
+     72|     expect(revoked.status).toBe(200);
+       |                            ^
+     73|     expect(revoked.body).toMatchObject({ status: "revoked" });
+     74|     await router.handle("POST", `/rewards/${rewards[1]!.id}/claim`, { …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > turns a missing reason into a bad request
+AssertionError: expected 404 to be 400 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 400[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:85:29
+     83|     const { router, rewards } = desk();
+     84|     const response = await router.handle("POST", `/rewards/${rewards[0…
+     85|     expect(response.status).toBe(400);
+       |                             ^
+     86|   });
+     87| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > recalls a whole payout
+AssertionError: expected 404 to be 200 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:95:29
+     93|       reason: "pool was wrong",
+     94|     });
+     95|     expect(response.status).toBe(200);
+       |                             ^
+     96|     const recalled = response.body as RewardRecord[];
+     97|     expect(recalled).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > refuses a recall over a claimed prize
+AssertionError: expected 404 to be 409 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 409[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:109:29
+    107|       reason: "pool was wrong",
+    108|     });
+    109|     expect(response.status).toBe(409);
+       |                             ^
+    110|   });
+    111| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > closes out what nobody came for
+AssertionError: expected 404 to be 200 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:118:29
+    116|       at: GRANT + 1001,
+    117|     });
+    118|     expect(response.status).toBe(200);
+       |                             ^
+    119|     expect(response.body as RewardRecord[]).toHaveLength(2);
+    120|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > states the payout round by round
+AssertionError: expected 404 to be 200 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:131:29
+    129|     await router.handle("POST", "/rewards/distribute", { tournamentId:…
+    130|     const response = await router.handle("GET", "/rewards/statement/tn…
+    131|     expect(response.status).toBe(200);
+       |                             ^
+    132|     const statement = response.body as {
+    133|       rounds: Array<{ round: number; standing: number }>;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts over http > answers a player's balance
+AssertionError: expected 404 to be 200 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 200[39m
+[31m+ 404[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:146:29
+    144|     await router.handle("POST", `/rewards/${rewards[0]!.id}/claim`, { …
+    145|     const response = await router.handle("GET", "/rewards/plr_ada/bala…
+    146|     expect(response.status).toBe(200);
+       |                             ^
+    147|     expect(response.body).toMatchObject({ playerId: "plr_ada", claimed…
+    148|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts through the sdk > recalls, pays again, and reads both rounds back
+TypeError: sdk.rewards.recall is not a function
+ ❯ tests/engine/payout-surfaces.test.ts:184:40
+    182|     const first = await sdk.rewards.distribute("tnm_open", GRANT);
+    183|     expect(first).toHaveLength(2);
+    184|     const recalled = await sdk.rewards.recall("tnm_open", T0 + 400, "p…
+       |                                        ^
+    185|     expect(recalled.every((reward) => reward.status === "revoked")).to…
+    186|     const second = await sdk.rewards.distribute("tnm_open", T0 + 500);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts from the command line > offers the commands the desk needs
+AssertionError: expected [ 'help', 'version', …(11) ] to include 'rewards:claim'
+ ❯ tests/engine/payout-surfaces.test.ts:210:24
+    208|       "rewards:balance",
+    209|     ]) {
+    210|       expect(commands).toContain(command);
+       |                        ^
+    211|       expect(REWARD_COMMANDS).toContain(command);
+    212|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts from the command line > prints them in its help
+AssertionError: expected 'arenaflow <command> [--flag value]\n\…' to contain 'rewards:recall'
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- re[7mwards:recall[27m[39m
+[31m+ [7ma[27mre[7mnaflow <command> [--flag value][27m[39m
+[31m+[39m
+[31m+ Commands:[39m
+[31m+   help[39m
+[31m+   player:create[39m
+[31m+   tournament:create[39m
+[31m+   tournament:open[39m
+[31m+   tournament:register[39m
+[31m+   tournament:start[39m
+[31m+   tournament:end[39m
+[31m+   match:create[39m
+[31m+   match:result[39m
+[31m+   leaderboard[39m
+[31m+   rewards:distribute[39m
+[31m+[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:220:18
+    218|       help += text;
+    219|     });
+    220|     expect(help).toContain("rewards:recall");
+       |                  ^
+    221|     expect(help).toContain("rewards:balance");
+    222|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts from the command line > insists on a reason when a payout is recalled
+AssertionError: expected '{\n  "error": "unknown command: rewar…' to contain '--reason'
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- --reason[39m
+[31m+ {[39m
+[31m+   "error": "unknown command: rewards:recall"[39m
+[31m+ }[39m
+[31m+[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:230:20
+    228|     });
+    229|     expect(code).toBe(1);
+    230|     expect(output).toContain("--reason");
+       |                    ^
+    231|   });
+    232| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/45]⎯
+
+ FAIL  tests/engine/payout-surfaces.test.ts > payouts from the command line > insists on a player when a balance is read
+AssertionError: expected '{\n  "error": "unknown command: rewar…' to contain '--player'
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- --player[39m
+[31m+ {[39m
+[31m+   "error": "unknown command: rewards:balance"[39m
+[31m+ }[39m
+[31m+[39m
+
+ ❯ tests/engine/payout-surfaces.test.ts:239:20
+    237|     });
+    238|     expect(code).toBe(1);
+    239|     expect(output).toContain("--player");
+       |                    ^
+    240|   });
+    241| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking one reward back > revokes it and keeps the record
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:77:29
+     75|   it("revokes it and keeps the record", () => {
+     76|     const { store, service, rewards } = paid();
+     77|     const revoked = service.revokeReward(rewards[0]!.id, T0 + 400, "fl…
+       |                             ^
+     78|     expect(revoked.status).toBe("revoked");
+     79|     expect(revoked.amount).toBe(700);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking one reward back > records it on the reward's own stream
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:87:13
+     85|   it("records it on the reward's own stream", () => {
+     86|     const { store, service, rewards } = paid();
+     87|     service.revokeReward(rewards[0]!.id, T0 + 400, "flagged by review"…
+       |             ^
+     88|     const events = store.journal
+     89|       .readStream(`reward:${rewards[0]!.id}`)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking one reward back > needs a reason
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:102:38
+    100|   it("needs a reason", () => {
+    101|     const { service, rewards } = paid();
+    102|     expect(failureCode(() => service.revokeReward(rewards[0]!.id, T0 +…
+       |                                      ^
+    103|       "INVALID_ARGUMENT",
+    104|     );
+ ❯ failureCode tests/engine/prize-desk.test.ts:60:5
+ ❯ tests/engine/prize-desk.test.ts:102:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking one reward back > refuses a reward nobody granted
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:109:38
+    107|   it("refuses a reward nobody granted", () => {
+    108|     const { service } = paid();
+    109|     expect(failureCode(() => service.revokeReward("rwd_ghost", T0 + 40…
+       |                                      ^
+    110|       "NOT_FOUND",
+    111|     );
+ ❯ failureCode tests/engine/prize-desk.test.ts:60:5
+ ❯ tests/engine/prize-desk.test.ts:109:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking one reward back > refuses the same reward twice
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:116:13
+    114|   it("refuses the same reward twice", () => {
+    115|     const { service, rewards } = paid();
+    116|     service.revokeReward(rewards[0]!.id, T0 + 400, "review");
+       |             ^
+    117|     expect(failureCode(() => service.revokeReward(rewards[0]!.id, T0 +…
+    118|       "CONFLICT",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking one reward back > refuses a prize somebody already took
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:125:38
+    123|     const { service, rewards } = paid();
+    124|     service.claimReward(rewards[0]!.id, T0 + 350);
+    125|     expect(failureCode(() => service.revokeReward(rewards[0]!.id, T0 +…
+       |                                      ^
+    126|       "ILLEGAL_STATE",
+    127|     );
+ ❯ failureCode tests/engine/prize-desk.test.ts:60:5
+ ❯ tests/engine/prize-desk.test.ts:125:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking a payout back > recalls every reward the tournament still holds
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:134:30
+    132|   it("recalls every reward the tournament still holds", () => {
+    133|     const { store, service } = paid();
+    134|     const recalled = service.recallRewards("tnm_open", T0 + 400, "pool…
+       |                              ^
+    135|     expect(recalled.map((reward) => reward.id)).toEqual(
+    136|       [...store.listRewards()].map((reward) => reward.id),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking a payout back > takes nothing back when one prize has been claimed
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:145:38
+    143|     const { store, service, rewards } = paid();
+    144|     service.claimReward(rewards[0]!.id, T0 + 350);
+    145|     expect(failureCode(() => service.recallRewards("tnm_open", T0 + 40…
+       |                                      ^
+    146|       "CONFLICT",
+    147|     );
+ ❯ failureCode tests/engine/prize-desk.test.ts:60:5
+ ❯ tests/engine/prize-desk.test.ts:145:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking a payout back > has nothing to do twice over
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:154:13
+    152|   it("has nothing to do twice over", () => {
+    153|     const { service } = paid();
+    154|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    155|     expect(service.recallRewards("tnm_open", T0 + 401, "pool was wrong…
+    156|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > taking a payout back > needs a reason of its own
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:160:38
+    158|   it("needs a reason of its own", () => {
+    159|     const { service } = paid();
+    160|     expect(failureCode(() => service.recallRewards("tnm_open", T0 + 40…
+       |                                      ^
+    161|       "INVALID_ARGUMENT",
+    162|     );
+ ❯ failureCode tests/engine/prize-desk.test.ts:60:5
+ ❯ tests/engine/prize-desk.test.ts:160:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > paying a tournament again > still refuses when only part of the payout came back
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:174:13
+    172|   it("still refuses when only part of the payout came back", () => {
+    173|     const { service, rewards } = paid();
+    174|     service.revokeReward(rewards[0]!.id, T0 + 400, "review");
+       |             ^
+    175|     expect(failureCode(() => service.distributeRewards("tnm_open", T0 …
+    176|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > paying a tournament again > mints a second round once the payout is recalled
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:180:13
+    178|   it("mints a second round once the payout is recalled", () => {
+    179|     const { service, rewards } = paid();
+    180|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    181|     const second = service.distributeRewards("tnm_open", T0 + 500);
+    182|     expect(second.map((reward) => reward.id)).toEqual(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > paying a tournament again > leaves the round it replaced where it was
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:190:13
+    188|   it("leaves the round it replaced where it was", () => {
+    189|     const { store, service, rewards } = paid();
+    190|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    191|     service.distributeRewards("tnm_open", T0 + 500);
+    192|     expect(store.listRewards()).toHaveLength(4);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > paying a tournament again > counts on to a third round
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:199:13
+    197|   it("counts on to a third round", () => {
+    198|     const { service, rewards } = paid();
+    199|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    200|     service.distributeRewards("tnm_open", T0 + 500);
+    201|     service.recallRewards("tnm_open", T0 + 600, "wrong again");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > paying a tournament again > pays the same tiers the config always paid
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:210:13
+    208|   it("pays the same tiers the config always paid", () => {
+    209|     const { service } = paid();
+    210|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    211|     const second = service.distributeRewards("tnm_open", T0 + 500);
+    212|     expect(second.map((reward) => [reward.playerId, reward.tier, rewar…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > claim windows > refuses one millisecond later
+AssertionError: expected 'no-failure' to be 'ILLEGAL_STATE' // Object.is equality
+
+Expected: [32m"ILLEGAL_STATE"[39m
+Received: [31m"no-failure"[39m
+
+ ❯ tests/engine/prize-desk.test.ts:232:82
+    230|   it("refuses one millisecond later", () => {
+    231|     const { service, rewards } = paid(1000);
+    232|     expect(failureCode(() => service.claimReward(rewards[0]!.id, GRANT…
+       |                                                                                  ^
+    233|       "ILLEGAL_STATE",
+    234|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > claim windows > refuses a prize that came back
+TypeError: service.revokeReward is not a function
+ ❯ tests/engine/prize-desk.test.ts:244:13
+    242|   it("refuses a prize that came back", () => {
+    243|     const { service, rewards } = paid(1000);
+    244|     service.revokeReward(rewards[0]!.id, GRANT + 10, "review");
+       |             ^
+    245|     expect(failureCode(() => service.claimReward(rewards[0]!.id, GRANT…
+    246|       "ILLEGAL_STATE",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > closing out what nobody came for > revokes everything past its deadline
+TypeError: service.expireClaims is not a function
+ ❯ tests/engine/prize-desk.test.ts:259:29
+    257|   it("revokes everything past its deadline", () => {
+    258|     const { store, service, rewards } = paid(1000);
+    259|     const expired = service.expireClaims("tnm_open", GRANT + 1001);
+       |                             ^
+    260|     expect(expired.map((reward) => reward.id)).toEqual(rewards.map((re…
+    261|     expect(store.listRewards().every((reward) => reward.status === "re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > closing out what nobody came for > leaves a prize somebody took
+TypeError: service.expireClaims is not a function
+ ❯ tests/engine/prize-desk.test.ts:267:29
+    265|     const { store, service, rewards } = paid(1000);
+    266|     service.claimReward(rewards[0]!.id, GRANT + 10);
+    267|     const expired = service.expireClaims("tnm_open", GRANT + 1001);
+       |                             ^
+    268|     expect(expired.map((reward) => reward.id)).toEqual([rewards[1]!.id…
+    269|     expect(statusOf(store, rewards[0]!.id)).toBe("claimed");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > closing out what nobody came for > does nothing before the deadline
+TypeError: service.expireClaims is not a function
+ ❯ tests/engine/prize-desk.test.ts:274:20
+    272|   it("does nothing before the deadline", () => {
+    273|     const { service } = paid(1000);
+    274|     expect(service.expireClaims("tnm_open", GRANT + 1000)).toHaveLengt…
+       |                    ^
+    275|   });
+    276| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > closing out what nobody came for > does nothing at all without a window
+TypeError: service.expireClaims is not a function
+ ❯ tests/engine/prize-desk.test.ts:279:20
+    277|   it("does nothing at all without a window", () => {
+    278|     const { service } = paid();
+    279|     expect(service.expireClaims("tnm_open", GRANT + 9_000_000)).toHave…
+       |                    ^
+    280|   });
+    281| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > reading the payout back > states one round with what it handed out
+TypeError: service.payoutStatement is not a function
+ ❯ tests/engine/prize-desk.test.ts:286:31
+    284|   it("states one round with what it handed out", () => {
+    285|     const { service } = paid();
+    286|     const statement = service.payoutStatement("tnm_open");
+       |                               ^
+    287|     expect(statement.tournamentId).toBe("tnm_open");
+    288|     expect(statement.rounds).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > reading the payout back > states nothing at all before a tournament pays
+TypeError: service.payoutStatement is not a function
+ ❯ tests/engine/prize-desk.test.ts:300:31
+    298|   it("states nothing at all before a tournament pays", () => {
+    299|     const { service } = cup();
+    300|     const statement = service.payoutStatement("tnm_open");
+       |                               ^
+    301|     expect(statement.rounds).toHaveLength(0);
+    302|     expect(statement.recalled).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > reading the payout back > shows a recalled round standing at nothing
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:309:13
+    307|   it("shows a recalled round standing at nothing", () => {
+    308|     const { service } = paid();
+    309|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    310|     const statement = service.payoutStatement("tnm_open");
+    311|     expect(statement.rounds[0]?.granted).toBe(1000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > reading the payout back > keeps both rounds, oldest first
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:319:13
+    317|   it("keeps both rounds, oldest first", () => {
+    318|     const { service } = paid();
+    319|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    320|     service.distributeRewards("tnm_open", T0 + 500);
+    321|     const statement = service.payoutStatement("tnm_open");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > reading the payout back > splits what was paid from what is owed
+TypeError: service.payoutStatement is not a function
+ ❯ tests/engine/prize-desk.test.ts:332:31
+    330|     const { service, rewards } = paid();
+    331|     service.claimReward(rewards[0]!.id, T0 + 350);
+    332|     const statement = service.payoutStatement("tnm_open");
+       |                               ^
+    333|     expect(statement.paid).toBe(700);
+    334|     expect(statement.outstanding).toBe(300);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > what a player is owed > counts a granted prize as waiting
+TypeError: service.rewardBalance is not a function
+ ❯ tests/engine/prize-desk.test.ts:342:20
+    340|   it("counts a granted prize as waiting", () => {
+    341|     const { service } = paid();
+    342|     expect(service.rewardBalance("plr_ada")).toMatchObject({ claimed: …
+       |                    ^
+    343|     expect(service.rewardBalance("plr_cy")).toMatchObject({ claimed: 0…
+    344|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > what a player is owed > counts a taken prize as paid
+TypeError: service.rewardBalance is not a function
+ ❯ tests/engine/prize-desk.test.ts:349:20
+    347|     const { service, rewards } = paid();
+    348|     service.claimReward(rewards[0]!.id, T0 + 350);
+    349|     expect(service.rewardBalance("plr_ada")).toMatchObject({ claimed: …
+       |                    ^
+    350|   });
+    351| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > what a player is owed > counts a recalled prize as neither
+TypeError: service.recallRewards is not a function
+ ❯ tests/engine/prize-desk.test.ts:354:13
+    352|   it("counts a recalled prize as neither", () => {
+    353|     const { service } = paid();
+    354|     service.recallRewards("tnm_open", T0 + 400, "pool was wrong");
+       |             ^
+    355|     expect(service.rewardBalance("plr_ada")).toMatchObject({ claimed: …
+    356|     expect(service.rewardBalance("plr_bo")).toMatchObject({ claimed: 0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/45]⎯
+
+ FAIL  tests/engine/prize-desk.test.ts > what a player is owed > refuses a player nobody created
+TypeError: service.rewardBalance is not a function
+ ❯ tests/engine/prize-desk.test.ts:361:38
+    359|   it("refuses a player nobody created", () => {
+    360|     const { service } = paid();
+    361|     expect(failureCode(() => service.rewardBalance("plr_ghost"))).toBe…
+       |                                      ^
+    362|   });
+    363| });
+ ❯ failureCode tests/engine/prize-desk.test.ts:60:5
+ ❯ tests/engine/prize-desk.test.ts:361:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/45]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  45 failed | 6 passed (51)
+   Start at  04:22:43
+   Duration  1.01s (transform 676ms, setup 0ms, collect 1.14s, tests 96ms, environment 1ms, prepare 308ms)
+
+JUNIT report written to /verify-pipes/new.fifo
++ env HOME=/tmp/runner-home setpriv --reuid=nobody --regid=nogroup --clear-groups npx vitest run --config /tmp/arenaflow-shipped.config.ts --reporter=basic --reporter=junit --outputFile.junit=/verify-pipes/base.fifo
+
+ RUN  v3.2.7 /app
+
+ DEPRECATED  'basic' reporter is deprecated and will be removed in Vitest v3.
+Remove 'basic' from 'reporters' option. To match 'basic' reporter 100%, use configuration:
+{
+  "test": {
+    "reporters": [
+      [
+        "default",
+        {
+          "summary": false
+        }
+      ]
+    ]
+  }
+}
+ ✓ tests/domain/players.test.ts (9 tests) 8ms
+ ✓ tests/events/replay.test.ts (3 tests) 11ms
+ ✓ tests/domain/tournaments.test.ts (6 tests) 7ms
+ ✓ tests/engine/scenarios.test.ts (13 tests) 15ms
+ ✓ tests/engine/tournament.test.ts (2 tests) 10ms
+ ✓ tests/engine/catalog.test.ts (10 tests) 6ms
+ ✓ tests/engine/scoring.test.ts (3 tests) 5ms
+ ✓ tests/events/journal.test.ts (3 tests) 6ms
+ ✓ tests/domain/matches.test.ts (4 tests) 5ms
+ ✓ tests/engine/ranking.test.ts (3 tests) 6ms
+ ✓ tests/engine/anti-cheat.test.ts (3 tests) 4ms
+ ✓ tests/examples/recipes.test.ts (12 tests) 11ms
+ ✓ tests/engine/matrix.test.ts (25 tests) 9ms
+ ✓ tests/integration/api.test.ts (1 test) 9ms
+ ✓ tests/integration/replay-seasons.test.ts (2 tests) 8ms
+ ✓ tests/core/shared.test.ts (4 tests) 7ms
+ ✓ tests/persistence/memory.test.ts (2 tests) 6ms
+ ✓ tests/domain/scores.test.ts (4 tests) 4ms
+ ✓ tests/domain/rewards.test.ts (2 tests) 6ms
+ ✓ tests/engine/rules.test.ts (2 tests) 4ms
+ ✓ tests/engine/rewards.test.ts (1 test) 4ms
+ ✓ tests/domain/rankings.test.ts (2 tests) 3ms
+ ✓ tests/sdk/client.test.ts (1 test) 10ms
+ ✓ tests/engine/matchmaking.test.ts (2 tests) 5ms
+ ✓ tests/domain/seasons.test.ts (2 tests) 4ms
+ ✓ tests/engine/seasons.test.ts (1 test) 4ms
+ ✓ tests/persistence/sqlite.test.ts (1 test) 13ms
+ ✓ tests/cli/cli.test.ts (2 tests) 15ms
+ ✓ tests/examples/walkthrough.test.ts (1 test) 9ms
+
+
+ Test Files  29 passed (29)
+      Tests  126 passed (126)
+   Start at  04:22:45
+   Duration  3.15s (transform 935ms, setup 0ms, collect 2.62s, tests 216ms, environment 5ms, prepare 2.14s)
+
+JUNIT report written to /verify-pipes/base.fifo

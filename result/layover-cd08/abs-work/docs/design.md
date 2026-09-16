@@ -1,0 +1,81 @@
+# layover design
+
+layover answers two questions about scheduled transport: *what leaves this stop
+next*, and *how do I get from here to there*. It reads a feed of tables, builds
+an immutable network, and searches it. Python 3.10 or newer, standard library
+only, no clocks and no network access inside the engine.
+
+## Layers
+
+A package may import a package below it in this table and nothing else, not even
+across a row. `tests/test_package.py` holds the same numbers and fails the suite
+if an import crosses them.
+
+| Layer | Package | Holds |
+| --- | --- | --- |
+| 0 | `errors` | every failure, with a code and a place |
+| 1 | `times`, `dates`, `geo`, `money` | values with no domain meaning |
+| 2 | `services`, `network`, `fares` | calendars, the network, fare products and rules |
+| 3 | `feed`, `timetable` | the table format, and the network read through a date |
+| 4 | `plan`, `document` | journey search, and the versioned save format |
+| 5 | `report` | boards, grids, itineraries, diagrams, summaries |
+| 6 | `validate` | the checks over a loaded feed |
+| 7 | `demo` | the worked example network |
+| 8 | `session` | the façade the README shows |
+| 9 | `cli` | the command line |
+
+## Rules the code keeps to
+
+- **Time is an integer.** Seconds since the start of the service day, so a trip
+  that leaves at 25:10 keeps its ordering against one that leaves at 01:10 the
+  next day. `times.parse_clock` accepts both and never guesses.
+- **Nothing floats.** Fares are `Decimal`, coordinates are microdegrees, and
+  distances come back as whole metres. `document.digest` refuses a float.
+- **The network is immutable once built.** `network.builder` is the only way to
+  make one, and it validates as it goes. Everything downstream reads.
+- **A search is a function of its inputs.** No wall clock, no environment, no
+  iteration over an unordered set. The same query on the same network gives the
+  same journeys in the same order, in any interpreter.
+- **Errors carry a code and a place.** Every failure names the table, the row and
+  the field it came from, so a feed with a thousand problems reports all of them.
+
+## Why the backward search is its own module
+
+Planning from a deadline is the same shape of search as planning from a
+departure, and it is not the same search. The rounds run from the destination
+outward, every label holds the latest moment a passenger may still be at a stop
+rather than the earliest they can reach it, and a pattern is walked from its
+last call down to its first, so alighting is what a round enters a pattern by
+and boarding is what it leaves by. Declared transfers are directional, and
+walking one backward means asking which walks end at a stop, which is the index
+the network does not keep and the search builds for itself.
+
+There is a smaller difference that costs more than it looks. Running the
+forward search from an early hour and keeping the last journey that arrives in
+time answers a different question: it finds journeys leaving early, not the
+last one worth catching, and on a network where the quick way runs twice an
+hour and the slow way runs constantly it will hand back the slow one. The
+backward pass is what makes the late departure the thing being maximised.
+
+Sharing one module with the forward search would mean a comparison operator and
+a direction flag threaded through every line of it, and the two would then be
+wrong together. They sit side by side in `plan` instead, and the backward one
+leans on the forward one for the last step: once it knows the last workable
+departure, the journeys it offers are the ones the ordinary search finds from
+that moment, which is what keeps a passenger who leaves on time from waiting
+around at every change on the way.
+
+## Why fares sit under the search rather than over it
+
+Pricing takes a sequence of rides, where a ride is a route, two stops and two
+times. It does not take a journey. That keeps `fares` under `plan` rather than
+over it, so the same code prices a planned journey, a list read off a ticket
+machine and a hand written example in a test, and the search never has to know
+what a fare is.
+
+## What is deliberately missing
+
+`README.md` ends with fourteen numbered gaps. They are not oversights and they
+are not to be filled in passing. The ones that touch this table are the packed
+on-disk index, which would go under `feed`, and the real time layer, which would
+sit between `timetable` and `plan`.

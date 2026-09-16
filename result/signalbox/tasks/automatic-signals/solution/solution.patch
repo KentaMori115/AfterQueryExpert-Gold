@@ -1,0 +1,967 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ff216eb..5f9fb61 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -27,7 +27,7 @@ The release that made the thing usable by somebody who did not write it.
+ 
+ ### Checking it
+ 
+-- Fifty four rules, each with a written explanation, generated into
++- Fifty five rules, each with a written explanation, generated into
+   `docs/rules.md` so it cannot go stale.
+ - Waivers, `--strict`, `--since` and JSON findings, which is everything a build
+   needs to say what is new.
+diff --git a/README.md b/README.md
+index 30de905..28a7787 100644
+--- a/README.md
++++ b/README.md
+@@ -48,6 +48,7 @@ signalbox table kingsmoor.sbx -f csv       # the control table
+ signalbox points kingsmoor.sbx             # the same thing read points first
+ signalbox aspects kingsmoor.sbx            # what each signal will show
+ signalbox locking kingsmoor.sbx            # what each route holds
++signalbox automatic kingsmoor.sbx          # what the trains work, not a signaller
+ signalbox headway kingsmoor.sbx            # what service it will carry
+ signalbox check kingsmoor.sbx              # what is wrong with it
+ signalbox draw kingsmoor.sbx --legend      # a schematic
+diff --git a/docs/design.md b/docs/design.md
+index 0562d91..5f73106 100644
+--- a/docs/design.md
++++ b/docs/design.md
+@@ -33,6 +33,12 @@ walking forward from each signal, overlaps beyond each exit signal, flanks by
+ walking back from the ends a route does not use, and locking from the sub routes
+ each route holds. Everything in here is a pure calculation over a `Scheme`.
+ 
++Automatic signals are worked out in `signalling.automatic`, above routes and
++below everything that acts on them: it says which of the signals the plan
++declares automatic can really be left to the trains, and what stops the rest.
++The machine sets those routes and keeps them set, the rules report the rest, and
++neither of them decides the question twice.
++
+ `sim` runs the result. The machine holds the state and applies the same rules
+ the tables were generated from; `sim.lamps` works out what each signal shows;
+ trains and drivers move over the graph; scenarios script the lot.
+diff --git a/docs/language.md b/docs/language.md
+index 1b55662..d25a2a0 100644
+--- a/docs/language.md
++++ b/docs/language.md
+@@ -112,6 +112,7 @@ section TA over E1
+ signal K1 on E1 at 800 facing forward direction down aspects 4 sighting 300
+ signal K2 on E1 at 0 facing backward direction up aspects 3
+ signal K20 on E1 at 400 facing forward aspects 2 type shunt
++signal K5 on E1 at 600 facing forward direction down aspects 4 automatic yes
+ ```
+ 
+ `facing forward` means the signal reads towards the end of the edge it stands
+@@ -122,6 +123,12 @@ usually at offset `0` or at the far end of its edge.
+ Signals take `type main`, `type shunt` or `type banner`, and the flags
+ `subsidiary yes` for a call on arm and `warning yes` for a warning arrangement.
+ 
++`automatic yes` says the signal is not on the panel. Nobody sets its route: the
++route stands set, the signal follows the track in front of it, and a signaller
++who wants it back has only the replacement control. A signal worked that way has
++to have one route and nothing to move, so it is a main signal on plain line;
++anything else is a mistake in the plan and `check` says which.
++
+ ## Level crossings and traps
+ 
+ ```sbx
+diff --git a/docs/rules.md b/docs/rules.md
+index 9b3f069..4fcaaaa 100644
+--- a/docs/rules.md
++++ b/docs/rules.md
+@@ -9,6 +9,7 @@ it fires. This file is generated from the rules themselves by
+ | `aspect-clamp` | warning | signals can show the aspect the sequence wants |
+ | `aspect-dark` | error | every running signal has a route |
+ | `aspect-junction` | advice | diverging routes are approach controlled |
++| `auto-working` | error | automatic signals can be left to the trains |
+ | `berth-missing` | warning | every signal has a berth track |
+ | `berth-shared` | advice | two signals do not berth in the same section |
+ | `capacity-heads` | advice | four aspect signalling is used where it pays |
+@@ -85,6 +86,14 @@ A diverging route much slower than the line, with nothing to make the driver slo
+ 
+ **What to do:** Approach control the junction signal from red, or fit a flashing aspect sequence.
+ 
++## auto-working
++
++*error: automatic signals can be left to the trains*
++
++The plan leaves this signal to the trains, and the layout under it will not have that: either it reads more than one way, or its route needs a set of points held and nobody is there to call them.
++
++**What to do:** Work the signal from the panel like any other, or take the choice and the points out of what it reads over.
++
+ ## berth-missing
+ 
+ *warning: every signal has a berth track*
+diff --git a/docs/scenarios.md b/docs/scenarios.md
+index 2ba5ac5..9be0865 100644
+--- a/docs/scenarios.md
++++ b/docs/scenarios.md
+@@ -41,6 +41,8 @@ at 130 release "K1(M)"
+ at 200 fail P103
+ at 200 fail TB
+ at 200 fail K1
++at 220 replace K5
++at 240 automatic K5
+ at 260 restore P103
+ at 300 stop 1A05
+ at 302 reverse 1A05
+@@ -56,6 +58,8 @@ at 380 remove 1A05
+ | `release` | Emergency release, which waits out its own timer whatever the track says |
+ | `fail` | Fails a set of points, a track circuit or a signal, whichever the name is |
+ | `restore` | Puts one of those right again |
++| `replace` | Puts an automatic signal back to danger and keeps it there |
++| `automatic` | Gives a replaced signal back to the trains |
+ | `stop` | Brings a train to a stand where it is |
+ | `reverse` | Turns a stopped train round |
+ | `remove` | Takes a train off the layout |
+@@ -107,6 +111,8 @@ expect train 2B10 gone
+ expect train 1A05 facing backward
+ expect signal K1 shows R
+ expect signal K5 dark
++expect signal K7 automatic
++expect signal K9 replaced
+ expect points P101 lying reverse
+ expect points P103 status failed
+ expect route "K1(M)" is available
+@@ -115,7 +121,8 @@ expect section TB occupied
+ expect section TC failed
+ ```
+ 
+-An aspect is written `R`, `Y`, `YY` or `G`. A route status is one of
++A signal is `automatic` while the trains are working it and `replaced` while a
++signaller is holding it back. An aspect is written `R`, `Y`, `YY` or `G`. A route status is one of
+ `available`, `called`, `set`, `occupied` or `releasing`.
+ 
+ Anything a command or an expectation cannot do is reported as a failure of the
+diff --git a/src/signalbox/cli/commands/automatic.py b/src/signalbox/cli/commands/automatic.py
+new file mode 100644
+index 0000000..7ff8aef
+--- /dev/null
++++ b/src/signalbox/cli/commands/automatic.py
+@@ -0,0 +1,82 @@
++"""The automatic command: which signals the trains work, and which cannot."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import typer
++
++from ...signalling.automatic import AutomaticWorking, AutoSignal, automatic_working
++from ...signalling.conflict import build_matrix
++from ...signalling.interlocking import Interlocking
++from ..common import console, grid, load_interlocking
++
++
++def _row(found: AutoSignal) -> list[str]:
++    return [
++        found.signal,
++        found.route or "-",
++        "yes" if found.works else "no",
++        ", ".join(found.watching) or "-",
++        found.detail if found.detail else ("" if found.works else str(found.fault)),
++    ]
++
++
++def _locked_out(interlocking: Interlocking, working: AutomaticWorking) -> list[list[str]]:
++    """The panel moves an automatic route will never let a signaller have.
++
++    An automatic route stands set, so anything signalled against it is refused
++    every time it is asked for. That is worth printing beside the signal that
++    does it, because on the control table it looks like an ordinary route.
++    """
++    matrix = build_matrix(interlocking)
++    automatic = set(working.routes())
++    rows = []
++    for plan in interlocking:
++        if plan.name in automatic:
++            continue
++        against = sorted(set(matrix.against(plan.name)) & automatic)
++        if against:
++            rows.append([plan.name, ", ".join(against)])
++    return rows
++
++
++def automatic(
++    plan: Path = typer.Argument(..., help="the scheme plan to read"),
++    faults: bool = typer.Option(
++        False, "--faults", help="only the signals that cannot be worked automatically"
++    ),
++    locks: bool = typer.Option(
++        False, "--locks", help="the routes an automatic one will never let go of"
++    ),
++) -> None:
++    """Print the automatic signals and the routes they work."""
++    scheme, interlocking = load_interlocking(plan)
++    working = automatic_working(scheme, interlocking)
++
++    if locks:
++        rows = _locked_out(interlocking, working)
++        if not rows:
++            console.print(f"nothing in {plan.name} is locked out by an automatic route")
++            return
++        console.print(
++            grid(f"locked out in {plan.name}", ["route", "against"], rows)
++        )
++        return
++
++    found = working.faults() if faults else working.sorted_signals()
++    if not found:
++        console.print(f"nothing in {plan.name} is worked automatically")
++        return
++
++    console.print(
++        grid(
++            f"automatic signals in {plan.name}",
++            ["signal", "route", "works", "watches", "why not"],
++            [_row(entry) for entry in found],
++        )
++    )
++
++
++def register(app: typer.Typer) -> None:
++    app.command()(automatic)
+diff --git a/src/signalbox/cli/commands/route.py b/src/signalbox/cli/commands/route.py
+index 6cfbe3f..5c1ce3d 100644
+--- a/src/signalbox/cli/commands/route.py
++++ b/src/signalbox/cli/commands/route.py
+@@ -8,6 +8,7 @@ import typer
+ 
+ from ...signalling.approach import approach_lock_for
+ from ...signalling.aspects import build_chart
++from ...signalling.automatic import automatic_working
+ from ...signalling.conflict import build_matrix
+ from ...signalling.crossing import requirements_for
+ from ...signalling.locking import build_locking
+@@ -33,6 +34,7 @@ def route(
+     approach = approach_lock_for(scheme, item)
+     rule = chart.rule(name)
+     shape = route_profile(scheme, item)
++    worked_by = automatic_working(scheme, interlocking).signal_of(name)
+ 
+     rows = [
+         ["from", item.entrance],
+@@ -46,6 +48,7 @@ def route(
+         ["flank", ", ".join(flank.requirement() for flank in item.flanks) or "none"],
+         ["crossings", ", ".join(requirements_for(scheme, item)) or "none"],
+         ["release", entry.release.value],
++        ["worked", "automatically" if worked_by else "from the panel"],
+         ["approach", approach.describe()],
+         ["locks out", ", ".join(entry.locks_out) or "nothing"],
+         ["aspects", str(rule) if rule is not None else "shunt, no aspect"],
+diff --git a/src/signalbox/cli/main.py b/src/signalbox/cli/main.py
+index f98c672..9f26b8a 100644
+--- a/src/signalbox/cli/main.py
++++ b/src/signalbox/cli/main.py
+@@ -21,6 +21,7 @@ from .. import __version__
+ from . import common
+ from .commands import (
+     aspects,
++    automatic,
+     chainage,
+     check,
+     diff,
+@@ -127,5 +128,6 @@ for module in (
+     rules,
+     route,
+     setting,
++    automatic,
+ ):
+     module.register(app)
+diff --git a/src/signalbox/interchange/report.py b/src/signalbox/interchange/report.py
+index 1a9c4cb..93e7e76 100644
+--- a/src/signalbox/interchange/report.py
++++ b/src/signalbox/interchange/report.py
+@@ -8,6 +8,7 @@ running commands.
+ 
+ from __future__ import annotations
+ 
++from ..signalling.automatic import automatic_working
+ from ..signalling.berth import without_berths
+ from ..signalling.headway import legs, summarise
+ from ..signalling.interlocking import Interlocking
+@@ -81,6 +82,25 @@ def _protection(scheme: Scheme, interlocking: Interlocking) -> list[str]:
+     return lines
+ 
+ 
++def _automatic(scheme: Scheme, interlocking: Interlocking) -> list[str]:
++    """What the trains work, left out entirely where nothing is worked that way.
++
++    A scheme with no automatic signals in it should not carry a heading saying
++    so, since most of them have none and the report is read on paper.
++    """
++    working = automatic_working(scheme, interlocking)
++    if not len(working):
++        return []
++
++    lines = _heading("Automatic working")
++    for found in working.working():
++        watching = ", ".join(found.watching) or "nothing"
++        lines.append(f"  {found.signal} works {found.route}, watching {watching}")
++    for found in working.faults():
++        lines.append(f"  {found.signal} cannot be worked automatically: {found.fault}")
++    return lines
++
++
+ def _capacity(scheme: Scheme, interlocking: Interlocking) -> list[str]:
+     lines = _heading("Capacity")
+     lines.append("  " + summarise(legs(scheme, interlocking)))
+@@ -112,6 +132,7 @@ def write_report(
+     lines += _layout(scheme)
+     lines += _routes(interlocking)
+     lines += _protection(scheme, interlocking)
++    lines += _automatic(scheme, interlocking)
+     lines += _capacity(scheme, interlocking)
+     lines += _findings(findings)
+     return "\n".join(lines) + "\n"
+diff --git a/src/signalbox/signalling/automatic.py b/src/signalbox/signalling/automatic.py
+new file mode 100644
+index 0000000..4d86e18
+--- /dev/null
++++ b/src/signalbox/signalling/automatic.py
+@@ -0,0 +1,159 @@
++"""Automatic signals: the ones the trains work rather than the signaller.
++
++A signal marked ``automatic yes`` in the plan is not on the panel. Nobody asks
++for its route; the route stands set, the signal follows the track ahead of it,
++and the whole thing is one less thing for a signaller to do on a plain stretch
++of line.
++
++That only works where there is nothing to decide. A signal reading two ways has
++to be told which way, and a route that calls a set of points has to have them
++moved by something. Both of those need a signaller, so both of them stop a
++signal working automatically, and the design is wrong rather than the signal.
++Working out which of the declared automatic signals can actually work is
++therefore the first thing anything else here wants to know.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterator
++from dataclasses import dataclass
++from enum import Enum
++
++from ..topology.scheme import Scheme
++from .interlocking import Interlocking, RoutePlan
++
++
++class AutoFault(Enum):
++    """Why a signal declared automatic cannot be worked by the trains."""
++
++    NO_ROUTE = "no route"
++    CHOICE = "a choice of routes"
++    POINTS = "points to move"
++
++    def __str__(self) -> str:
++        return self.value
++
++
++@dataclass(frozen=True)
++class AutoSignal:
++    """One signal declared automatic, and what came of it."""
++
++    signal: str
++    route: str | None = None
++    fault: AutoFault | None = None
++    detail: str = ""
++    watching: tuple[str, ...] = ()
++    """The track that has to be clear before the signal will clear.
++
++    Nobody is going to be told why an automatic signal is at danger, so the
++    sections it is watching are worth having written down where the design is
++    read rather than worked out again off the control table every time.
++    """
++
++    @property
++    def works(self) -> bool:
++        """Whether the trains really do work this signal."""
++        return self.route is not None and self.fault is None
++
++    def __str__(self) -> str:
++        if self.works:
++            return f"{self.signal} works {self.route}"
++        tail = f" ({self.detail})" if self.detail else ""
++        return f"{self.signal} cannot work automatically: {self.fault}{tail}"
++
++
++def _to_move(plan: RoutePlan) -> list[str]:
++    """Every set of points the route needs held, whatever it needs them for."""
++    wanted = dict(plan.points())
++    wanted.update(plan.overlap_points())
++    wanted.update(plan.flank_points())
++    return sorted(wanted)
++
++
++def _watching(plan: RoutePlan) -> tuple[str, ...]:
++    """The sections the signal proves clear: the route's own, then the overlap."""
++    found = list(plan.sections)
++    for section in plan.overlap_sections():
++        if section not in found:
++            found.append(section)
++    return tuple(found)
++
++
++def _decide(signal: str, plans: list[RoutePlan]) -> AutoSignal:
++    """What one declared automatic signal comes to."""
++    if not plans:
++        return AutoSignal(signal, fault=AutoFault.NO_ROUTE)
++    if len(plans) > 1:
++        return AutoSignal(
++            signal,
++            fault=AutoFault.CHOICE,
++            detail=", ".join(sorted(plan.name for plan in plans)),
++        )
++    only = plans[0]
++    moving = _to_move(only)
++    if moving:
++        return AutoSignal(signal, fault=AutoFault.POINTS, detail=", ".join(moving))
++    return AutoSignal(signal, route=only.name, watching=_watching(only))
++
++
++class AutomaticWorking:
++    """Every automatic signal in a scheme, working or not."""
++
++    def __init__(self, signals: list[AutoSignal]) -> None:
++        self.signals = {found.signal: found for found in signals}
++
++    def __len__(self) -> int:
++        return len(self.signals)
++
++    def __iter__(self) -> Iterator[AutoSignal]:
++        return iter(self.sorted_signals())
++
++    def __contains__(self, signal: object) -> bool:
++        return signal in self.signals
++
++    def sorted_signals(self) -> list[AutoSignal]:
++        return [self.signals[name] for name in sorted(self.signals)]
++
++    def signal(self, name: str) -> AutoSignal | None:
++        return self.signals.get(name)
++
++    def working(self) -> list[AutoSignal]:
++        """The ones the trains really do work."""
++        return [found for found in self.sorted_signals() if found.works]
++
++    def faults(self) -> list[AutoSignal]:
++        """The ones declared automatic that cannot be."""
++        return [found for found in self.sorted_signals() if not found.works]
++
++    def routes(self) -> tuple[str, ...]:
++        """Every route that stands set without anybody asking for it."""
++        return tuple(
++            found.route for found in self.working() if found.route is not None
++        )
++
++    def route_of(self, signal: str) -> str | None:
++        found = self.signals.get(signal)
++        return found.route if found is not None and found.works else None
++
++    def signal_of(self, route: str) -> str | None:
++        for found in self.working():
++            if found.route == route:
++                return found.signal
++        return None
++
++    def is_automatic(self, route: str) -> bool:
++        return route in self.routes()
++
++    def describe(self) -> str:
++        working = len(self.working())
++        return f"{working} of {len(self.signals)} automatic signals working"
++
++
++def automatic_working(scheme: Scheme, interlocking: Interlocking) -> AutomaticWorking:
++    """Work out which declared automatic signals the trains can be left to."""
++    found = [
++        _decide(signal.name, interlocking.from_signal(signal.name))
++        for signal in scheme.sorted_signals()
++        if signal.automatic
++    ]
++    return AutomaticWorking(found)
+diff --git a/src/signalbox/sim/ars.py b/src/signalbox/sim/ars.py
+index d73859f..5244eda 100644
+--- a/src/signalbox/sim/ars.py
++++ b/src/signalbox/sim/ars.py
+@@ -107,6 +107,14 @@ class Ars:
+         return found
+ 
+     def _already_set(self, route: str) -> bool:
++        """Whether asking for this route would be asking for nothing.
++
++        A route worked automatically counts, and always will: the booking is
++        satisfied by a signal nobody has to work, so the train is stepped on to
++        whatever comes after it rather than left waiting for a refusal.
++        """
++        if self.world.machine.automatic.is_automatic(route):
++            return True
+         state = self.world.machine.state.route(route)
+         return state.status in (RouteStatus.SET, RouteStatus.OCCUPIED)
+ 
+diff --git a/src/signalbox/sim/machine.py b/src/signalbox/sim/machine.py
+index 949dace..31c759a 100644
+--- a/src/signalbox/sim/machine.py
++++ b/src/signalbox/sim/machine.py
+@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
+ 
+ from ..signalling.approach import ApproachLock, approach_lock_for
+ from ..signalling.aspects import AspectChart, build_chart
++from ..signalling.automatic import AutomaticWorking, automatic_working
+ from ..signalling.conflict import build_matrix
+ from ..signalling.emergency import EmergencyRelease, release_for
+ from ..signalling.interlocking import Interlocking
+@@ -77,6 +78,7 @@ class Machine:
+             )
+             for plan in self.interlocking
+         }
++        self.automatic: AutomaticWorking = automatic_working(self.scheme, self.interlocking)
+         self._timers: dict[str, float] = {}
+         self.lamps = Lamps(self.scheme, self.interlocking, self.chart, self.state)
+         for name in self.scheme.graph.movable():
+@@ -85,6 +87,7 @@ class Machine:
+             self.state.routes.setdefault(plan.name, RouteState(plan.name))
+             self._released.setdefault(plan.name, set())
+             self._entered.setdefault(plan.name, set())
++        self._work_automatic_routes()
+         self.refresh_aspects()
+ 
+     # asking for things -------------------------------------------------
+@@ -117,7 +120,17 @@ class Machine:
+         return outcome
+ 
+     def request(self, route: str) -> Outcome:
+-        """Ask for a route to be set."""
++        """Ask for a route to be set.
++
++        A route worked automatically is not the signaller's to ask for. It is
++        already there, and saying so is more use than pretending to set it.
++        """
++        if self.automatic.is_automatic(route):
++            return Outcome(False, f"{route} is worked automatically")
++        return self._set(route)
++
++    def _set(self, route: str) -> Outcome:
++        """Set a route if nothing in the locking stands in the way of it."""
+         if route not in self.state.routes:
+             return Outcome(False, f"no route called {route}")
+         current = self.state.route(route)
+@@ -186,10 +199,15 @@ class Machine:
+ 
+     def cancel(self, route: str) -> Outcome:
+         """Ask for a route to be given up."""
++        if self.automatic.is_automatic(route):
++            return Outcome(False, f"{route} is worked automatically")
+         state = self.state.route(route)
+         if not state.held and state.status is not RouteStatus.CALLED:
+             return Outcome(False, f"{route} is not set")
++        return self._give_up(route)
+ 
++    def _give_up(self, route: str) -> Outcome:
++        """Take a route away, waiting the approach locking out where it applies."""
+         lock = self.approach[route]
+         approaching = any(self.state.is_occupied(section) for section in lock.watched)
+         showing = self.state.aspects.get(self.interlocking.plan(route).entrance, Aspect.RED)
+@@ -201,6 +219,70 @@ class Machine:
+         self._release(route)
+         return ACCEPTED
+ 
++    # automatic working -------------------------------------------------
++
++    def _work_automatic_routes(self) -> None:
++        """Set whatever the trains work, wherever the track is free for it.
++
++        Called wherever the answer can have changed: when the machine is built,
++        when anything releases, when a signal is given back, and on every tick,
++        since track a route wanted may have been given up by something else.
++        """
++        for route in self.automatic.routes():
++            if self.state.is_replaced(self.interlocking.plan(route).entrance):
++                continue
++            state = self.state.route(route)
++            if state.status is RouteStatus.OCCUPIED and self._train_has_gone(route):
++                self._free(route)
++                state = self.state.route(route)
++            if state.held or state.status is RouteStatus.CALLED:
++                continue
++            self._set(route)
++
++    def _train_has_gone(self, route: str) -> bool:
++        """Whether the track a route is holding has been left again.
++
++        A route the signaller set stays where it is until somebody gives it up,
++        and a route that releases section by section gets there on its own. One
++        that holds a single section does neither, so an automatic signal reading
++        over one section would stand at danger for the rest of the day.
++        """
++        return not any(
++            self.state.is_occupied(sub.section)
++            for sub in self.interlocking.plan(route).held_track()
++        )
++
++    def replace(self, signal: str) -> Outcome:
++        """Put an automatic signal back to danger and hold it there.
++
++        This is the one control a signaller has over a signal the trains work.
++        The route goes the same way a cancelled one does, approach locking and
++        all, and does not come back until the signal does.
++        """
++        route = self.automatic.route_of(signal)
++        if route is None:
++            return Outcome(False, f"{signal} is not worked automatically")
++        if self.state.is_replaced(signal):
++            return Outcome(False, f"{signal} is already replaced")
++        self.state.replace(signal)
++        state = self.state.route(route)
++        if state.held or state.status is RouteStatus.CALLED:
++            return self._give_up(route)
++        self.refresh_aspects()
++        return ACCEPTED
++
++    def work_automatically(self, signal: str) -> Outcome:
++        """Give a replaced signal back to the trains."""
++        route = self.automatic.route_of(signal)
++        if route is None:
++            return Outcome(False, f"{signal} is not worked automatically")
++        if not self.state.is_replaced(signal):
++            return Outcome(False, f"{signal} is not replaced")
++        self.state.work_automatically(signal)
++        self._work_automatic_routes()
++        self.refresh_aspects()
++        return ACCEPTED
++
+     def emergency_release(self, route: str) -> Outcome:
+         """Take a route away when nothing can be proved about the train.
+ 
+@@ -208,6 +290,8 @@ class Machine:
+         it always waits out the emergency timer, because the case it is for is
+         the one where the track circuits cannot be believed.
+         """
++        if self.automatic.is_automatic(route):
++            return Outcome(False, f"{route} is worked automatically")
+         state = self.state.route(route)
+         if not state.held and state.status is not RouteStatus.CALLED:
+             return Outcome(False, f"{route} is not set")
+@@ -293,6 +377,12 @@ class Machine:
+         return Outcome(True, f"{name} detected {points.lie.value}")
+ 
+     def _release(self, route: str) -> None:
++        self._free(route)
++        self._work_automatic_routes()
++        self.refresh_aspects()
++
++    def _free(self, route: str) -> None:
++        """Give up everything a route is holding, without deciding what next."""
+         for sub in self.interlocking.plan(route).held_track():
+             if self.state.holder_of(sub) == route:
+                 self.state.free(sub)
+@@ -303,7 +393,6 @@ class Machine:
+         self._released[route] = set()
+         self._entered[route] = set()
+         self._timers.pop(route, None)
+-        self.refresh_aspects()
+ 
+     # the world moving --------------------------------------------------
+ 
+@@ -331,6 +420,7 @@ class Machine:
+                     self.state.free(sub)
+                     self._released[state.name].add(section)
+             self._finish_if_done(state.name)
++        self._work_automatic_routes()
+         self.refresh_aspects()
+ 
+     def _finish_if_done(self, route: str) -> None:
+@@ -360,6 +450,7 @@ class Machine:
+                 and self.state.clock - state.cancelled_at >= self._timers.get(state.name, 0.0)
+             ):
+                 self._release(state.name)
++        self._work_automatic_routes()
+         self.refresh_aspects()
+ 
+     # aspects -----------------------------------------------------------
+diff --git a/src/signalbox/sim/scenario.py b/src/signalbox/sim/scenario.py
+index f634af1..ab8f775 100644
+--- a/src/signalbox/sim/scenario.py
++++ b/src/signalbox/sim/scenario.py
+@@ -318,6 +318,22 @@ def _do_cancel(world: World, args: tuple[str, ...], ars: Ars | None) -> str | No
+     return None if world.cancel(args[0]) else f"could not cancel {args[0]}"
+ 
+ 
++def _do_replace(world: World, args: tuple[str, ...], ars: Ars | None) -> str | None:
++    del ars
++    if problem := _needs(args, 1, "replace SIGNAL"):
++        return problem
++    return None if world.replace(args[0]) else f"could not replace {args[0]}"
++
++
++def _do_automatic(world: World, args: tuple[str, ...], ars: Ars | None) -> str | None:
++    del ars
++    if problem := _needs(args, 1, "automatic SIGNAL"):
++        return problem
++    if world.work_automatically(args[0]):
++        return None
++    return f"could not give {args[0]} back to the trains"
++
++
+ def _do_release(world: World, args: tuple[str, ...], ars: Ars | None) -> str | None:
+     del ars
+     if problem := _needs(args, 1, "release ROUTE"):
+@@ -374,11 +390,13 @@ def _do_restore(world: World, args: tuple[str, ...], ars: Ars | None) -> str | N
+ 
+ #: Every verb the scenario language has, and what does it.
+ COMMANDS: dict[str, Handler] = {
++    "automatic": _do_automatic,
+     "book": _do_book,
+     "cancel": _do_cancel,
+     "fail": _do_fail,
+     "note": _do_note,
+     "release": _do_release,
++    "replace": _do_replace,
+     "remove": _do_remove,
+     "restore": _do_restore,
+     "reverse": _do_reverse,
+@@ -474,13 +492,25 @@ def _check_train(world: World, args: tuple[str, ...]) -> str | None:
+     return f"do not know how to check a train {what!r}"
+ 
+ 
++def _check_replacement(world: World, name: str, what: str) -> str | None:
++    """Whether the trains have this signal, or a signaller is holding it back."""
++    replaced = world.machine.state.is_replaced(name)
++    if what == "replaced":
++        return None if replaced else f"{name} is not replaced"
++    if world.machine.automatic.route_of(name) is None:
++        return f"{name} is not worked automatically"
++    return f"{name} is replaced" if replaced else None
++
++
+ def _check_signal(world: World, args: tuple[str, ...]) -> str | None:
+-    if problem := _needs(args, 2, "expect signal NAME dark|shows ASPECT"):
++    if problem := _needs(args, 2, "expect signal NAME dark|replaced|automatic|shows ASPECT"):
+         return problem
+     name, what = args[0], args[1]
+ 
+     if what == "dark":
+         return None if world.machine.state.is_dark(name) else f"{name} is lit"
++    if what in ("replaced", "automatic"):
++        return _check_replacement(world, name, what)
+     if what != "shows":
+         return f"do not know how to check a signal {what!r}"
+     if problem := _needs(args, 3, "expect signal NAME shows ASPECT"):
+diff --git a/src/signalbox/sim/state.py b/src/signalbox/sim/state.py
+index ce05eb5..6cf569a 100644
+--- a/src/signalbox/sim/state.py
++++ b/src/signalbox/sim/state.py
+@@ -129,6 +129,7 @@ class SchemeState:
+     occupied: set[str] = field(default_factory=set)
+     failed: set[str] = field(default_factory=set)
+     dark: set[str] = field(default_factory=set)
++    replaced: set[str] = field(default_factory=set)
+     points: dict[str, PointState] = field(default_factory=dict)
+     routes: dict[str, RouteState] = field(default_factory=dict)
+     subroutes: dict[str, Hold] = field(default_factory=dict)
+@@ -176,6 +177,21 @@ class SchemeState:
+     def is_dark(self, signal: str) -> bool:
+         return signal in self.dark
+ 
++    def replace(self, signal: str) -> None:
++        """Hold an automatic signal at danger until somebody gives it back.
++
++        The replacement control is the one thing a signaller has over a signal
++        the trains work. It is a state of the signal rather than of any route,
++        because the route goes and comes back underneath it.
++        """
++        self.replaced.add(signal)
++
++    def work_automatically(self, signal: str) -> None:
++        self.replaced.discard(signal)
++
++    def is_replaced(self, signal: str) -> bool:
++        return signal in self.replaced
++
+     # points -----------------------------------------------------------
+ 
+     def point(self, name: str) -> PointState:
+diff --git a/src/signalbox/sim/world.py b/src/signalbox/sim/world.py
+index bda502e..c59140b 100644
+--- a/src/signalbox/sim/world.py
++++ b/src/signalbox/sim/world.py
+@@ -158,6 +158,16 @@ class World:
+         self.note(EventKind.ROUTE, route, f"cancelled, {outcome}")
+         return bool(outcome)
+ 
++    def replace(self, signal: str) -> bool:
++        outcome = self.machine.replace(signal)
++        self.note(EventKind.SIGNAL, signal, f"replaced, {outcome}")
++        return bool(outcome)
++
++    def work_automatically(self, signal: str) -> bool:
++        outcome = self.machine.work_automatically(signal)
++        self.note(EventKind.SIGNAL, signal, f"back to automatic, {outcome}")
++        return bool(outcome)
++
+     def emergency_release(self, route: str) -> bool:
+         outcome = self.machine.emergency_release(route)
+         self.note(EventKind.ROUTE, route, f"emergency release, {outcome}")
+diff --git a/src/signalbox/verify/checks/__init__.py b/src/signalbox/verify/checks/__init__.py
+index bc8c98f..0380639 100644
+--- a/src/signalbox/verify/checks/__init__.py
++++ b/src/signalbox/verify/checks/__init__.py
+@@ -7,6 +7,7 @@ cannot appear in a report without somebody having decided it should.
+ 
+ from . import (
+     aspect,
++    automatic,
+     capacity,
+     crossing,
+     detection,
+@@ -27,6 +28,7 @@ from . import (
+ 
+ __all__ = [
+     "aspect",
++    "automatic",
+     "capacity",
+     "crossing",
+     "detection",
+diff --git a/src/signalbox/verify/checks/automatic.py b/src/signalbox/verify/checks/automatic.py
+new file mode 100644
+index 0000000..37cae11
+--- /dev/null
++++ b/src/signalbox/verify/checks/automatic.py
+@@ -0,0 +1,28 @@
++"""Signals the plan leaves to the trains, and whether it can.
++
++An automatic signal is a promise that nothing about the move needs deciding. A
++signal reading two ways has a decision in it, and so has one whose route calls a
++set of points, because something has to move them and there is nobody there to
++ask for it. Neither is a working arrangement, and neither is a signal the trains
++can be left with: the plan says automatic and the ground says otherwise, which
++is the one thing worth reporting about the flag.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterator
++
++from ..report import Finding, Severity
++from ..rules import Context, rule
++
++
++@rule("auto-working", "automatic signals can be left to the trains", Severity.ERROR)
++def automatic_signals_can_work(context: Context) -> Iterator[Finding]:
++    for found in context.automatic.faults():
++        yield Finding(
++            rule="auto-working",
++            severity=Severity.ERROR,
++            subject=found.signal,
++            message=f"is declared automatic and has {found.fault}",
++            detail=found.detail,
++        )
+diff --git a/src/signalbox/verify/checks/setting.py b/src/signalbox/verify/checks/setting.py
+index 9f70435..8b726ff 100644
+--- a/src/signalbox/verify/checks/setting.py
++++ b/src/signalbox/verify/checks/setting.py
+@@ -5,6 +5,11 @@ for every route on an empty railway and see what happens, and then ask for pairs
+ of routes the conflict matrix says are compatible and check that the machine
+ agrees. A disagreement between the table and the machine means one of the two is
+ wrong, and finding out which is much cheaper here than on site.
++
++A route worked automatically is not asked for at all. The machine refuses the
++request, rightly, and reading that refusal as a fault would report every
++automatic signal in the scheme as broken interlocking. What still has to hold is
++that its signal clears, so that one is checked with the route left where it is.
+ """
+ 
+ from __future__ import annotations
+@@ -27,6 +32,8 @@ def _machine(context: Context) -> Machine:
+ @rule("setting-refused", "every route can be set on an empty railway", Severity.ERROR)
+ def every_route_can_be_set(context: Context) -> Iterator[Finding]:
+     for plan in context.plans():
++        if context.automatic.is_automatic(plan.name):
++            continue
+         machine = _machine(context)
+         outcome = machine.request(plan.name)
+         if outcome:
+@@ -53,7 +60,7 @@ def every_main_route_clears(context: Context) -> Iterator[Finding]:
+         if not plan.klass.clears_signal:
+             continue
+         machine = _machine(context)
+-        if not machine.request(plan.name):
++        if not _standing(machine, plan.name) and not machine.request(plan.name):
+             continue
+         _clear_the_road(machine, plan.exit)
+         machine.tick(60.0)
+@@ -68,6 +75,11 @@ def every_main_route_clears(context: Context) -> Iterator[Finding]:
+         )
+ 
+ 
++def _standing(machine: Machine, route: str) -> bool:
++    """Whether this route is there already because the trains work it."""
++    return machine.automatic.is_automatic(route)
++
++
+ def _clear_the_road(machine: Machine, signal: str, depth: int = 6) -> None:
+     """Set a route on from each signal ahead, as far as ``depth`` signals."""
+     seen: set[str] = set()
+@@ -78,7 +90,9 @@ def _clear_the_road(machine: Machine, signal: str, depth: int = 6) -> None:
+         seen.add(here)
+         onward = machine.interlocking.from_signal(here)
+         chosen = next((plan for plan in onward if plan.klass.clears_signal), None)
+-        if chosen is None or not machine.request(chosen.name):
++        if chosen is None:
++            return
++        if not _standing(machine, chosen.name) and not machine.request(chosen.name):
+             return
+         machine.tick(60.0)
+         if not chosen.route.exit.is_signal:
+@@ -98,6 +112,10 @@ def compatible_routes_can_both_be_set(context: Context) -> Iterator[Finding]:
+             return
+         if matrix.clashes(first.name, second.name):
+             continue
++        if context.automatic.is_automatic(first.name) or context.automatic.is_automatic(
++            second.name
++        ):
++            continue
+         checked += 1
+ 
+         machine = _machine(context)
+diff --git a/src/signalbox/verify/guidance.py b/src/signalbox/verify/guidance.py
+index 2cf4fcb..78d8338 100644
+--- a/src/signalbox/verify/guidance.py
++++ b/src/signalbox/verify/guidance.py
+@@ -115,6 +115,14 @@ GUIDANCE: dict[str, Guidance] = dict(
+             "Usually the direction of working on the track it stands on is "
+             "wrong, or the signal is facing the wrong way.",
+         ),
++        _g(
++            "auto-working",
++            "The plan leaves this signal to the trains, and the layout under it "
++            "will not have that: either it reads more than one way, or its route "
++            "needs a set of points held and nobody is there to call them.",
++            "Work the signal from the panel like any other, or take the choice "
++            "and the points out of what it reads over.",
++        ),
+         _g(
+             "aspect-junction",
+             "A diverging route much slower than the line, with nothing to make "
+diff --git a/src/signalbox/verify/rules.py b/src/signalbox/verify/rules.py
+index 8ba157e..2335806 100644
+--- a/src/signalbox/verify/rules.py
++++ b/src/signalbox/verify/rules.py
+@@ -12,6 +12,7 @@ from functools import cached_property
+ from typing import TypeVar
+ 
+ from ..signalling.aspects import AspectChart, build_chart
++from ..signalling.automatic import AutomaticWorking, automatic_working
+ from ..signalling.braking import BrakingModel
+ from ..signalling.conflict import ConflictMatrix, build_matrix
+ from ..signalling.interlocking import Interlocking, RoutePlan, build_interlocking
+@@ -56,6 +57,10 @@ class Context:
+     def locking(self) -> LockingTable:
+         return build_locking(self.interlocking, self.matrix)
+ 
++    @cached_property
++    def automatic(self) -> AutomaticWorking:
++        return automatic_working(self.scheme, self.interlocking)
++
+     @cached_property
+     def chart(self) -> AspectChart:
+         return build_chart(self.scheme, self.interlocking)

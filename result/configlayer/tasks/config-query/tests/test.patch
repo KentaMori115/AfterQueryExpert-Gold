@@ -1,0 +1,701 @@
+diff --git a/tests/query/__init__.py b/tests/query/__init__.py
+new file mode 100644
+index 0000000..c2b7127
+--- /dev/null
++++ b/tests/query/__init__.py
+@@ -0,0 +1 @@
++"""Tests for configlayer.query."""
+diff --git a/tests/query/test_query_layers.py b/tests/query/test_query_layers.py
+new file mode 100644
+index 0000000..01f896c
+--- /dev/null
++++ b/tests/query/test_query_layers.py
+@@ -0,0 +1,213 @@
++"""Tests for the compiled Query class and origin-aware selection."""
++
++from __future__ import annotations
++
++import pytest
++
++from configlayer.exceptions import ConfigError
++
++CFG = {
++    "db": {"host": "h", "password": "pw", "pool": {"size": 4}},
++    "auth": {"token": "tok"},
++}
++
++
++# ---------------------------------------------------------------------------
++# Query — compile once, use many times
++# ---------------------------------------------------------------------------
++
++class TestQuery:
++    def test_query_mirrors_module_functions(self):
++        from configlayer.query import Query, pick, prune, select
++
++        q = Query(["**.password", "**.token"])
++        assert q.select(CFG) == select(CFG, ["**.password", "**.token"])
++        assert q.pick(CFG) == pick(CFG, ["**.password", "**.token"])
++        assert q.prune(CFG) == prune(CFG, ["**.password", "**.token"])
++
++    def test_query_first_paths_values(self):
++        from configlayer.query import Query
++
++        q = Query("db.*")
++        assert q.first(CFG) == "h"
++        assert q.paths(CFG) == ["db.host", "db.password", "db.pool"]
++        assert q.values(CFG)[0] == "h"
++        assert q.first({}, default="none") == "none"
++
++    def test_query_matches_predicate(self):
++        from configlayer.query import Query
++
++        q = Query("**.token")
++        assert q.matches(CFG) is True
++        assert q.matches({"db": {"host": "h"}}) is False
++
++    def test_query_is_reusable_across_configs(self):
++        from configlayer.query import Query
++
++        q = Query("**.password")
++        assert q.paths(CFG) == ["db.password"]
++        assert q.paths({"root": {"password": "x"}}) == ["root.password"]
++        assert q.paths({}) == []
++
++    def test_query_from_strings_equals_query_from_key_patterns(self):
++        from configlayer.policy import KeyPattern
++        from configlayer.query import Query
++
++        sample = {"a": {"k": 1}, "b": {"c": {"d": 2}}}
++        from_strings = Query(["a.*", "b.**"])
++        from_objects = Query([KeyPattern("a.*"), KeyPattern("b.**")])
++        assert from_strings.select(sample) == from_objects.select(sample)
++        assert from_strings.paths(sample) == ["a.k", "b"]
++
++    def test_query_read_methods_reject_a_non_mapping(self):
++        from configlayer.query import Query
++
++        q = Query("db.*")
++        for call in (q.select, q.first, q.paths, q.values, q.matches):
++            with pytest.raises(ConfigError):
++                call("not a mapping")
++
++    def test_query_transforms_reject_a_non_mapping(self):
++        from configlayer.query import Query
++
++        q = Query("db.*")
++        with pytest.raises(ConfigError):
++            q.pick(None)
++        with pytest.raises(ConfigError):
++            q.prune(None)
++
++    def test_query_errors_match_the_module_function_errors(self):
++        from configlayer.query import Query, pick, prune, select
++
++        q = Query("db.*")
++        for bad in (None, 7, "text", ["a"]):
++            for module_call, method in ((select, q.select), (pick, q.pick),
++                                        (prune, q.prune)):
++                with pytest.raises(ConfigError):
++                    module_call(bad, "db.*")
++                with pytest.raises(ConfigError):
++                    method(bad)
++
++    def test_query_accepts_precompiled_patterns(self):
++        from configlayer.policy import KeyPattern
++        from configlayer.query import Query
++
++        q = Query(KeyPattern("db.*"))
++        assert q.paths(CFG) == ["db.host", "db.password", "db.pool"]
++
++    def test_query_rejects_bad_patterns_at_construction(self):
++        from configlayer.query import Query
++
++        with pytest.raises(ConfigError):
++            Query("bad..pattern")
++        with pytest.raises(ConfigError):
++            Query([])
++
++
++# ---------------------------------------------------------------------------
++# select_origins — queries with provenance
++# ---------------------------------------------------------------------------
++
++def make_stack():
++    from configlayer import LayeredConfig
++    from configlayer.source import DictSource
++
++    return LayeredConfig([
++        DictSource(
++            {"db": {"host": "localhost", "password": "dev-pw",
++                    "pool": {"size": 4}}},
++            name="defaults",
++        ),
++        DictSource(
++            {"db": {"password": "prod-pw"}, "auth": {"token": "tok"}},
++            name="prod",
++            priority=10,
++        ),
++    ])
++
++
++class TestSelectOrigins:
++    def test_each_leaf_names_its_supplying_layer(self):
++        from configlayer.query import select_origins
++
++        found = select_origins(make_stack(), "**.password")
++        assert len(found) == 1
++        match = found[0]
++        assert match.path == "db.password"
++        assert match.value == "prod-pw"
++        assert match.origin == "prod"
++
++    def test_unshadowed_leaves_blame_the_lower_layer(self):
++        from configlayer.query import select_origins
++
++        found = select_origins(make_stack(), "db.host")
++        assert found[0].origin == "defaults"
++        assert found[0].value == "localhost"
++
++    def test_interior_matches_expand_to_leaves(self):
++        from configlayer.query import select_origins
++
++        found = select_origins(make_stack(), "db")
++        by_path = {m.path: m for m in found}
++        assert set(by_path) == {"db.host", "db.password", "db.pool.size"}
++        assert by_path["db.password"].origin == "prod"
++        assert by_path["db.pool.size"].origin == "defaults"
++
++    def test_disabling_a_layer_changes_the_reported_origin(self):
++        from configlayer.query import select_origins
++
++        stack = make_stack()
++        stack.stack.disable("prod")
++        found = select_origins(stack, "**.password")
++        assert found[0].value == "dev-pw"
++        assert found[0].origin == "defaults"
++
++    def test_no_matches_is_an_empty_list(self):
++        from configlayer.query import select_origins
++
++        assert select_origins(make_stack(), "cache.**") == []
++
++    def test_origin_match_records_are_immutable(self):
++        from configlayer.query import select_origins
++
++        match = select_origins(make_stack(), "db.host")[0]
++        with pytest.raises(AttributeError):
++            match.origin = "elsewhere"
++
++
++# ---------------------------------------------------------------------------
++# Public surface
++# ---------------------------------------------------------------------------
++
++class TestSurface:
++    def test_package_exports(self):
++        import configlayer.query as query
++
++        for name in ("Match", "OriginMatch", "Query", "select",
++                     "select_origins", "first", "paths", "values",
++                     "pick", "prune"):
++            assert hasattr(query, name), name
++
++    def test_top_level_re_exports(self):
++        import configlayer
++        import configlayer.query as query
++
++        for name in ("select", "pick", "prune"):
++            assert getattr(configlayer, name) is getattr(query, name), name
++
++    def test_changelog_records_the_new_package(self):
++        from pathlib import Path
++
++        root = Path(__file__).resolve().parents[2]
++        text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
++        newest = text.split("## [0.7.0]")[0]
++        assert "query" in newest.lower()
++
++    def test_pattern_language_is_the_policy_one(self):
++        from configlayer.policy import KeyPattern
++        from configlayer.query import paths
++
++        # db.* covers db.host but not db.pool.size — exactly KeyPattern.
++        assert KeyPattern("db.*").matches("db.host")
++        assert not KeyPattern("db.*").matches("db.pool.size")
++        assert paths(CFG, "db.*") == ["db.host", "db.password", "db.pool"]
+diff --git a/tests/query/test_query_scenarios.py b/tests/query/test_query_scenarios.py
+new file mode 100644
+index 0000000..6aec2e6
+--- /dev/null
++++ b/tests/query/test_query_scenarios.py
+@@ -0,0 +1,160 @@
++"""Scenario tests: glob semantics on deeper trees, sweeps over stacks."""
++
++from __future__ import annotations
++
++DEEP = {
++    "services": {
++        "api": {
++            "endpoint": "https://api",
++            "limits": {"rps": 100, "burst": 250},
++            "auth": {"password": "api-pw"},
++        },
++        "worker": {
++            "endpoint": "amqp://worker",
++            "limits": {"rps": 10},
++            "auth": {"password": "worker-pw"},
++        },
++    },
++    "region": "eu-1",
++}
++
++
++class TestGlobSemanticsMatrix:
++    def test_star_star_star_combinations(self):
++        from configlayer.query import paths
++
++        assert paths(DEEP, "services.*.endpoint") == [
++            "services.api.endpoint",
++            "services.worker.endpoint",
++        ]
++        assert paths(DEEP, "services.*.limits.rps") == [
++            "services.api.limits.rps",
++            "services.worker.limits.rps",
++        ]
++        assert paths(DEEP, "**.password") == [
++            "services.api.auth.password",
++            "services.worker.auth.password",
++        ]
++
++    def test_star_never_spans_two_segments(self):
++        from configlayer.query import paths
++
++        assert paths(DEEP, "services.*.rps") == []
++        assert paths(DEEP, "*.endpoint") == []
++
++    def test_double_star_in_the_middle(self):
++        from configlayer.query import paths
++
++        assert paths(DEEP, "services.**.rps") == [
++            "services.api.limits.rps",
++            "services.worker.limits.rps",
++        ]
++
++    def test_trailing_double_star_selects_the_node_itself(self):
++        from configlayer.query import select
++
++        found = select(DEEP, "services.api.**")
++        assert [m.path for m in found] == ["services.api"]
++
++    def test_root_level_leaf(self):
++        from configlayer.query import first
++
++        assert first(DEEP, "region") == "eu-1"
++
++
++class TestOperationalSweeps:
++    def test_secret_sweep_pick_then_prune_for_handoff(self):
++        from configlayer.query import pick, prune
++
++        secret_patterns = ["**.password", "**.token", "**.secret"]
++        to_vault = pick(DEEP, secret_patterns)
++        to_share = prune(DEEP, secret_patterns)
++
++        assert to_vault == {
++            "services": {
++                "api": {"auth": {"password": "api-pw"}},
++                "worker": {"auth": {"password": "worker-pw"}},
++            }
++        }
++        assert to_share["services"]["api"]["auth"] == {}
++        assert to_share["region"] == "eu-1"
++
++    def test_reusable_query_across_reloads(self):
++        from configlayer.query import Query
++
++        q = Query("services.*.limits.**")
++        before = q.paths(DEEP)
++        grown = {
++            "services": {
++                "api": {"limits": {"rps": 100}},
++                "worker": {"limits": {"rps": 10}},
++                "cron": {"limits": {"rps": 1}},
++            }
++        }
++        after = q.paths(grown)
++        assert before == [
++            "services.api.limits",
++            "services.worker.limits",
++        ]
++        assert after == [
++            "services.api.limits",
++            "services.worker.limits",
++            "services.cron.limits",
++        ]
++
++    def test_origin_sweep_finds_the_layer_leaking_a_secret(self):
++        from configlayer import LayeredConfig
++        from configlayer.query import select_origins
++        from configlayer.source import DictSource
++
++        stack = LayeredConfig([
++            DictSource({"api": {"key": "safe"}}, name="defaults"),
++            DictSource({"api": {"password": "oops"}}, name="dev-overlay",
++                       priority=5),
++            DictSource({"api": {"endpoint": "https://x"}}, name="prod",
++                       priority=10),
++        ])
++        found = select_origins(stack, "**.password")
++        assert [(m.path, m.origin) for m in found] == [
++            ("api.password", "dev-overlay"),
++        ]
++
++    def test_select_on_resolved_stack_equals_select_on_as_dict(self):
++        from configlayer import LayeredConfig
++        from configlayer.query import select, select_origins
++        from configlayer.source import DictSource
++
++        stack = LayeredConfig([
++            DictSource({"db": {"host": "a", "port": 1}}, name="defaults"),
++            DictSource({"db": {"host": "b"}}, name="site", priority=1),
++        ])
++        plain = select(stack.as_dict(), "db.*")
++        origin_aware = select_origins(stack, "db.*")
++        assert [m.path for m in plain] == [m.path for m in origin_aware]
++        assert [m.value for m in plain] == [m.value for m in origin_aware]
++
++
++class TestOrderStability:
++    def test_document_order_follows_the_mapping_not_the_patterns(self):
++        from configlayer.query import paths
++
++        one = paths(DEEP, ["region", "services.api.endpoint"])
++        two = paths(DEEP, ["services.api.endpoint", "region"])
++        assert one == two == ["services.api.endpoint", "region"]
++
++    def test_reordered_input_reorders_the_matches(self):
++        from configlayer.query import paths
++
++        a = {"x": {"k": 1}, "y": {"k": 2}}
++        b = {"y": {"k": 2}, "x": {"k": 1}}
++        assert paths(a, "**.k") == ["x.k", "y.k"]
++        assert paths(b, "**.k") == ["y.k", "x.k"]
++
++
++class TestRecords:
++    def test_match_dataclass_shape(self):
++        from configlayer.query import select
++
++        match = select(DEEP, "region")[0]
++        assert (match.path, match.value) == ("region", "eu-1")
++        assert match == select(DEEP, "region")[0]
+diff --git a/tests/query/test_select.py b/tests/query/test_select.py
+new file mode 100644
+index 0000000..1e004f4
+--- /dev/null
++++ b/tests/query/test_select.py
+@@ -0,0 +1,134 @@
++"""Tests for select, first, paths, values and the pattern semantics."""
++
++from __future__ import annotations
++
++import pytest
++
++from configlayer.exceptions import ConfigError
++
++CFG = {
++    "db": {
++        "host": "db.internal",
++        "port": 5432,
++        "password": "pw-db",
++        "pool": {"size": 10, "password": "pw-pool"},
++    },
++    "auth": {"token": "tok", "user": "svc"},
++    "name": "orders",
++    "replicas": ["r1", "r2"],
++}
++
++
++# ---------------------------------------------------------------------------
++# select
++# ---------------------------------------------------------------------------
++
++class TestSelect:
++    def test_literal_pattern_selects_one_leaf(self):
++        from configlayer.query import select
++
++        found = select(CFG, "db.host")
++        assert len(found) == 1
++        assert found[0].path == "db.host"
++        assert found[0].value == "db.internal"
++
++    def test_single_star_matches_exactly_one_segment(self):
++        from configlayer.query import select
++
++        found = select(CFG, "db.*")
++        assert [m.path for m in found] == [
++            "db.host", "db.port", "db.password", "db.pool",
++        ]
++
++    def test_matched_interior_mapping_is_reported_whole(self):
++        from configlayer.query import select
++
++        found = select(CFG, "db.pool")
++        assert found[0].value == {"size": 10, "password": "pw-pool"}
++
++    def test_double_star_matches_across_depths(self):
++        from configlayer.query import select
++
++        found = select(CFG, "**.password")
++        assert [m.path for m in found] == ["db.password", "db.pool.password"]
++
++    def test_outermost_match_suppresses_inner_ones(self):
++        from configlayer.query import select
++
++        # db.** also covers db itself (** may match nothing), so only
++        # the outermost node is reported.
++        found = select(CFG, "db.**")
++        assert [m.path for m in found] == ["db"]
++
++    def test_document_order_is_preserved(self):
++        from configlayer.query import select
++
++        found = select(CFG, ["auth.user", "db.host", "name"])
++        assert [m.path for m in found] == ["db.host", "auth.user", "name"]
++
++    def test_lists_are_leaves(self):
++        from configlayer.query import select
++
++        found = select(CFG, "replicas")
++        assert found[0].value == ["r1", "r2"]
++
++    def test_multiple_patterns_do_not_duplicate_nodes(self):
++        from configlayer.query import select
++
++        found = select(CFG, ["db.host", "db.*"])
++        assert [m.path for m in found] == [
++            "db.host", "db.port", "db.password", "db.pool",
++        ]
++
++    def test_no_matches_is_an_empty_list(self):
++        from configlayer.query import select
++
++        assert select(CFG, "cache.*") == []
++
++    def test_match_records_are_immutable(self):
++        from configlayer.query import select
++
++        match = select(CFG, "name")[0]
++        with pytest.raises(AttributeError):
++            match.value = "other"
++
++    def test_invalid_pattern_rejected(self):
++        from configlayer.query import select
++
++        with pytest.raises(ConfigError):
++            select(CFG, "db.ho*st")
++        with pytest.raises(ConfigError):
++            select(CFG, "")
++
++    def test_non_mapping_config_rejected(self):
++        from configlayer.query import select
++
++        with pytest.raises(ConfigError):
++            select(["a"], "x")
++
++
++# ---------------------------------------------------------------------------
++# first / paths / values
++# ---------------------------------------------------------------------------
++
++class TestConveniences:
++    def test_first_returns_document_order_winner(self):
++        from configlayer.query import first
++
++        assert first(CFG, "**.password") == "pw-db"
++
++    def test_first_default_when_nothing_matches(self):
++        from configlayer.query import first
++
++        assert first(CFG, "cache.*") is None
++        assert first(CFG, "cache.*", default=8) == 8
++
++    def test_paths(self):
++        from configlayer.query import paths
++
++        assert paths(CFG, "auth.*") == ["auth.token", "auth.user"]
++
++    def test_values(self):
++        from configlayer.query import values
++
++        assert values(CFG, "**.password") == ["pw-db", "pw-pool"]
+diff --git a/tests/query/test_transform.py b/tests/query/test_transform.py
+new file mode 100644
+index 0000000..c382788
+--- /dev/null
++++ b/tests/query/test_transform.py
+@@ -0,0 +1,163 @@
++"""Tests for pick and prune, the shape-preserving transforms."""
++
++from __future__ import annotations
++
++import pytest
++
++from configlayer.exceptions import ConfigError
++
++CFG = {
++    "db": {
++        "host": "db.internal",
++        "password": "pw-db",
++        "pool": {"size": 10, "password": "pw-pool"},
++    },
++    "auth": {"token": "tok", "user": "svc"},
++    "name": "orders",
++}
++
++SECRETS = ["**.password", "**.token"]
++
++
++class TestPick:
++    def test_pick_keeps_only_matches_with_shape(self):
++        from configlayer.query import pick
++
++        assert pick(CFG, SECRETS) == {
++            "db": {
++                "password": "pw-db",
++                "pool": {"password": "pw-pool"},
++            },
++            "auth": {"token": "tok"},
++        }
++
++    def test_pick_interior_match_brings_whole_subtree(self):
++        from configlayer.query import pick
++
++        assert pick(CFG, "db.pool") == {
++            "db": {"pool": {"size": 10, "password": "pw-pool"}}
++        }
++
++    def test_pick_preserves_key_order(self):
++        from configlayer.query import pick
++
++        result = pick(CFG, "db.*")
++        assert list(result["db"]) == ["host", "password", "pool"]
++
++    def test_pick_nothing_returns_empty_dict(self):
++        from configlayer.query import pick
++
++        assert pick(CFG, "cache.*") == {}
++
++    def test_pick_does_not_alias_the_input(self):
++        from configlayer.query import pick
++
++        result = pick(CFG, "db.pool")
++        result["db"]["pool"]["size"] = 99
++        assert CFG["db"]["pool"]["size"] == 10
++
++    def test_pick_copies_every_nested_container(self):
++        from configlayer.query import pick
++
++        source = {"db": {"pool": {"size": 10}, "hosts": ["a", "b"]}}
++        result = pick(source, "db.**")
++        assert result == source
++        assert result["db"] is not source["db"]
++        assert result["db"]["pool"] is not source["db"]["pool"]
++        assert result["db"]["hosts"] is not source["db"]["hosts"]
++
++    def test_pick_invalid_inputs_rejected(self):
++        from configlayer.query import pick
++
++        with pytest.raises(ConfigError):
++            pick("not a mapping", "x")
++        with pytest.raises(ConfigError):
++            pick(CFG, [])
++
++
++class TestPrune:
++    def test_prune_removes_matches_keeps_the_rest(self):
++        from configlayer.query import prune
++
++        assert prune(CFG, SECRETS) == {
++            "db": {
++                "host": "db.internal",
++                "pool": {"size": 10},
++            },
++            "auth": {"user": "svc"},
++            "name": "orders",
++        }
++
++    def test_prune_interior_match_drops_whole_subtree(self):
++        from configlayer.query import prune
++
++        result = prune(CFG, "db.pool")
++        assert "pool" not in result["db"]
++        assert result["db"]["host"] == "db.internal"
++
++    def test_prune_leaves_emptied_mappings_in_place(self):
++        from configlayer.query import prune
++
++        result = prune(CFG, "auth.*")
++        assert result["auth"] == {}
++
++    def test_prune_never_mutates_the_input(self):
++        from configlayer.query import prune
++
++        prune(CFG, SECRETS)
++        assert CFG["db"]["password"] == "pw-db"
++        assert CFG["auth"]["token"] == "tok"
++
++    def test_prune_result_does_not_alias_the_input(self):
++        from configlayer.query import prune
++
++        result = prune(CFG, "name")
++        result["db"]["pool"]["size"] = 99
++        assert CFG["db"]["pool"]["size"] == 10
++
++
++    def test_prune_result_survives_later_input_mutation(self):
++        from configlayer.query import prune
++
++        source = {"db": {"host": "h", "pool": {"size": 10}, "password": "x"}}
++        result = prune(source, "**.password")
++        source["db"]["pool"]["size"] = 99
++        source["db"]["host"] = "changed"
++        assert result["db"]["pool"]["size"] == 10
++        assert result["db"]["host"] == "h"
++
++    def test_prune_copies_list_values(self):
++        from configlayer.query import prune
++
++        source = {"hosts": ["a", "b"], "password": "x"}
++        result = prune(source, "password")
++        result["hosts"].append("c")
++        assert source["hosts"] == ["a", "b"]
++
++
++class TestPickPruneComplement:
++    def test_pick_and_prune_partition_the_leaves(self):
++        from configlayer.query import pick, prune
++
++        def leaves(node, prefix=""):
++            out = set()
++            for key, value in node.items():
++                path = f"{prefix}.{key}" if prefix else key
++                if isinstance(value, dict):
++                    out |= leaves(value, path)
++                else:
++                    out.add(path)
++            return out
++
++        picked = leaves(pick(CFG, SECRETS))
++        pruned = leaves(prune(CFG, SECRETS))
++        assert picked | pruned == leaves(CFG)
++        assert picked & pruned == set()
++
++    def test_secret_sweep_composes_with_export_style_use(self):
++        from configlayer.query import pick, prune
++
++        safe = prune(CFG, SECRETS)
++        secret = pick(CFG, SECRETS)
++        assert "password" not in safe["db"]
++        assert secret["db"]["password"] == "pw-db"

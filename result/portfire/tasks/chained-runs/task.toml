@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/chained-runs"
+
+[metadata]
+task_id = "chained-runs"
+display_title = "Chain fused runs fired from one output"
+display_description = "A chained clause on ripple and fan fires the whole run from one pin, with every shot still counted where shells are counted and only the head snapped to the frame clock."
+category = "feature_request"
+language = "typescript"
+repository_url = "platform://gold/repos/WpqTJpXGevrGEFj3lf8N"
+base_commit_hash = "cbfb245b02c044e160ca8346fc17ce78eb374ddc"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-portfire-wpqtjp:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

@@ -1,0 +1,270 @@
+/**
+ * The rope, and the fact that decides how deep a shaft can be wound.
+ *
+ * A rope's breaking length does not depend on its diameter at all,
+ * because doubling the diameter quadruples both the strength and the
+ * weight. So a bigger rope does not reach deeper on its own account —
+ * it reaches deeper only because it can carry a bigger conveyance, and
+ * at some depth it cannot carry any conveyance whatever.
+ */
+
+import { describe, expect, it } from "vitest";
+import {
+  CONSTRUCTIONS,
+  GRADES,
+  LAY_MASS,
+  breakingLength,
+  breakingLoad,
+  construction,
+  constructionNamed,
+  deepestEmpty,
+  describeRope,
+  diameterFor,
+  lockedCoilGain,
+  massPerMetre,
+  outerWire,
+  rope,
+  ropeMass,
+  ropeWeight,
+  steelArea,
+  wireCount,
+} from "../src/rope/construction.ts";
+import {
+  BROKEN_WIRES,
+  DEEPEST_FACTOR,
+  LEAST_RATIO,
+  SHALLOW_FACTOR,
+  WORN_DIAMETER,
+  bendingStress,
+  bigEnough,
+  condemningBreaks,
+  deepestFor,
+  diameterForDuty,
+  factorAt,
+  factorFor,
+  leastDrum,
+  lifeIn,
+  lifeInMonths,
+  mostHanging,
+  mostHangingOver,
+  ownShare,
+  ratioOf,
+  staticRopeLoad,
+  stillGood,
+  strongEnough,
+  wetShaftLife,
+  wornOut,
+  wornStrength,
+} from "../src/rope/wear.ts";
+import { weightOf } from "../src/units/measure.ts";
+import { WindingError } from "../src/errors.ts";
+
+const forty = rope(40);
+
+describe("a rope as the maker's table gives it", () => {
+  it("puts a forty millimetre 6x36 where the table puts it", () => {
+    expect(breakingLoad(forty)).toBeGreaterThan(1000);
+    expect(breakingLoad(forty)).toBeLessThan(1200);
+    expect(massPerMetre(forty)).toBeGreaterThan(5.4);
+    expect(massPerMetre(forty)).toBeLessThan(6.6);
+  });
+
+  it("carries a good deal less steel than the caliper suggests", () => {
+    expect(steelArea(forty)).toBeLessThan((Math.PI * 1600) / 4);
+    expect(steelArea(forty)).toBeGreaterThan(500);
+  });
+
+  it("goes as the square of the diameter, both ways", () => {
+    expect(breakingLoad(rope(80)) / breakingLoad(rope(40))).toBeCloseTo(4, 2);
+    expect(massPerMetre(rope(80)) / massPerMetre(rope(40))).toBeCloseTo(4, 2);
+  });
+
+  it("allows for the wires being longer than the rope", () => {
+    expect(LAY_MASS).toBeGreaterThan(1);
+    expect(LAY_MASS).toBeLessThan(1.3);
+  });
+
+  it("scales its length by weight and by pull alike", () => {
+    expect(ropeMass(forty, 100)).toBeCloseTo(massPerMetre(forty) * 100, 3);
+    expect(ropeWeight(forty, 100)).toBeCloseTo(weightOf(ropeMass(forty, 100)), 3);
+  });
+
+  it("describes itself in a line", () => {
+    expect(describeRope(forty)).toContain("breaking");
+  });
+});
+
+describe("the constructions", () => {
+  it("makes a locked coil half as strong again as a round strand", () => {
+    const gain = lockedCoilGain();
+    expect(gain).toBeGreaterThan(0.35);
+    expect(gain).toBeLessThan(0.75);
+  });
+
+  it("gives a many-wired rope much finer wires", () => {
+    expect(outerWire(rope(40, constructionNamed("6x36")))).toBeLessThan(outerWire(rope(40, constructionNamed("6x19"))));
+    expect(outerWire(rope(40, constructionNamed("6x19")))).toBeLessThan(outerWire(rope(40, constructionNamed("6x7"))));
+  });
+
+  it("and therefore much less bending on the same drum", () => {
+    expect(bendingStress(rope(40, constructionNamed("6x36")), 3.2)).toBeLessThan(
+      bendingStress(rope(40, constructionNamed("6x7")), 3.2) / 1.8,
+    );
+  });
+
+  it("counts its own wires", () => {
+    expect(wireCount(constructionNamed("6x36"))).toBe(216);
+    expect(wireCount(constructionNamed("6x7"))).toBe(42);
+  });
+
+  it("refuses one it has never heard of", () => {
+    expect(() => constructionNamed("4x9")).toThrow(/6x36/);
+  });
+
+  it("refuses a fill nothing could have", () => {
+    expect(() => construction("silly", 6, 19, 0.95, 0.86)).toThrow(WindingError);
+  });
+
+  it("refuses a grade wire is not drawn to", () => {
+    expect(() => rope(40, constructionNamed("6x36"), 1500)).toThrow(/1570/);
+    for (const each of GRADES) expect(() => rope(40, constructionNamed("6x36"), each)).not.toThrow();
+  });
+
+  it("keeps a fill and a spinning loss for every construction", () => {
+    for (const each of Object.values(CONSTRUCTIONS)) {
+      expect(each.fill).toBeGreaterThan(0.3);
+      expect(each.spinning).toBeGreaterThan(0.8);
+    }
+  });
+});
+
+describe("the breaking length", () => {
+  it("is about nineteen kilometres and does not depend on the diameter", () => {
+    expect(breakingLength(rope(25))).toBeCloseTo(breakingLength(rope(70)), -2);
+    expect(breakingLength(forty)).toBeGreaterThan(17_000);
+    expect(breakingLength(forty)).toBeLessThan(22_000);
+  });
+
+  it("comes down by the factor of safety to something a shaft could be", () => {
+    expect(deepestEmpty(forty, 8)).toBeCloseTo(breakingLength(forty) / 8, -1);
+  });
+
+  it("rises with the grade", () => {
+    expect(breakingLength(rope(40, constructionNamed("6x36"), 2160))).toBeGreaterThan(breakingLength(forty));
+  });
+});
+
+describe("the rule whose factor falls with depth", () => {
+  it("starts at eight and never goes below four and a half", () => {
+    expect(factorFor(0)).toBeCloseTo(SHALLOW_FACTOR, 3);
+    expect(factorFor(4000)).toBeCloseTo(DEEPEST_FACTOR, 3);
+    expect(factorFor(900)).toBeLessThan(factorFor(200));
+  });
+
+  it("counts the rope's own weight inside the factor", () => {
+    const hanging = weightOf(20_000);
+    expect(factorAt(forty, 900, hanging)).toBeLessThan(breakingLoad(forty) / hanging);
+    expect(staticRopeLoad(forty, 900)).toBeGreaterThan(50);
+  });
+
+  it("makes the rope most of its own load at depth", () => {
+    expect(ownShare(forty, 200, weightOf(20_000))).toBeLessThan(ownShare(forty, 1800, weightOf(20_000)));
+  });
+
+  it("says whether a rope is strong enough for its shaft", () => {
+    expect(strongEnough(rope(52), 900, weightOf(17_000))).toBe(true);
+    expect(strongEnough(rope(28), 900, weightOf(17_000))).toBe(false);
+  });
+
+  it("does not fall smoothly, and the range figure is the safe one", () => {
+    // The straight-line rule falls faster than the rope's weight rises
+    // over part of the range, so a deeper shaft is briefly allowed more.
+    expect(mostHangingOver(forty, 800, 1400)).toBeLessThanOrEqual(mostHanging(forty, 1400));
+  });
+
+  it("gives nought for a load a rope will not hang at any depth", () => {
+    expect(deepestFor(forty, weightOf(22_000))).toBe(0);
+    expect(deepestFor(rope(56), weightOf(22_000))).toBeGreaterThan(1000);
+  });
+
+  it("refuses a rope that will not carry itself", () => {
+    // The diameter is irrelevant — a six millimetre rope reaches as
+    // deep as a seventy. What runs out is the grade: a 1570 rope has a
+    // breaking length of fifteen kilometres and a factor of four and a
+    // half leaves three and a third of them.
+    expect(() => mostHanging(rope(40, constructionNamed("6x36"), 1570), 3600)).toThrow(WindingError);
+    expect(() => mostHanging(rope(6, constructionNamed("6x36"), 1570), 3600)).toThrow(WindingError);
+  });
+
+  it("finds the diameter a duty wants", () => {
+    const found = diameterForDuty(900, weightOf(22_000), constructionNamed("6x36"), 1960);
+    expect(strongEnough(rope(found), 900, weightOf(22_000))).toBe(true);
+    expect(strongEnough(rope(found - 1), 900, weightOf(22_000))).toBe(false);
+  });
+
+  it("refuses a duty no single rope will do", () => {
+    expect(() => diameterForDuty(3000, weightOf(60_000), constructionNamed("6x36"), 1960)).toThrow(WindingError);
+  });
+});
+
+describe("the drum the rope is bent round", () => {
+  it("wants eighty times its own diameter", () => {
+    expect(leastDrum(forty)).toBeCloseTo((40 * LEAST_RATIO) / 1000, 3);
+    expect(bigEnough(forty, 3.2)).toBe(true);
+    expect(bigEnough(forty, 2.4)).toBe(false);
+    expect(ratioOf(forty, 3.2)).toBeCloseTo(80, 1);
+  });
+
+  it("wants more of a locked coil rope", () => {
+    expect(leastDrum(rope(40, constructionNamed("locked")))).toBeGreaterThan(leastDrum(forty));
+  });
+
+  it("gives a high power more life for a bigger drum", () => {
+    expect(lifeIn(forty, 4.4) / lifeIn(forty, 3.2)).toBeGreaterThan(2);
+  });
+
+  it("gives less of it in a wet shaft", () => {
+    expect(wetShaftLife(forty, 4)).toBeLessThan(lifeIn(forty, 4));
+  });
+
+  it("turns a life into months at a stated rate", () => {
+    expect(lifeInMonths(400_000, 400)).toBeCloseTo(400_000 / 400 / 30.44, 2);
+  });
+
+  it("refuses a drum nothing survives", () => {
+    expect(() => lifeIn(forty, 0.5)).toThrow(WindingError);
+  });
+});
+
+describe("condemning a rope", () => {
+  it("counts a share of the wires, and never fewer than two", () => {
+    expect(condemningBreaks(forty)).toBeCloseTo(216 * BROKEN_WIRES, 0);
+    expect(condemningBreaks(rope(40, constructionNamed("6x7")))).toBe(2);
+  });
+
+  it("takes the wear on the area and not the diameter", () => {
+    const worn = wornOut(forty);
+    expect(worn).toBeCloseTo(40 * (1 - WORN_DIAMETER), 2);
+    expect(wornStrength(forty, worn) / breakingLoad(forty)).toBeCloseTo((1 - WORN_DIAMETER) ** 2, 3);
+  });
+
+  it("condemns a rope that is thin or weak, whichever comes first", () => {
+    const fifty = rope(52);
+    expect(stillGood(fifty, 52, 900, weightOf(15_000))).toBe(true);
+    expect(stillGood(fifty, 44, 900, weightOf(15_000))).toBe(false);
+  });
+
+  it("condemns on the diameter before the strength runs out", () => {
+    // A rope worn past its diameter limit comes off whether or not it
+    // would still hold: the wear is all on the outer wires, which are
+    // the ones carrying the bending as well.
+    const fifty = rope(52);
+    const thin = wornOut(fifty) - 0.5;
+    expect(wornStrength(fifty, thin) / (weightOf(8000) + staticRopeLoad(fifty, 300))).toBeGreaterThan(factorFor(300));
+    expect(stillGood(fifty, thin, 300, weightOf(8000))).toBe(false);
+  });
+
+  it("will not have a rope that has grown", () => {
+    expect(() => wornStrength(forty, 42)).toThrow(WindingError);
+  });
+});

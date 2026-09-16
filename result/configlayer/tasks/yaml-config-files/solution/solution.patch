@@ -1,0 +1,643 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7ab2da1..810a804 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,6 +3,17 @@
+ All notable changes to configlayer are documented here.
+ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+ 
++## [0.8.0] — Unreleased
++
++### Added
++- `configlayer.loader.YAMLLoader` — minimal-YAML-subset loader: block mappings
++  and block sequences nested by indentation, one-line flow collections, quoted
++  and bare scalars with `true`/`false`/`null` coercion, and comments.  Anchors,
++  aliases, tags, block scalars, multi-document streams and multi-line flow
++  collections are rejected with a `LoaderError` naming the construct.
++- `FileSource` gains a `yaml` format, auto-detected for `.yaml`/`.yml` files;
++  parse failures surface as `SourceError` with the loader error chained.
++
+ ## [0.7.0] — 2026-07-20
+ 
+ ### Added
+diff --git a/configlayer/loader/__init__.py b/configlayer/loader/__init__.py
+index 0ff5dc2..e1bb27c 100644
+--- a/configlayer/loader/__init__.py
++++ b/configlayer/loader/__init__.py
+@@ -12,6 +12,7 @@ from configlayer.loader.env_loader import EnvLoader
+ from configlayer.loader.ini_loader import INILoader
+ from configlayer.loader.json_loader import JSONLoader
+ from configlayer.loader.toml_loader import TOMLLoader
++from configlayer.loader.yaml_loader import YAMLLoader
+ from configlayer.loader.registry import (
+     detect_format,
+     get_loader,
+@@ -26,6 +27,7 @@ __all__ = [
+     "JSONLoader",
+     "INILoader",
+     "TOMLLoader",
++    "YAMLLoader",
+     "EnvLoader",
+     "detect_format",
+     "get_loader",
+diff --git a/configlayer/loader/yaml_loader.py b/configlayer/loader/yaml_loader.py
+new file mode 100644
+index 0000000..a3fa639
+--- /dev/null
++++ b/configlayer/loader/yaml_loader.py
+@@ -0,0 +1,471 @@
++"""Minimal-YAML-subset configuration loader.
++
++A hand-written parser for the slice of YAML that configuration files
++actually use: block mappings and block sequences nested by indentation,
++one-line flow collections (``[a, b]`` and ``{k: v}``), quoted and bare
++scalars, and comments.  Deliberately *out of scope* — and rejected with a
++clear LoaderError that names the construct — are anchors and aliases,
++tags, block scalars (``|`` and ``>``), multi-document streams and
++multi-line flow collections, so the grammar stays small, dependency-free
++and unambiguous.
++"""
++
++from __future__ import annotations
++
++import re
++from typing import Any
++
++from configlayer.exceptions import LoaderError
++from configlayer.loader.base import Loader
++
++# Escape sequences permitted inside a double-quoted scalar.
++_ESCAPES = {
++    '"': '"',
++    "\\": "\\",
++    "n": "\n",
++    "t": "\t",
++    "r": "\r",
++    "0": "\0",
++}
++
++# First characters that mark a construct outside the supported subset.
++_REJECTED_LEADS = {
++    "&": "anchors are not supported",
++    "*": "aliases are not supported",
++    "!": "tags are not supported",
++    "|": "block scalars are not supported",
++    ">": "block scalars are not supported",
++}
++
++
++class YAMLLoader(Loader):
++    """Loader that parses a documented subset of YAML into a nested dict.
++
++    The top level of the document must be a mapping; a document whose
++    root is a sequence or a scalar raises :class:`LoaderError`.
++
++    >>> YAMLLoader().load("db:\\n  host: localhost\\n  port: 5432\\n")
++    {'db': {'host': 'localhost', 'port': 5432}}
++    """
++
++    def load(self, text: str) -> dict[str, Any]:
++        lines = _logical_lines(text)
++        if not lines:
++            return {}
++        value, next_index = _parse_block(lines, 0, lines[0].indent)
++        if next_index != len(lines):
++            line = lines[next_index]
++            raise LoaderError(
++                f"line {line.number}: unexpected de-indented content "
++                f"after the document root"
++            )
++        if not isinstance(value, dict):
++            raise LoaderError(
++                "YAML document root must be a mapping, got "
++                f"{type(value).__name__}."
++            )
++        return value
++
++
++class _Line:
++    """One meaningful line: its indent, its content, and its 1-based number."""
++
++    __slots__ = ("indent", "text", "number")
++
++    def __init__(self, indent: int, text: str, number: int) -> None:
++        self.indent = indent
++        self.text = text
++        self.number = number
++
++
++def _logical_lines(text: str) -> list[_Line]:
++    """Split *text* into meaningful lines, dropping blanks and comments.
++
++    Raises
++    ------
++    LoaderError
++        If a tab character appears in indentation, or a document marker
++        (``---`` / ``...``) is present.
++    """
++    out: list[_Line] = []
++    for number, raw in enumerate(text.splitlines(), start=1):
++        stripped_lead = raw.lstrip(" ")
++        indent = len(raw) - len(stripped_lead)
++        if stripped_lead[:1] == "\t":
++            raise LoaderError(
++                f"line {number}: tab characters are not allowed in indentation"
++            )
++        content = _strip_comment(stripped_lead, number).rstrip()
++        if not content:
++            continue
++        if content in ("---", "...") or content.startswith("--- "):
++            raise LoaderError(
++                f"line {number}: document markers are not supported; "
++                "provide a single YAML document"
++            )
++        out.append(_Line(indent, content, number))
++    return out
++
++
++def _strip_comment(text: str, number: int) -> str:
++    """Remove a trailing ``#`` comment, honouring quoted regions."""
++    quote: str | None = None
++    i = 0
++    while i < len(text):
++        ch = text[i]
++        if quote == '"':
++            if ch == "\\":
++                i += 2
++                continue
++            if ch == '"':
++                quote = None
++        elif quote == "'":
++            if ch == "'":
++                # '' is an escaped quote inside a single-quoted scalar.
++                if i + 1 < len(text) and text[i + 1] == "'":
++                    i += 2
++                    continue
++                quote = None
++        elif ch in ('"', "'"):
++            quote = ch
++        elif ch == "#" and (i == 0 or text[i - 1] in " \t"):
++            return text[:i]
++        i += 1
++    if quote is not None:
++        raise LoaderError(f"line {number}: unterminated {quote} quoted string")
++    return text
++
++
++# ---------------------------------------------------------------------------
++# Block structure
++# ---------------------------------------------------------------------------
++
++def _parse_block(lines: list[_Line], i: int, indent: int) -> tuple[Any, int]:
++    """Parse the block starting at ``lines[i]`` whose items sit at *indent*."""
++    line = lines[i]
++    if line.indent != indent:
++        raise LoaderError(
++            f"line {line.number}: bad indentation (expected column {indent}, "
++            f"got {line.indent})"
++        )
++    if line.text == "-" or line.text.startswith("- "):
++        return _parse_sequence(lines, i, indent)
++    return _parse_mapping(lines, i, indent)
++
++
++def _parse_mapping(lines: list[_Line], i: int, indent: int) -> tuple[dict[str, Any], int]:
++    result: dict[str, Any] = {}
++    while i < len(lines):
++        line = lines[i]
++        if line.indent < indent:
++            break
++        if line.indent > indent:
++            raise LoaderError(
++                f"line {line.number}: bad indentation (expected column "
++                f"{indent}, got {line.indent})"
++            )
++        if line.text == "-" or line.text.startswith("- "):
++            raise LoaderError(
++                f"line {line.number}: sequence entry where a mapping key "
++                "was expected"
++            )
++        key, rest = _split_key(line.text, line.number)
++        if key in result:
++            raise LoaderError(
++                f"line {line.number}: duplicate mapping key {key!r}"
++            )
++        if rest:
++            result[key] = _parse_inline_value(rest, line.number)
++            i += 1
++        else:
++            value, i = _parse_child(lines, i + 1, indent)
++            result[key] = value
++    return result, i
++
++
++def _parse_sequence(lines: list[_Line], i: int, indent: int) -> tuple[list[Any], int]:
++    result: list[Any] = []
++    while i < len(lines):
++        line = lines[i]
++        if line.indent < indent:
++            break
++        if line.indent > indent:
++            raise LoaderError(
++                f"line {line.number}: bad indentation (expected column "
++                f"{indent}, got {line.indent})"
++            )
++        if not (line.text == "-" or line.text.startswith("- ")):
++            break
++        rest = line.text[1:].lstrip(" ")
++        if not rest:
++            value, i = _parse_child(lines, i + 1, indent)
++            result.append(value)
++            continue
++        if rest == "-" or rest.startswith("- "):
++            # Compact form: the dash opens a nested sequence on the same
++            # line.  Re-enter the sequence parser as if the nested entry
++            # began at the column where it actually starts.
++            column = line.indent + (len(line.text) - len(rest))
++            shifted = list(lines)
++            shifted[i] = _Line(column, rest, line.number)
++            value, i = _parse_sequence(shifted, i, column)
++            result.append(value)
++            continue
++        if _looks_like_key(rest):
++            # Compact form: the dash opens a mapping on the same line.  The
++            # column where the first key begins governs the entries below.
++            key_column = line.indent + (len(line.text) - len(rest))
++            value, i = _parse_compact_mapping(lines, i, key_column, rest)
++            result.append(value)
++            continue
++        result.append(_parse_inline_value(rest, line.number))
++        i += 1
++    return result, i
++
++
++def _parse_compact_mapping(
++    lines: list[_Line], i: int, key_column: int, first: str
++) -> tuple[dict[str, Any], int]:
++    """Parse ``- key: value`` and the aligned mapping entries below it."""
++    line = lines[i]
++    result: dict[str, Any] = {}
++    key, rest = _split_key(first, line.number)
++    if rest:
++        result[key] = _parse_inline_value(rest, line.number)
++        i += 1
++    else:
++        value, i = _parse_child(lines, i + 1, key_column)
++        result[key] = value
++    while i < len(lines) and lines[i].indent == key_column:
++        entry = lines[i]
++        if entry.text == "-" or entry.text.startswith("- "):
++            break
++        key, rest = _split_key(entry.text, entry.number)
++        if key in result:
++            raise LoaderError(
++                f"line {entry.number}: duplicate mapping key {key!r}"
++            )
++        if rest:
++            result[key] = _parse_inline_value(rest, entry.number)
++            i += 1
++        else:
++            value, i = _parse_child(lines, i + 1, key_column)
++            result[key] = value
++    return result, i
++
++
++def _parse_child(lines: list[_Line], i: int, parent_indent: int) -> tuple[Any, int]:
++    """Parse the nested block under a key or dash with no inline value."""
++    if i >= len(lines) or lines[i].indent <= parent_indent:
++        return None, i
++    return _parse_block(lines, i, lines[i].indent)
++
++
++def _looks_like_key(text: str) -> bool:
++    """Whether *text* begins a ``key:`` mapping entry rather than a scalar."""
++    try:
++        _, rest = _split_key(text, 0)
++    except LoaderError:
++        return False
++    return True
++
++
++def _split_key(text: str, number: int) -> tuple[str, str]:
++    """Split ``key: rest`` into the parsed key and the trimmed remainder.
++
++    The key may be bare (ending at the first ``:`` that is followed by a
++    space or ends the line) or quoted.  Raises LoaderError when no such
++    separator exists.
++    """
++    if text[:1] in ('"', "'"):
++        key, consumed = _read_quoted(text, 0, number)
++        rest = text[consumed:].lstrip(" ")
++        if rest[:1] != ":":
++            raise LoaderError(
++                f"line {number}: expected ':' after quoted key"
++            )
++        return key, rest[1:].lstrip(" ")
++    depth = 0
++    for i, ch in enumerate(text):
++        if ch in "[{":
++            depth += 1
++        elif ch in "]}":
++            depth -= 1
++        elif ch == ":" and depth == 0:
++            if i + 1 == len(text) or text[i + 1] == " ":
++                key = text[:i].rstrip()
++                if not key:
++                    raise LoaderError(f"line {number}: empty mapping key")
++                return key, text[i + 1 :].lstrip(" ")
++    raise LoaderError(
++        f"line {number}: expected a 'key: value' mapping entry, got {text!r}"
++    )
++
++
++# ---------------------------------------------------------------------------
++# Scalars and flow collections
++# ---------------------------------------------------------------------------
++
++def _parse_inline_value(text: str, number: int) -> Any:
++    """Parse a value that appears on the same line as its key or dash."""
++    lead = text[:1]
++    if lead in _REJECTED_LEADS:
++        raise LoaderError(f"line {number}: {_REJECTED_LEADS[lead]}")
++    if lead in "[{":
++        value, consumed = _parse_flow(text, 0, number)
++        trailing = text[consumed:].strip()
++        if trailing:
++            raise LoaderError(
++                f"line {number}: unexpected content {trailing!r} after "
++                "flow collection"
++            )
++        return value
++    if lead in ('"', "'"):
++        value, consumed = _read_quoted(text, 0, number)
++        trailing = text[consumed:].strip()
++        if trailing:
++            raise LoaderError(
++                f"line {number}: unexpected content {trailing!r} after "
++                "quoted scalar"
++            )
++        return value
++    return _coerce_scalar(text)
++
++
++def _parse_flow(text: str, i: int, number: int) -> tuple[Any, int]:
++    """Parse a flow collection starting at ``text[i]``; returns (value, end)."""
++    close = "]" if text[i] == "[" else "}"
++    is_seq = close == "]"
++    items: list[Any] = []
++    mapping: dict[str, Any] = {}
++    i += 1
++    while True:
++        i = _skip_spaces(text, i)
++        if i >= len(text):
++            kind = "sequence" if is_seq else "mapping"
++            raise LoaderError(f"line {number}: unterminated flow {kind}")
++        if text[i] == close:
++            i += 1
++            break
++        if is_seq:
++            value, i = _parse_flow_item(text, i, number)
++            items.append(value)
++        else:
++            key, i = _parse_flow_key(text, i, number)
++            i = _skip_spaces(text, i)
++            if text[i : i + 1] != ":":
++                raise LoaderError(
++                    f"line {number}: expected ':' in flow mapping"
++                )
++            i = _skip_spaces(text, i + 1)
++            value, i = _parse_flow_item(text, i, number)
++            if key in mapping:
++                raise LoaderError(
++                    f"line {number}: duplicate mapping key {key!r}"
++                )
++            mapping[key] = value
++        i = _skip_spaces(text, i)
++        if i >= len(text):
++            kind = "sequence" if is_seq else "mapping"
++            raise LoaderError(f"line {number}: unterminated flow {kind}")
++        if text[i] == ",":
++            i += 1
++            continue
++        if text[i] != close:
++            raise LoaderError(
++                f"line {number}: expected ',' or '{close}' in flow collection"
++            )
++    return (items if is_seq else mapping), i
++
++
++def _parse_flow_item(text: str, i: int, number: int) -> tuple[Any, int]:
++    ch = text[i]
++    if ch in _REJECTED_LEADS:
++        raise LoaderError(f"line {number}: {_REJECTED_LEADS[ch]}")
++    if ch in "[{":
++        return _parse_flow(text, i, number)
++    if ch in ('"', "'"):
++        return _read_quoted(text, i, number)
++    j = i
++    depth = 0
++    while j < len(text):
++        c = text[j]
++        if c in ",]}" and depth == 0:
++            break
++        j += 1
++    return _coerce_scalar(text[i:j].strip()), j
++
++
++def _parse_flow_key(text: str, i: int, number: int) -> tuple[str, int]:
++    if text[i] in ('"', "'"):
++        return _read_quoted(text, i, number)
++    j = i
++    while j < len(text) and text[j] not in ":,]}":
++        j += 1
++    key = text[i:j].strip()
++    if not key:
++        raise LoaderError(f"line {number}: empty mapping key")
++    return key, j
++
++
++def _read_quoted(text: str, i: int, number: int) -> tuple[str, int]:
++    """Read a quoted scalar starting at ``text[i]``; returns (value, end)."""
++    quote = text[i]
++    i += 1
++    out: list[str] = []
++    while i < len(text):
++        ch = text[i]
++        if quote == '"':
++            if ch == "\\":
++                esc = text[i + 1 : i + 2]
++                if esc not in _ESCAPES:
++                    raise LoaderError(
++                        f"line {number}: unknown escape sequence '\\{esc}'"
++                    )
++                out.append(_ESCAPES[esc])
++                i += 2
++                continue
++            if ch == '"':
++                return "".join(out), i + 1
++        else:
++            if ch == "'":
++                if text[i + 1 : i + 2] == "'":
++                    out.append("'")
++                    i += 2
++                    continue
++                return "".join(out), i + 1
++        out.append(ch)
++        i += 1
++    raise LoaderError(f"line {number}: unterminated {quote} quoted string")
++
++
++def _skip_spaces(text: str, i: int) -> int:
++    while i < len(text) and text[i] == " ":
++        i += 1
++    return i
++
++
++_INT_RE = re.compile(r"[-+]?\d+\Z")
++_FLOAT_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+(?=[eE]))(?:[eE][-+]?\d+)?\Z")
++
++
++def _coerce_scalar(text: str) -> Any:
++    """Coerce a bare scalar to bool, None, int, float, or leave it a str.
++
++    Only unambiguous literals coerce: ``true``/``false`` (lowercase),
++    ``null``/``~``/empty for None, plain base-10 integers, and decimal
++    floats with an optional exponent.  Anything else — including
++    ``inf``, ``nan``, and digit groups with ``_`` separators — stays a
++    string.
++    """
++    if text in ("null", "~", ""):
++        return None
++    if text == "true":
++        return True
++    if text == "false":
++        return False
++    if _INT_RE.match(text):
++        return int(text, 10)
++    if _FLOAT_RE.match(text):
++        return float(text)
++    return text
+diff --git a/configlayer/source/file_source.py b/configlayer/source/file_source.py
+index af2563a..3b72eea 100644
+--- a/configlayer/source/file_source.py
++++ b/configlayer/source/file_source.py
+@@ -1,4 +1,4 @@
+-"""File-based configuration source (JSON and dotenv formats)."""
++"""File-based configuration source (JSON, dotenv and YAML formats)."""
+ 
+ from __future__ import annotations
+ 
+@@ -7,13 +7,15 @@ import os
+ from pathlib import Path
+ from typing import Any
+ 
+-from configlayer.exceptions import SourceError
++from configlayer.exceptions import LoaderError, SourceError
+ from configlayer.source.base import ConfigSource
+ 
+ # Mapping of file extensions to format names.
+ _EXT_TO_FORMAT: dict[str, str] = {
+     ".json": "json",
+     ".env": "dotenv",
++    ".yaml": "yaml",
++    ".yml": "yaml",
+ }
+ 
+ 
+@@ -28,6 +30,11 @@ class FileSource(ConfigSource):
+         Line-oriented ``KEY=VALUE`` pairs.  Lines starting with ``#``
+         (after optional whitespace) are treated as comments and ignored.
+         Surrounding single or double quotes are stripped from values.
++    yaml
++        The YAML subset parsed by
++        :class:`~configlayer.loader.yaml_loader.YAMLLoader` (block
++        mappings and sequences, one-line flow collections, quoted and
++        bare scalars).  The document root must be a mapping.
+ 
+     Format auto-detection
+     ---------------------
+@@ -36,6 +43,7 @@ class FileSource(ConfigSource):
+ 
+     * ``.json`` → ``"json"``
+     * ``.env``  → ``"dotenv"``
++    * ``.yaml`` / ``.yml`` → ``"yaml"``
+ 
+     Parameters
+     ----------
+@@ -84,7 +92,7 @@ class FileSource(ConfigSource):
+ 
+     @property
+     def format(self) -> str:
+-        """Resolved format string (``"json"`` or ``"dotenv"``)."""
++        """Resolved format string (``"json"``, ``"dotenv"`` or ``"yaml"``)."""
+         return self._format
+ 
+     # ------------------------------------------------------------------
+@@ -122,6 +130,8 @@ class FileSource(ConfigSource):
+             return self._parse_json(content)
+         if self._format == "dotenv":
+             return self._parse_dotenv(content)
++        if self._format == "yaml":
++            return self._parse_yaml(content)
+ 
+         # Should never reach here; _resolve_format already validated.
+         raise SourceError(f"Unknown format: {self._format!r}")  # pragma: no cover
+@@ -207,6 +217,36 @@ class FileSource(ConfigSource):
+                 result[key] = value
+         return result
+ 
++    def _parse_yaml(self, content: str) -> dict[str, Any]:
++        """Parse YAML-subset content via :class:`YAMLLoader`.
++
++        Parameters
++        ----------
++        content:
++            Raw file content.
++
++        Returns
++        -------
++        dict
++            Parsed configuration mapping.
++
++        Raises
++        ------
++        SourceError
++            If the content is outside the supported YAML subset or its
++            top level is not a mapping.  The underlying
++            :class:`~configlayer.exceptions.LoaderError` is chained as
++            the cause so the parse position is not lost.
++        """
++        from configlayer.loader.yaml_loader import YAMLLoader
++
++        try:
++            return YAMLLoader().load(content)
++        except LoaderError as exc:
++            raise SourceError(
++                f"Invalid YAML in {self._path}: {exc}"
++            ) from exc
++
+     # ------------------------------------------------------------------
+     # Internal helpers
+     # ------------------------------------------------------------------
+@@ -222,7 +262,7 @@ class FileSource(ConfigSource):
+         Returns
+         -------
+         str
+-            One of ``"json"`` or ``"dotenv"``.
++            One of ``"json"``, ``"dotenv"`` or ``"yaml"``.
+ 
+         Raises
+         ------
+diff --git a/tests/source/test_file_source.py b/tests/source/test_file_source.py
+index 97ad147..853f72e 100644
+--- a/tests/source/test_file_source.py
++++ b/tests/source/test_file_source.py
+@@ -178,7 +178,7 @@ class TestFormatAutoDetect:
+         assert data["K"] == "V"
+ 
+     def test_unknown_extension_no_explicit_format_raises(self, tmp_path):
+-        p = write_file(tmp_path, "cfg.yaml", "key: value\n")
++        p = write_file(tmp_path, "cfg.xml", "<key>value</key>\n")
+         with pytest.raises(SourceError, match="auto-detect"):
+             FileSource(str(p))
+ 

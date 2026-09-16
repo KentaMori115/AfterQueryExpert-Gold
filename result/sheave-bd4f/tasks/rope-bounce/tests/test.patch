@@ -1,0 +1,770 @@
+diff --git a/test/pit/hanging-rope.test.ts b/test/pit/hanging-rope.test.ts
+new file mode 100644
+index 0000000..acef3e5
+--- /dev/null
++++ b/test/pit/hanging-rope.test.ts
+@@ -0,0 +1,200 @@
++/**
++ * A rope hanging in a shaft, taken as a spring.
++ *
++ * Everything here is about one length of rope with one load on the end
++ * of it, and about the two things that follow from a rope being elastic
++ * at all: it stretches, by rather more than anybody expects at depth,
++ * and it has a period of its own.
++ *
++ * The figures are checked against each other rather than against a
++ * table, because the arithmetic is not in doubt and the places it is
++ * rounded to are nobody's business. What is in doubt is which mass goes
++ * into which formula, and every case here is arranged so that a wrong
++ * answer to that shows up as a wrong number somewhere.
++ */
++
++import { describe, expect, it } from "vitest";
++import { hang, springRate, wholeStretch, bounceMass, bouncePeriod } from "../../src/rope/index.ts";
++import { constructionNamed, massPerMetre, rope, steelArea } from "../../src/rope/construction.ts";
++import { YOUNGS } from "../../src/rope/wear.ts";
++import { weightOf } from "../../src/units/measure.ts";
++
++const winding = rope(52, constructionNamed("6x36"), 1960);
++const locked = rope(52, constructionNamed("locked"), 1960);
++const deep = hang({ rope: winding, length: 984, ropes: 1, carried: 17_040, balance: 0 });
++
++function ownMass(one: ReturnType<typeof hang>): number {
++  return massPerMetre(one.rope) * one.ropes * one.length;
++}
++
++describe("how stiff a hanging rope is", () => {
++  it("is the steel in it over the length of it", () => {
++    const wanted = (0.55 * YOUNGS * steelArea(winding)) / (1000 * 984);
++    expect(springRate(deep)).toBeCloseTo(wanted, 2);
++  });
++
++  it("softens in proportion as the rope gets longer", () => {
++    const half = hang({ ...deep, length: 492 });
++    expect(springRate(half)).toBeCloseTo(2 * springRate(deep), 2);
++  });
++
++  it("adds up over the ropes of a set, four being four springs side by side", () => {
++    const four = hang({ ...deep, ropes: 4 });
++    expect(springRate(four)).toBeCloseTo(4 * springRate(deep), 2);
++  });
++
++  it("takes no notice of what is hanging on it", () => {
++    const heavier = hang({ ...deep, carried: 40_000, balance: 9_000 });
++    expect(springRate(heavier)).toBeCloseTo(springRate(deep), 4);
++  });
++
++  it("is stiffer where the wires are locked than where they are laid", () => {
++    const one = hang({ ...deep, rope: locked });
++    expect(springRate(one)).toBeGreaterThan(springRate(deep));
++  });
++
++  it("keeps three quarters of the steel's modulus in a locked coil rope", () => {
++    const one = hang({ ...deep, rope: locked });
++    const wanted = (0.75 * YOUNGS * steelArea(locked)) / (1000 * 984);
++    expect(springRate(one)).toBeCloseTo(wanted, 2);
++  });
++
++});
++
++describe("how far it stretches", () => {
++  it("gives way under what hangs on it and under half its own weight", () => {
++    const wanted = (weightOf(deep.carried) + weightOf(ownMass(deep)) / 2) / springRate(deep);
++    expect(wholeStretch(deep)).toBeCloseTo(wanted, 3);
++  });
++
++  it("comes to better than a metre on a deep winder", () => {
++    expect(wholeStretch(deep)).toBeGreaterThan(1);
++    expect(wholeStretch(deep)).toBeLessThan(3);
++  });
++
++  it("counts a balance rope as something hanging on it", () => {
++    const balanced = hang({ ...deep, balance: 9_363 });
++    const wanted = (weightOf(deep.carried + 9_363) + weightOf(ownMass(deep)) / 2) / springRate(deep);
++    expect(wholeStretch(balanced)).toBeCloseTo(wanted, 3);
++    expect(wholeStretch(balanced)).toBeGreaterThan(wholeStretch(deep));
++  });
++
++  it("stretches twice as far under twice the load", () => {
++    const heavier = hang({ ...deep, carried: 34_080 });
++    const own = weightOf(ownMass(deep)) / 2 / springRate(deep);
++    expect(wholeStretch(heavier) - own).toBeCloseTo(2 * (wholeStretch(deep) - own), 3);
++  });
++
++  it("counts its own weight at half, the top of it carrying all and the bottom none", () => {
++    const bare = hang({ ...deep, carried: 1 });
++    const asIfHung = weightOf(ownMass(deep)) / springRate(deep);
++    expect(wholeStretch(bare)).toBeLessThan(asIfHung);
++    expect(wholeStretch(bare)).toBeCloseTo(asIfHung / 2, 2);
++  });
++});
++
++describe("what actually swings on the end of the spring", () => {
++  it("is the conveyance, the whole balance rope, and a third of the winding rope", () => {
++    const balanced = hang({ ...deep, balance: 9_363 });
++    expect(bounceMass(balanced)).toBeCloseTo(17_040 + 9_363 + ownMass(deep) / 3, 2);
++  });
++
++  it("counts a third of the winding rope and not the whole of it", () => {
++    expect(bounceMass(deep)).toBeLessThan(17_040 + ownMass(deep));
++    expect(bounceMass(deep)).toBeCloseTo(17_040 + ownMass(deep) / 3, 2);
++  });
++
++  it("counts the whole of a balance rope and not a third of it", () => {
++    const balanced = hang({ ...deep, balance: 9_000 });
++    expect(bounceMass(balanced) - bounceMass(deep)).toBeCloseTo(9_000, 2);
++  });
++
++  it("counts every rope of a set", () => {
++    const four = hang({ ...deep, ropes: 4 });
++    expect(bounceMass(four)).toBeCloseTo(17_040 + (4 * ownMass(deep)) / 3, 2);
++  });
++
++  it("gets lighter as an unbalanced conveyance rises", () => {
++    const low = hang({ ...deep, length: 984 });
++    const high = hang({ ...deep, length: 42 });
++    expect(bounceMass(high)).toBeLessThan(bounceMass(low));
++  });
++
++  it("gets heavier as a balanced one rises, which is the other way about", () => {
++    const low = hang({ ...deep, length: 984, balance: 0 });
++    const high = hang({ ...deep, length: 42, balance: 9.94 * 942 });
++    expect(bounceMass(high)).toBeGreaterThan(bounceMass(low));
++  });
++});
++
++describe("the period it bounces at", () => {
++  it("is that mass on that spring and nothing else", () => {
++    const wanted = 2 * Math.PI * Math.sqrt(bounceMass(deep) / (springRate(deep) * 1000));
++    expect(bouncePeriod(deep)).toBeCloseTo(wanted, 3);
++  });
++
++  it("is a few seconds on a deep winder, slow enough to watch", () => {
++    expect(bouncePeriod(deep)).toBeGreaterThan(1.5);
++    expect(bouncePeriod(deep)).toBeLessThan(6);
++  });
++
++  it("shortens as the conveyance rises and the spring hardens", () => {
++    const high = hang({ ...deep, length: 42 });
++    expect(bouncePeriod(high)).toBeLessThan(bouncePeriod(deep));
++  });
++
++  it("is longer on a balanced winder than on the same one without the balance rope", () => {
++    const balanced = hang({ ...deep, balance: 9_363 });
++    expect(bouncePeriod(balanced)).toBeGreaterThan(bouncePeriod(deep));
++  });
++
++  it("is shorter on a locked coil rope, which gives less", () => {
++    const one = hang({ ...deep, rope: locked });
++    expect(bouncePeriod(one)).toBeLessThan(bouncePeriod(deep));
++  });
++});
++
++describe("a set of ropes pulling together", () => {
++  it("stretches the same under its own weight as one rope does", () => {
++    const four = hang({ ...deep, ropes: 4 });
++    const own = weightOf(ownMass(deep)) / 2 / springRate(deep);
++    const ownOfFour = weightOf(ownMass(four)) / 2 / springRate(four);
++    expect(ownOfFour).toBeCloseTo(own, 4);
++  });
++
++  it("stretches a quarter as far under the load it carries", () => {
++    const four = hang({ ...deep, ropes: 4 });
++    const oneOwn = weightOf(ownMass(deep)) / 2 / springRate(deep);
++    const fourOwn = weightOf(ownMass(four)) / 2 / springRate(four);
++    expect(wholeStretch(four) - fourOwn).toBeCloseTo((wholeStretch(deep) - oneOwn) / 4, 4);
++  });
++
++  it("swings more mass and yet bounces quicker, the spring having hardened more", () => {
++    const four = hang({ ...deep, ropes: 4 });
++    expect(bounceMass(four)).toBeGreaterThan(bounceMass(deep));
++    expect(bouncePeriod(four)).toBeLessThan(bouncePeriod(deep));
++  });
++});
++
++describe("the two ends of one shaft", () => {
++  const bottom = hang({ rope: winding, length: 984, ropes: 1, carried: 17_040, balance: 0 });
++  const bank = hang({ rope: winding, length: 42, ropes: 1, carried: 17_040, balance: 9.94 * 942 });
++
++  it("hangs near enough the same weight at both, which is what a balance rope is for", () => {
++    const low = weightOf(bottom.carried + bottom.balance + ownMass(bottom));
++    const high = weightOf(bank.carried + bank.balance + ownMass(bank));
++    expect(Math.abs(high - low) / low).toBeLessThan(0.01);
++  });
++
++  it("swings a good deal more at the bank than at the pit bottom", () => {
++    expect(bounceMass(bank)).toBeGreaterThan(bounceMass(bottom));
++  });
++
++  it("bounces faster at the bank all the same, the spring having hardened more", () => {
++    expect(bouncePeriod(bank)).toBeLessThan(bouncePeriod(bottom));
++  });
++
++  it("has next to no stretch left in it at the bank", () => {
++    expect(wholeStretch(bank)).toBeLessThan(wholeStretch(bottom) / 10);
++  });
++});
+diff --git a/test/pit/signing-off.test.ts b/test/pit/signing-off.test.ts
+new file mode 100644
+index 0000000..68ac86c
+--- /dev/null
++++ b/test/pit/signing-off.test.ts
+@@ -0,0 +1,237 @@
++/**
++ * The stop as it reaches a sheet somebody signs.
++ *
++ * A figure nobody reads is not a check. The design sheet has to carry
++ * the stop beside every other figure the installation is signed off
++ * against, ranked with them and against a band that can be moved; the
++ * audit has to say so in the rope's own part, where a winding engineer
++ * would look for it; and the command line has to answer for it.
++ *
++ * The certificate used to break it is Bolsover with a heavier balance
++ * rope than it was built with. That is chosen on purpose: the static
++ * factor of safety takes no notice of a balance rope at all, so the
++ * installation still passes the figure the rules ask for and fails the
++ * stop. A check that only repeated the static one would not notice.
++ */
++
++import { describe, expect, it } from "vitest";
++import { readFileSync } from "node:fs";
++import { parseWinder } from "../../src/winder/parse.ts";
++import { bands, checks, failed, room } from "../../src/design/checks.ts";
++import { ropeFindings } from "../../src/winder/audit.ts";
++import { ropeStrongEnough, winder, worstShock } from "../../src/winder/model.ts";
++import { DEEPEST_FACTOR } from "../../src/rope/wear.ts";
++import { commandNamed, commands, run, usage } from "../../src/cli/main.ts";
++
++const bolsover = parseWinder(readFileSync("examples/bolsover.winder", "utf8"));
++const whealJane = parseWinder(readFileSync("examples/wheal-jane.winder", "utf8"));
++const overBalanced = winder({ ...bolsover, balance: 20 });
++
++/**
++ * The figures a sheet carries about one thing, in the order they appear.
++ *
++ * Read by what a line is about and what unit the number is in, never by where
++ * it sits, so any layout of the same answers reads the same. Two runs of one
++ * command lay their sheet out alike, which is what lets the two lists be
++ * compared position by position.
++ */
++const NUMBER = /-?\d+(?:,\d{3})*(?:\.\d+)?/g;
++
++function figures(lines: readonly string[], word: string, unit: string): number[] {
++  const wanted = unit === "" ? undefined : new RegExp(`^\\s*${unit}(?![A-Za-z/])`);
++  const out: number[] = [];
++  for (const line of lines) {
++    if (!line.toLowerCase().includes(word)) continue;
++    for (const found of line.matchAll(NUMBER)) {
++      const after = line.slice((found.index ?? 0) + found[0].length);
++      const carries = wanted === undefined ? !/^\s*[A-Za-z%\u00b0]/.test(after) : wanted.test(after);
++      if (!carries) continue;
++      const value = Number(found[0].replace(/,/g, ""));
++      if (Number.isFinite(value)) out.push(value);
++    }
++  }
++  return out;
++}
++
++/**
++ * The sheet for a rope of a stated length.
++ *
++ * The request names the option and not how a length is written on it, so both
++ * readings are tried: the unit the rest of the program insists on, and a bare
++ * number. Whichever the build takes is the one read.
++ */
++function sheet(metres: number): string[] {
++  for (const written of [`${metres}m`, String(metres)]) {
++    const found = run(["bounce", "--length", written]);
++    if (found.code === 0) return found.lines;
++  }
++  expect.unreachable(`bounce would not answer for a ${metres} m rope`);
++  return [];
++}
++
++/** Whether every figure held or grew, and at least one grew. */
++function rose(from: readonly number[], to: readonly number[]): boolean {
++  if (from.length === 0 || from.length !== to.length) return false;
++  let moved = false;
++  for (let at = 0; at < from.length; at += 1) {
++    const before = from[at] as number;
++    const after = to[at] as number;
++    if (after < before) return false;
++    if (after > before) moved = true;
++  }
++  return moved;
++}
++
++function named(one: ReturnType<typeof checks>, name: string) {
++  const found = one.find((each) => each.name === name);
++  expect(found, name).toBeDefined();
++  return found as NonNullable<typeof found>;
++}
++
++describe("the stop on the design sheet", () => {
++  it("is one of the figures an installation is signed off against", () => {
++    expect(checks(bolsover).map((each) => each.name)).toContain("stop");
++  });
++
++  it("carries the factor found at the worst point of the wind", () => {
++    expect(named(checks(bolsover), "stop").found).toBeCloseTo(worstShock(bolsover).factor, 3);
++  });
++
++  it("is banded below at the floor no rope is put on beneath", () => {
++    const one = named(checks(bolsover), "stop");
++    expect(one.low).toBe(DEEPEST_FACTOR);
++    expect(bands().stop).toBe(DEEPEST_FACTOR);
++  });
++
++  it("is not banded above, a rope being allowed to be as strong as it likes", () => {
++    expect(named(checks(bolsover), "stop").high).toBeUndefined();
++  });
++
++  it("is met on all three certificates that come with the library", () => {
++    for (const one of [bolsover, whealJane]) expect(named(checks(one), "stop").met).toBe(true);
++  });
++
++  it("leaves Bolsover passing every check it passed before", () => {
++    expect(named(checks(bolsover), "stop").met).toBe(true);
++    expect(failed(checks(bolsover))).toHaveLength(0);
++  });
++
++  it("takes a band the caller moves, like every other check here", () => {
++    const strict = bands({ stop: 12 });
++    expect(named(checks(bolsover, strict), "stop").met).toBe(false);
++    expect(named(checks(bolsover, strict), "stop").low).toBe(12);
++  });
++
++  it("catches a winder that keeps its static factor and loses the stop", () => {
++    expect(ropeStrongEnough(overBalanced)).toBe(true);
++    expect(named(checks(overBalanced), "factor").met).toBe(true);
++    expect(named(checks(overBalanced), "stop").met).toBe(false);
++  });
++
++  it("counts that one among the checks it missed", () => {
++    expect(failed(checks(overBalanced)).map((each) => each.name)).toContain("stop");
++  });
++});
++
++describe("the stop in the audit", () => {
++  it("says nothing severe about a rope that stands its own brake", () => {
++    for (const one of [bolsover, whealJane]) {
++      expect(worstShock(one).factor).toBeGreaterThan(DEEPEST_FACTOR);
++      expect(ropeFindings(one).filter((each) => each.severity === "error")).toHaveLength(0);
++    }
++  });
++
++  it("raises one against a rope that does not", () => {
++    const raised = ropeFindings(overBalanced).filter((each) => each.severity === "error");
++    expect(raised.length).toBeGreaterThanOrEqual(1);
++  });
++
++  it("puts it in the rope's part of the sheet", () => {
++    const raised = ropeFindings(overBalanced).filter((each) => each.severity === "error");
++    expect(raised.length).toBeGreaterThanOrEqual(1);
++    for (const each of ropeFindings(overBalanced)) expect(each.part).toBe("rope");
++  });
++
++  it("never throws on an installation that cannot work", () => {
++    expect(() => ropeFindings(overBalanced)).not.toThrow();
++    expect(ropeFindings(overBalanced).some((each) => each.severity === "error")).toBe(true);
++  });
++});
++
++describe("the command line", () => {
++  it("has a command for it", () => {
++    expect(commands().map((each) => each.name)).toContain("bounce");
++  });
++
++  it("says what it does, on the same sheet as the rest", () => {
++    expect(commandNamed("bounce").says.length).toBeGreaterThan(20);
++    expect(usage().join(" ")).toContain("bounce");
++  });
++
++  it("runs with nothing asked of it", () => {
++    const found = run(["bounce"]);
++    expect(found.code).toBe(0);
++    expect(found.lines.length).toBeGreaterThan(5);
++  });
++
++  it("says the stretch, the period and the factor a stop leaves", () => {
++    const said = sheet(984).join("\n").toLowerCase();
++    expect(said).toContain("stretch");
++    expect(said).toContain("period");
++    expect(said).toContain("factor");
++  });
++
++  it("gives a longer rope more stretch and a slower bounce", () => {
++    const shallow = sheet(120);
++    const deep = sheet(1200);
++    expect(rose(figures(shallow, "stretch", "m"), figures(deep, "stretch", "m"))).toBe(true);
++    expect(rose(figures(shallow, "period", "s"), figures(deep, "period", "s"))).toBe(true);
++  });
++
++  it("and less of a factor left when that longer rope is stopped", () => {
++    expect(rose(figures(sheet(1200), "factor", ""), figures(sheet(120), "factor", ""))).toBe(true);
++  });
++
++  it("refuses an option it does not take, as every command here does", () => {
++    const found = run(["bounce", "--nonsense", "1"]);
++    expect(found.code).toBe(1);
++    expect(found.lines.join(" ")).toContain("nonsense");
++  });
++
++  it("says the same thing twice running, reading no clock of its own", () => {
++    const once = run(["bounce"]);
++    const again = run(["bounce"]);
++    expect(once.code).toBe(0);
++    expect(again.code).toBe(0);
++    expect(once.lines).toEqual(again.lines);
++  });
++
++});
++
++describe("the stop beside the other figures", () => {
++  it("is ranked with them rather than kept apart", () => {
++    const found = named(checks(bolsover), "stop");
++    expect(room(found)).toBeGreaterThan(0);
++    expect(room(found)).toBeLessThanOrEqual(1);
++  });
++
++  it("has no room at all on a winder that misses it", () => {
++    expect(room(named(checks(overBalanced), "stop"))).toBe(0);
++  });
++
++  it("moves with the band it is judged against", () => {
++    const slack = bands({ stop: 2 });
++    const tight = bands({ stop: 4.4 });
++    expect(room(named(checks(bolsover, slack), "stop"))).toBeGreaterThan(
++      room(named(checks(bolsover, tight), "stop")),
++    );
++  });
++
++  it("leaves every other band where it was", () => {
++    const moved = bands({ stop: 6 });
++    expect(moved.stop).toBe(6);
++    expect(moved.ratio).toBe(bands().ratio);
++    expect(moved.fleet).toBe(bands().fleet);
++    expect(moved.dead).toBe(bands().dead);
++  });
++});
+diff --git a/test/pit/stopped-wind.test.ts b/test/pit/stopped-wind.test.ts
+new file mode 100644
+index 0000000..bf22a5d
+--- /dev/null
++++ b/test/pit/stopped-wind.test.ts
+@@ -0,0 +1,154 @@
++/**
++ * A wind that is stopped, and what the rope makes of it.
++ *
++ * The arithmetic is short and the trap in it is not. A retardation put
++ * on the drum does not raise the rope's tension by mass times
++ * retardation; it raises it by that and then the conveyance swings past
++ * by as much again, and the rope carries the sum. Which way that lands
++ * depends on which way the conveyance was going, and the case that
++ * breaks ropes is the one where it was going down.
++ *
++ * The mass that matters here is the swinging one and not everything
++ * hanging in the shaft, so every case below is arranged to fail if the
++ * two are confused.
++ */
++
++import { describe, expect, it } from "vitest";
++import { hang, bounceMass, goesSlack, leastPull, peakPull, shockFactor } from "../../src/rope/index.ts";
++import { breakingLoad, constructionNamed, massPerMetre, rope } from "../../src/rope/construction.ts";
++import { weightOf } from "../../src/units/measure.ts";
++import { ARRESTOR, EMERGENCY_BRAKE } from "../../src/safety/gear.ts";
++
++const winding = rope(52, constructionNamed("6x36"), 1960);
++const deep = hang({ rope: winding, length: 984, ropes: 1, carried: 17_040, balance: 0 });
++const balanced = hang({ rope: winding, length: 42, ropes: 1, carried: 17_040, balance: 9_363 });
++const set = hang({ rope: rope(42, constructionNamed("6x36"), 1960), length: 1145, ropes: 4, carried: 28_400, balance: 0 });
++
++function hanging(one: ReturnType<typeof hang>): number {
++  return weightOf(one.carried + one.balance + massPerMetre(one.rope) * one.ropes * one.length);
++}
++
++describe("what a rising conveyance leaves in the rope when it is stopped", () => {
++  it("is what already hung there, plus twice what the retardation asks", () => {
++    const wanted = hanging(deep) + (2 * bounceMass(deep) * EMERGENCY_BRAKE) / 1000;
++    expect(peakPull(deep, EMERGENCY_BRAKE)).toBeCloseTo(wanted, 2);
++  });
++
++  it("doubles what a gentle load of the same size would do", () => {
++    const gently = (bounceMass(deep) * EMERGENCY_BRAKE) / 1000;
++    expect(peakPull(deep, EMERGENCY_BRAKE) - hanging(deep)).toBeCloseTo(2 * gently, 2);
++  });
++
++  it("grows in step with the retardation", () => {
++    const once = peakPull(deep, 1) - hanging(deep);
++    const thrice = peakPull(deep, 3) - hanging(deep);
++    expect(thrice).toBeCloseTo(3 * once, 2);
++  });
++
++  it("counts the swinging mass and not the whole rope hanging in the shaft", () => {
++    const everything = hanging(deep) + (2 * (deep.carried + massPerMetre(winding) * deep.length) * EMERGENCY_BRAKE) / 1000;
++    expect(peakPull(deep, EMERGENCY_BRAKE)).toBeLessThan(everything);
++  });
++
++  it("counts every rope of a set in what is being retarded", () => {
++    const wanted = hanging(set) + (2 * bounceMass(set) * EMERGENCY_BRAKE) / 1000;
++    expect(peakPull(set, EMERGENCY_BRAKE)).toBeCloseTo(wanted, 2);
++  });
++});
++
++describe("what a falling one leaves in it", () => {
++  it("is the same arithmetic taken off instead of put on", () => {
++    const wanted = hanging(deep) - (2 * bounceMass(deep) * EMERGENCY_BRAKE) / 1000;
++    expect(leastPull(deep, EMERGENCY_BRAKE)).toBeCloseTo(wanted, 2);
++  });
++
++  it("is less than what hung there, because holding it back means pulling less", () => {
++    expect(leastPull(deep, EMERGENCY_BRAKE)).toBeLessThan(hanging(deep));
++  });
++
++  it("is left alone by the emergency brake on an ordinary deep winder", () => {
++    expect(leastPull(deep, EMERGENCY_BRAKE)).toBeGreaterThan(0);
++    expect(goesSlack(deep, EMERGENCY_BRAKE)).toBe(false);
++  });
++
++  it("goes past nothing when the arrestor gear takes it instead", () => {
++    expect(leastPull(deep, ARRESTOR)).toBeLessThan(0);
++    expect(goesSlack(deep, ARRESTOR)).toBe(true);
++  });
++
++  it("stands a harder stop where most of what hangs is the rope's own weight", () => {
++    expect(goesSlack(balanced, 5.5)).toBe(true);
++    expect(goesSlack(deep, 5.5)).toBe(false);
++  });
++
++  it("never goes slack below half of gravity, whatever is on the end of it", () => {
++    for (const one of [deep, balanced, set]) {
++      expect(goesSlack(one, 4.9)).toBe(false);
++    }
++  });
++});
++
++describe("the factor of safety a stop leaves", () => {
++  it("is the breaking load of the whole set over what the rope then carries", () => {
++    expect(shockFactor(deep, EMERGENCY_BRAKE)).toBeCloseTo(breakingLoad(winding) / peakPull(deep, EMERGENCY_BRAKE), 3);
++  });
++
++  it("counts all four ropes of a set as strength", () => {
++    expect(shockFactor(set, EMERGENCY_BRAKE)).toBeCloseTo(
++      (4 * breakingLoad(set.rope)) / peakPull(set, EMERGENCY_BRAKE),
++      3,
++    );
++  });
++
++  it("falls as the brake is set harder", () => {
++    expect(shockFactor(deep, 4)).toBeLessThan(shockFactor(deep, 2));
++  });
++
++  it("leaves an ordinary deep winder above four and a half on the emergency brake", () => {
++    expect(shockFactor(deep, EMERGENCY_BRAKE)).toBeGreaterThan(4.5);
++  });
++
++  it("takes it well below that on the arrestor gear", () => {
++    expect(shockFactor(deep, ARRESTOR)).toBeLessThan(4.5);
++  });
++
++  it("is worse on a balanced winder near the bank than on a bare rope there", () => {
++    const bare = hang({ ...balanced, balance: 0 });
++    expect(shockFactor(balanced, EMERGENCY_BRAKE)).toBeLessThan(shockFactor(bare, EMERGENCY_BRAKE));
++  });
++
++  it("counts a balance rope in what hangs and in what swings alike", () => {
++    const withRope = hang({ ...deep, balance: 9_000 });
++    const wanted = peakPull(deep, EMERGENCY_BRAKE) + weightOf(9_000) + (2 * 9_000 * EMERGENCY_BRAKE) / 1000;
++    expect(peakPull(withRope, EMERGENCY_BRAKE)).toBeCloseTo(wanted, 2);
++  });
++});
++
++describe("the stop taken across a range of brakes", () => {
++  it("puts nothing extra in at no retardation at all", () => {
++    expect(peakPull(deep, 0.0001)).toBeCloseTo(hanging(deep), 2);
++    expect(leastPull(deep, 0.0001)).toBeCloseTo(hanging(deep), 2);
++  });
++
++  it("rises without a break as the brake is set harder", () => {
++    let last = 0;
++    for (const at of [0.5, 1, 2, 2.5, 4, 6, 9.81]) {
++      const found = peakPull(deep, at);
++      expect(found).toBeGreaterThan(last);
++      last = found;
++    }
++  });
++
++  it("straddles what already hung there, whatever the brake is set to", () => {
++    for (const at of [0.5, 2.5, 6]) {
++      const middle = (peakPull(deep, at) + leastPull(deep, at)) / 2;
++      expect(middle).toBeCloseTo(hanging(deep), 2);
++    }
++  });
++
++  it("keeps a hang whose rope is nearly all of what hangs on the safe side longer", () => {
++    const bare = hang({ rope: winding, length: 2400, ropes: 1, carried: 500, balance: 0 });
++    expect(goesSlack(bare, 6)).toBe(false);
++    expect(goesSlack(balanced, 6)).toBe(true);
++  });
++});
+diff --git a/test/pit/three-collieries.test.ts b/test/pit/three-collieries.test.ts
+new file mode 100644
+index 0000000..f07e733
+--- /dev/null
++++ b/test/pit/three-collieries.test.ts
+@@ -0,0 +1,155 @@
++/**
++ * The three certificates that come with the library, read as springs.
++ *
++ * Bolsover is deep and carries a balance rope; Wheal Jane is shallow and
++ * carries none; Zollverein is deep, balanced, and hangs on four ropes.
++ * Between them they cover the thing worth knowing about a stopped wind,
++ * which is that the worst place in the shaft to be stopped is not the
++ * same place on all three.
++ *
++ * A conveyance rising pays the winding rope onto the drum and pays the
++ * balance rope out under itself. What hangs on the rope hardly changes
++ * across a wind, which is what a balance rope is for. What has to be
++ * retarded changes a great deal, because the whole of the balance rope
++ * swings and only a third of the winding rope does.
++ */
++
++import { describe, expect, it } from "vitest";
++import { readFileSync } from "node:fs";
++import { parseWinder } from "../../src/winder/parse.ts";
++import { hangAt, ropeWanted, windLength, worstShock } from "../../src/winder/model.ts";
++import { bounceMass, shockFactor, springRate } from "../../src/rope/index.ts";
++import { massPerMetre } from "../../src/rope/construction.ts";
++import { gross } from "../../src/cage/index.ts";
++import { weightOf } from "../../src/units/measure.ts";
++import type { Winder } from "../../src/winder/model.ts";
++import { EMERGENCY_BRAKE } from "../../src/safety/gear.ts";
++
++const bolsover = parseWinder(readFileSync("examples/bolsover.winder", "utf8"));
++const whealJane = parseWinder(readFileSync("examples/wheal-jane.winder", "utf8"));
++const zollverein = parseWinder(readFileSync("examples/zollverein.winder", "utf8"));
++
++function hangingAt(one: Winder, up: number): number {
++  const there = hangAt(one, up);
++  return weightOf(there.carried + there.balance + massPerMetre(one.rope) * one.ropes * there.length);
++}
++
++describe("the rope hanging at a point in the wind", () => {
++  it("reaches from the sheave and not from the bank", () => {
++    expect(hangAt(bolsover, 0).length).toBeCloseTo(ropeWanted(bolsover), 3);
++    expect(hangAt(bolsover, 0).length).toBeGreaterThan(windLength(bolsover));
++  });
++
++  it("shortens by every metre the conveyance has risen", () => {
++    expect(hangAt(bolsover, 400).length).toBeCloseTo(ropeWanted(bolsover) - 400, 3);
++  });
++
++  it("leaves the headgear's worth of rope with the conveyance at the bank", () => {
++    expect(hangAt(bolsover, windLength(bolsover)).length).toBeCloseTo(bolsover.shaft.headgear, 3);
++    expect(hangAt(bolsover, windLength(bolsover)).length).toBeGreaterThan(0);
++  });
++
++  it("carries a balance rope as long as the conveyance is high", () => {
++    expect(hangAt(bolsover, 0).balance).toBeCloseTo(0, 6);
++    expect(hangAt(bolsover, 500).balance).toBeCloseTo(bolsover.balance * 500, 3);
++    expect(hangAt(bolsover, windLength(bolsover)).balance).toBeCloseTo(bolsover.balance * windLength(bolsover), 3);
++  });
++
++  it("carries none at all where the certificate names none", () => {
++    expect(whealJane.balance).toBe(0);
++    for (const up of [0, 100, 380]) expect(hangAt(whealJane, up).balance).toBe(0);
++  });
++
++  it("carries the rising conveyance loaded", () => {
++    expect(hangAt(bolsover, 0).carried).toBeCloseTo(gross(bolsover.rising), 3);
++  });
++
++  it("is the two ends of one rope, hard at the bank and soft at the bottom", () => {
++    const bottom = hangAt(bolsover, 0);
++    const bank = hangAt(bolsover, windLength(bolsover));
++    expect(bank.length).toBeLessThan(bottom.length);
++    expect(springRate(bank)).toBeGreaterThan(springRate(bottom));
++  });
++});
++
++describe("what a balance rope does to the swinging mass", () => {
++  it("leaves what hangs on the rope near enough alone across a wind", () => {
++    const low = hangingAt(bolsover, 0);
++    const high = hangingAt(bolsover, windLength(bolsover));
++    expect(Math.abs(high - low) / low).toBeLessThan(0.01);
++  });
++
++  it("makes the mass to be retarded grow as the conveyance rises", () => {
++    const low = bounceMass(hangAt(bolsover, 0));
++    const high = bounceMass(hangAt(bolsover, windLength(bolsover)));
++    expect(high).toBeGreaterThan(low);
++  });
++
++  it("lets it fall instead where there is no balance rope", () => {
++    const low = bounceMass(hangAt(whealJane, 0));
++    const high = bounceMass(hangAt(whealJane, windLength(whealJane)));
++    expect(high).toBeLessThan(low);
++  });
++
++  it("adds every metre of itself and a third of every metre wound up", () => {
++    const up = 600;
++    const one = hangAt(bolsover, up);
++    const own = massPerMetre(bolsover.rope) * bolsover.ropes * one.length;
++    expect(bounceMass(one)).toBeCloseTo(one.carried + bolsover.balance * up + own / 3, 2);
++  });
++});
++
++describe("where in a wind an emergency stop is worst", () => {
++  it("is at the bank on a balanced winder, where the balance rope is all hanging", () => {
++    expect(worstShock(bolsover).up).toBeGreaterThan(windLength(bolsover) - 1);
++    expect(worstShock(bolsover).up).toBeLessThanOrEqual(windLength(bolsover));
++  });
++
++  it("is at the pit bottom on one with no balance rope, where the winding rope is", () => {
++    expect(worstShock(whealJane).up).toBeLessThan(1);
++    expect(worstShock(whealJane).up).toBeGreaterThanOrEqual(0);
++  });
++
++  it("is at the bank on the four-rope friction winder, which carries one too", () => {
++    expect(worstShock(zollverein).up).toBeGreaterThan(windLength(zollverein) - 1);
++    expect(worstShock(zollverein).up).toBeLessThanOrEqual(windLength(zollverein));
++  });
++
++  it("gives back the factor found at that point and not at any other", () => {
++    for (const one of [bolsover, whealJane, zollverein]) {
++      const found = worstShock(one);
++      const there = shockFactor(hangAt(one, found.up), EMERGENCY_BRAKE);
++      expect(found.factor).toBeLessThanOrEqual(there + 1e-6);
++      expect(found.factor).toBeGreaterThan(0);
++    }
++  });
++
++  it("is no better anywhere else in the wind", () => {
++    const found = worstShock(bolsover);
++    for (const up of [0, 200, 500, 800, 942]) {
++      const there = shockFactor(hangAt(bolsover, up), EMERGENCY_BRAKE);
++      expect(found.factor).toBeLessThanOrEqual(there + 1e-6);
++    }
++  });
++
++  it("takes the worst rope of a set and not the mean of them", () => {
++    const found = worstShock(zollverein);
++    const even = shockFactor(hangAt(zollverein, found.up), EMERGENCY_BRAKE);
++    expect(found.factor).toBeLessThan(even);
++    expect(found.factor).toBeCloseTo(even / 1.1, 3);
++  });
++
++  it("cuts a single rope by nothing, there being nothing for it to be unequal with", () => {
++    const found = worstShock(bolsover);
++    const even = shockFactor(hangAt(bolsover, found.up), EMERGENCY_BRAKE);
++    expect(found.factor).toBeCloseTo(even, 3);
++  });
++
++  it("brakes at the emergency brake and not at some gentler figure", () => {
++    const found = worstShock(bolsover);
++    const there = hangAt(bolsover, found.up);
++    expect(found.factor).toBeCloseTo(shockFactor(there, EMERGENCY_BRAKE), 2);
++    expect(found.factor).toBeLessThan(shockFactor(there, EMERGENCY_BRAKE / 2));
++  });
++
++});

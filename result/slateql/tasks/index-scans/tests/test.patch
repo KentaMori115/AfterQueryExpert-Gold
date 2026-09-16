@@ -1,0 +1,719 @@
+diff --git a/tests/test_index_access_paths.py b/tests/test_index_access_paths.py
+new file mode 100644
+index 0000000..224487f
+--- /dev/null
++++ b/tests/test_index_access_paths.py
+@@ -0,0 +1,525 @@
++"""Serving queries through an index instead of a full scan.
++
++An access path is invisible in the answer and visible only in the work: the
++same rows come back, in the same order, and ``rows_scanned`` says how many
++rows the engine actually touched to produce them.  Every test here pins both
++halves of that, because a path that reads fewer rows and returns different
++ones has not helped anybody.
++"""
++
++from __future__ import annotations
++
++from slateql import Session
++from slateql.config import SessionConfig
++from slateql.types.datatypes import INTEGER, STRING
++from slateql.types.schema import Schema
++
++READINGS_SCHEMA = Schema.of(
++    ("reading_id", INTEGER),
++    ("station", STRING),
++    ("depth", INTEGER),
++    ("note", STRING),
++)
++
++# Neither indexable column is in table order, both repeat, and depth holds two
++# nulls.  Sorting by either one reshuffles the table, so a path that hands back
++# rows in key order cannot hide behind the fixture.
++READINGS_ROWS = [
++    [1, "vale", 30, "a"],
++    [2, "ridge", 10, "b"],
++    [3, "vale", 20, "c"],
++    [4, "cove", None, "d"],
++    [5, "ridge", 30, "e"],
++    [6, "vale", 10, "f"],
++    [7, "cove", 20, "g"],
++    [8, "ridge", None, "h"],
++]
++
++STATIONS_SCHEMA = Schema.of(("station", STRING), ("region", STRING))
++
++STATIONS_ROWS = [
++    ["vale", "north"],
++    ["ridge", "south"],
++    ["cove", "west"],
++]
++
++
++def session(config: SessionConfig | None = None, **indexes: str) -> Session:
++    """A loaded session, indexed as asked.
++
++    ``indexes`` maps a readings column to the kind of index to build over it,
++    so ``session(depth="sorted")`` is a session whose only index is a sorted
++    one on ``depth``.
++    """
++
++    made = Session(config=config) if config is not None else Session()
++    made.register_rows("readings", READINGS_SCHEMA, READINGS_ROWS)
++    made.register_rows("stations", STATIONS_SCHEMA, STATIONS_ROWS)
++    for column, kind in indexes.items():
++        made.create_index("readings", column, kind=kind)
++    return made
++
++
++def run(session_: Session, statement: str) -> tuple[list[tuple], int]:
++    """The statement's rows and the number of rows it read to find them."""
++
++    result = session_.sql(statement)
++    return result.to_tuples(), result.metrics["rows_scanned"]
++
++
++def unindexed(statement: str) -> tuple[list[tuple], int]:
++    return run(session(), statement)
++
++
++# -- the answer never moves -------------------------------------------------
++
++
++def test_a_hash_lookup_hands_back_rows_in_table_order():
++    rows, scanned = run(
++        session(station="hash"),
++        "SELECT reading_id FROM readings WHERE station IN ('ridge', 'vale')",
++    )
++    # Grouped by key the rows would arrive 2, 5, 8, 1, 3, 6.
++    assert rows == [(1,), (2,), (3,), (5,), (6,), (8,)]
++    assert scanned == 6
++
++
++def test_a_range_hands_back_rows_in_table_order_not_key_order():
++    rows, scanned = run(
++        session(depth="sorted"),
++        "SELECT reading_id, depth FROM readings WHERE depth BETWEEN 10 AND 20",
++    )
++    # A sorted index walks its entries by key, which would give 2, 6, 3, 7.
++    assert rows == [(2, 10), (3, 20), (6, 10), (7, 20)]
++    assert scanned == 4
++
++
++def test_a_key_list_fetches_only_its_matches_from_a_sorted_index():
++    rows, scanned = run(
++        session(depth="sorted"),
++        "SELECT reading_id FROM readings WHERE depth IN (30, 10)",
++    )
++    # Grouped by key the rows would arrive 1, 5, 2, 6, and a full scan would
++    # have read all eight to find the four.
++    assert rows == [(1,), (2,), (5,), (6,)]
++    assert scanned == 4
++
++
++def test_an_indexed_answer_matches_the_unindexed_one():
++    statements = [
++        "SELECT reading_id FROM readings WHERE station = 'vale'",
++        "SELECT reading_id FROM readings WHERE depth >= 20",
++        "SELECT reading_id FROM readings WHERE depth IS NULL",
++        "SELECT reading_id FROM readings WHERE depth IS NOT NULL",
++        "SELECT reading_id FROM readings WHERE depth <> 10",
++        "SELECT note FROM readings WHERE station IN ('cove', 'ridge')",
++        "SELECT reading_id, depth FROM readings ORDER BY depth",
++        "SELECT reading_id, depth FROM readings ORDER BY depth DESC",
++        "SELECT station, COUNT(*) FROM readings GROUP BY station",
++    ]
++    indexed = session(station="hash", depth="sorted")
++    for statement in statements:
++        expected, _ = unindexed(statement)
++        actual, _ = run(indexed, statement)
++        assert actual == expected, statement
++
++
++def test_a_repeated_key_in_an_in_list_reports_each_row_once():
++    rows, scanned = run(
++        session(depth="hash"),
++        "SELECT reading_id FROM readings WHERE depth IN (10, 10, 20)",
++    )
++    assert rows == [(2,), (3,), (6,), (7,)]
++    assert scanned == 4
++
++
++def test_an_in_list_holding_null_matches_only_its_other_keys():
++    rows, scanned = run(
++        session(depth="hash"),
++        "SELECT reading_id FROM readings WHERE depth IN (10, NULL)",
++    )
++    assert rows == [(2,), (6,)]
++    assert scanned == 2
++
++
++def test_equality_against_null_finds_nothing_and_reads_nothing():
++    rows, scanned = run(
++        session(depth="hash"), "SELECT reading_id FROM readings WHERE depth = NULL"
++    )
++    assert rows == []
++    assert scanned == 0
++
++
++def test_a_range_bound_of_null_finds_nothing_and_reads_nothing():
++    rows, scanned = run(
++        session(depth="sorted"), "SELECT reading_id FROM readings WHERE depth > NULL"
++    )
++    assert rows == []
++    assert scanned == 0
++
++
++# -- what each shape can answer ---------------------------------------------
++
++
++def test_an_equality_predicate_fetches_only_its_matches():
++    rows, scanned = run(
++        session(station="hash"),
++        "SELECT reading_id FROM readings WHERE station = 'vale'",
++    )
++    assert rows == [(1,), (3,), (6,)]
++    assert scanned == 3
++
++
++def test_the_null_rows_are_fetched_directly():
++    rows, scanned = run(
++        session(depth="hash"), "SELECT reading_id FROM readings WHERE depth IS NULL"
++    )
++    assert rows == [(4,), (8,)]
++    assert scanned == 2
++
++
++def test_a_hash_index_cannot_serve_a_range():
++    rows, scanned = run(
++        session(depth="hash"), "SELECT reading_id FROM readings WHERE depth >= 20"
++    )
++    assert rows == [(1,), (3,), (5,), (7,)]
++    assert scanned == 8
++
++
++def test_a_bounded_predicate_fetches_only_the_rows_between():
++    rows, scanned = run(
++        session(depth="sorted"), "SELECT reading_id FROM readings WHERE depth >= 20"
++    )
++    assert rows == [(1,), (3,), (5,), (7,)]
++    assert scanned == 4
++
++
++def test_a_sorted_index_cannot_serve_is_null():
++    # It holds no entry for a null key, so the rows it would have to report
++    # are exactly the ones it dropped at build time.
++    rows, scanned = run(
++        session(depth="sorted"), "SELECT reading_id FROM readings WHERE depth IS NULL"
++    )
++    assert rows == [(4,), (8,)]
++    assert scanned == 8
++
++
++def test_is_not_null_never_uses_an_index():
++    for kind in ("hash", "sorted"):
++        rows, scanned = run(
++            session(depth=kind),
++            "SELECT reading_id FROM readings WHERE depth IS NOT NULL",
++        )
++        assert rows == [(1,), (2,), (3,), (5,), (6,), (7,)]
++        assert scanned == 8, kind
++
++
++def test_inequality_never_uses_an_index():
++    for kind in ("hash", "sorted"):
++        rows, scanned = run(
++            session(depth=kind), "SELECT reading_id FROM readings WHERE depth <> 10"
++        )
++        assert rows == [(1,), (3,), (5,), (7,)]
++        assert scanned == 8, kind
++
++
++def test_not_in_never_uses_an_index():
++    rows, scanned = run(
++        session(depth="hash"), "SELECT reading_id FROM readings WHERE depth NOT IN (10)"
++    )
++    assert rows == [(1,), (3,), (5,), (7,)]
++    assert scanned == 8
++
++
++def test_several_bounds_on_one_column_fold_into_one_range():
++    rows, scanned = run(
++        session(depth="sorted"),
++        "SELECT reading_id FROM readings WHERE depth >= 20 AND depth <= 20",
++    )
++    assert rows == [(3,), (7,)]
++    assert scanned == 2
++
++
++def test_a_range_matching_no_key_reads_no_rows():
++    rows, scanned = run(
++        session(depth="sorted"), "SELECT reading_id FROM readings WHERE depth > 30"
++    )
++    assert rows == []
++    assert scanned == 0
++
++
++def test_an_index_on_another_column_does_not_help():
++    rows, scanned = run(
++        session(station="hash"), "SELECT reading_id FROM readings WHERE note = 'c'"
++    )
++    assert rows == [(3,)]
++    assert scanned == 8
++
++
++# -- residual predicates ----------------------------------------------------
++
++
++def test_the_second_conjunct_runs_after_the_fetch():
++    rows, scanned = run(
++        session(station="hash"),
++        "SELECT reading_id FROM readings WHERE station = 'vale' AND depth > 15",
++    )
++    assert rows == [(1,), (3,)]
++    # The lookup fetched vale's three rows; the depth test then dropped one.
++    assert scanned == 3
++
++
++def test_a_residual_may_reject_every_row_the_index_found():
++    rows, scanned = run(
++        session(station="hash"),
++        "SELECT reading_id FROM readings WHERE station = 'vale' AND note = 'q'",
++    )
++    assert rows == []
++    # The lookup still fetched vale's three rows before the note test threw
++    # all three away.
++    assert scanned == 3
++
++
++def test_a_residual_on_a_column_the_query_never_selects_still_runs():
++    rows, scanned = run(
++        session(depth="sorted"),
++        "SELECT note FROM readings WHERE depth = 10 AND note <> 'b'",
++    )
++    assert rows == [("f",)]
++    assert scanned == 2
++
++
++def test_a_range_keeps_the_conjuncts_it_could_not_fold():
++    rows, scanned = run(
++        session(depth="sorted"),
++        "SELECT reading_id FROM readings "
++        "WHERE depth > 10 AND depth < 30 AND note <> 'c'",
++    )
++    assert rows == [(7,)]
++    assert scanned == 2
++
++
++# -- choosing between indexes -----------------------------------------------
++
++
++def test_a_second_indexed_predicate_does_not_narrow_the_fetch():
++    rows, scanned = run(
++        session(station="hash", depth="hash"),
++        "SELECT reading_id FROM readings WHERE station = 'vale' AND depth = 30",
++    )
++    assert rows == [(1,)]
++    # Either index alone would have found three rows; using both would find one.
++    assert scanned == 3
++
++
++def test_the_schema_order_of_indexed_columns_breaks_a_tie():
++    # Built depth first, so the order the indexes were made in disagrees with
++    # the order the schema puts their columns in.
++    both = session(depth="hash", station="hash")
++    first, first_scanned = run(
++        both, "SELECT reading_id FROM readings WHERE station = 'vale' AND depth = 30"
++    )
++    second, second_scanned = run(
++        both, "SELECT reading_id FROM readings WHERE depth = 30 AND station = 'vale'"
++    )
++    # station precedes depth in the schema, so it wins either way round.
++    assert first == second == [(1,)]
++    assert first_scanned == second_scanned == 3
++
++
++def test_an_equality_wins_over_a_bound_on_the_same_column():
++    rows, scanned = run(
++        session(depth="sorted"),
++        "SELECT reading_id FROM readings WHERE depth = 30 AND depth >= 10",
++    )
++    assert rows == [(1,), (5,)]
++    assert scanned == 2
++
++
++def test_bounded_rows_are_fetched_before_the_sort_runs():
++    rows, scanned = run(
++        session(SessionConfig(batch_size=1), depth="sorted"),
++        "SELECT reading_id, depth FROM readings WHERE depth >= 30 ORDER BY depth LIMIT 1",
++    )
++    assert rows == [(1, 30)]
++    # The range fetched the two deepest rows and a sort above it took the
++    # first.  Reading the whole index in order instead would have walked past
++    # four shallower rows before reaching one the filter keeps.
++    assert scanned == 2
++
++
++def test_an_equality_wins_over_walking_the_whole_index():
++    rows, scanned = run(
++        session(depth="sorted"),
++        "SELECT reading_id, depth FROM readings WHERE depth = 30 ORDER BY depth",
++    )
++    assert rows == [(1, 30), (5, 30)]
++    assert scanned == 2
++
++
++def test_the_sort_stays_when_the_scan_took_a_lookup_instead():
++    rows, scanned = run(
++        session(station="hash"),
++        "SELECT reading_id FROM readings WHERE station = 'vale' ORDER BY depth",
++    )
++    # Rows come back by depth, so something above the scan still sorted them.
++    assert rows == [(6,), (3,), (1,)]
++    assert scanned == 3
++
++
++# -- reading in index order -------------------------------------------------
++
++
++def test_an_ordered_read_produces_the_order_a_sort_would_have():
++    statement = "SELECT reading_id, depth FROM readings ORDER BY depth"
++    expected, _ = unindexed(statement)
++    rows, _ = run(session(depth="sorted"), statement)
++    assert rows == expected
++
++
++def test_an_ordered_read_stops_once_the_limit_is_met():
++    statement = "SELECT reading_id, depth FROM readings ORDER BY depth LIMIT 3"
++    config = SessionConfig(batch_size=1)
++    sorted_rows, sorted_scanned = run(session(config, depth="sorted"), statement)
++    plain_rows, plain_scanned = run(session(config), statement)
++    assert sorted_rows == plain_rows == [(2, 10), (6, 10), (3, 20)]
++    # A sort has to see every row before it can name the smallest.
++    assert plain_scanned == 8
++    assert sorted_scanned == 3
++
++
++def test_an_ordered_read_skips_the_offset_before_it_counts_the_limit():
++    rows, scanned = run(
++        session(SessionConfig(batch_size=1), depth="sorted"),
++        "SELECT reading_id, depth FROM readings ORDER BY depth LIMIT 2 OFFSET 3",
++    )
++    assert rows == [(7, 20), (1, 30)]
++    assert scanned == 5
++
++
++def test_a_descending_order_by_reads_the_index_backwards():
++    statement = "SELECT reading_id, depth FROM readings ORDER BY depth DESC LIMIT 2"
++    config = SessionConfig(batch_size=1)
++    rows, scanned = run(session(config, depth="sorted"), statement)
++    expected, _ = run(session(config), statement)
++    assert rows == expected == [(1, 30), (5, 30)]
++    assert scanned == 2
++
++
++def test_rows_sharing_a_key_keep_the_order_the_table_gave_them():
++    rows, _ = run(
++        session(depth="sorted"),
++        "SELECT reading_id, depth FROM readings ORDER BY depth DESC",
++    )
++    # Descending reverses the keys, not the rows inside one key.
++    assert rows == [
++        (1, 30),
++        (5, 30),
++        (3, 20),
++        (7, 20),
++        (2, 10),
++        (6, 10),
++        (4, None),
++        (8, None),
++    ]
++
++
++def test_null_placement_follows_the_session_config():
++    statement = "SELECT reading_id FROM readings ORDER BY depth LIMIT 2"
++    config = SessionConfig(null_ordering="nulls_first", batch_size=1)
++    rows, scanned = run(session(config, depth="sorted"), statement)
++    expected, plain_scanned = run(session(config), statement)
++    assert rows == expected == [(4,), (8,)]
++    # Two rows read means the index produced the order, nulls and all.
++    assert scanned == 2
++    assert plain_scanned == 8
++
++
++def test_an_order_by_spelling_out_its_own_null_placement_is_honoured():
++    statement = "SELECT reading_id FROM readings ORDER BY depth NULLS FIRST LIMIT 2"
++    config = SessionConfig(batch_size=1)
++    rows, scanned = run(session(config, depth="sorted"), statement)
++    expected, plain_scanned = run(session(config), statement)
++    assert rows == expected == [(4,), (8,)]
++    assert scanned == 2
++    assert plain_scanned == 8
++
++
++def test_a_hash_index_cannot_supply_an_order():
++    statement = "SELECT reading_id, depth FROM readings ORDER BY depth LIMIT 3"
++    rows, scanned = run(session(SessionConfig(batch_size=1), depth="hash"), statement)
++    assert rows == [(2, 10), (6, 10), (3, 20)]
++    assert scanned == 8
++
++
++def test_two_sort_keys_are_not_served_by_one_index():
++    statement = (
++        "SELECT reading_id, depth FROM readings ORDER BY depth, reading_id LIMIT 3"
++    )
++    rows, scanned = run(session(SessionConfig(batch_size=1), depth="sorted"), statement)
++    expected, _ = run(session(SessionConfig(batch_size=1)), statement)
++    assert rows == expected
++    assert scanned == 8
++
++
++def test_an_order_by_over_a_computed_column_is_not_served():
++    statement = (
++        "SELECT reading_id, depth * 2 AS doubled FROM readings "
++        "ORDER BY doubled LIMIT 2"
++    )
++    config = SessionConfig(batch_size=1)
++    rows, scanned = run(session(config, depth="sorted"), statement)
++    expected, _ = run(session(config), statement)
++    assert rows == expected == [(2, 20), (6, 20)]
++    # The doubled value is not the indexed one, so the sort has to see it all.
++    assert scanned == 8
++
++
++# -- the rest of the engine -------------------------------------------------
++
++
++def test_a_join_uses_the_index_on_the_side_that_has_one():
++    statement = (
++        "SELECT r.reading_id, s.region FROM readings r "
++        "JOIN stations s ON r.station = s.station WHERE r.station = 'vale'"
++    )
++    indexed = session(station="hash")
++    rows, scanned = run(indexed, statement)
++    expected, plain_scanned = unindexed(statement)
++    assert rows == expected == [(1, "north"), (3, "north"), (6, "north")]
++    assert scanned < plain_scanned
++
++
++def test_an_aggregate_over_a_lookup_counts_what_the_lookup_found():
++    rows, scanned = run(
++        session(station="hash"),
++        "SELECT COUNT(*) FROM readings WHERE station = 'vale'",
++    )
++    assert rows == [(3,)]
++    assert scanned == 3
++
++
++def test_distinct_over_a_lookup_reads_only_the_matching_rows():
++    rows, scanned = run(
++        session(depth="hash"),
++        "SELECT DISTINCT station FROM readings WHERE depth = 30",
++    )
++    assert rows == [("vale",), ("ridge",)]
++    assert scanned == 2
++
++
++def test_a_session_that_does_not_optimize_pushes_nothing_to_index():
++    statement = "SELECT reading_id FROM readings WHERE station = 'vale'"
++    config = SessionConfig(optimize=False)
++    rows, scanned = run(session(config, station="hash"), statement)
++    expected, _ = run(session(config), statement)
++    assert rows == expected == [(1,), (3,), (6,)]
++    assert scanned == 8
++
++
++def test_an_unindexed_table_still_reads_every_row():
++    rows, scanned = run(
++        session(station="hash"), "SELECT region FROM stations WHERE station = 'cove'"
++    )
++    assert rows == [("west",)]
++    assert scanned == 3
+diff --git a/tests/test_index_catalog.py b/tests/test_index_catalog.py
+new file mode 100644
+index 0000000..09b645d
+--- /dev/null
++++ b/tests/test_index_catalog.py
+@@ -0,0 +1,182 @@
++"""Creating, listing and dropping indexes."""
++
++from __future__ import annotations
++
++import pytest
++
++from slateql import Session, UnknownColumnError, UnknownTableError
++from slateql.types.datatypes import INTEGER, STRING
++from slateql.types.schema import Schema
++
++READINGS_SCHEMA = Schema.of(
++    ("reading_id", INTEGER),
++    ("station", STRING),
++    ("depth", INTEGER),
++    ("note", STRING),
++)
++
++# Station repeats, depth repeats and holds two nulls, and neither column is in
++# the order the table stores its rows.
++READINGS_ROWS = [
++    [1, "vale", 30, "a"],
++    [2, "ridge", 10, "b"],
++    [3, "vale", 20, "c"],
++    [4, "cove", None, "d"],
++    [5, "ridge", 30, "e"],
++    [6, "vale", 10, "f"],
++    [7, "cove", 20, "g"],
++    [8, "ridge", None, "h"],
++]
++
++STATIONS_SCHEMA = Schema.of(("station", STRING), ("region", STRING))
++
++STATIONS_ROWS = [
++    ["vale", "north"],
++    ["ridge", "south"],
++    ["cove", "west"],
++]
++
++
++def loaded() -> Session:
++    """A session holding both tables and no indexes."""
++
++    session = Session()
++    session.register_rows("readings", READINGS_SCHEMA, READINGS_ROWS)
++    session.register_rows("stations", STATIONS_SCHEMA, STATIONS_ROWS)
++    return session
++
++
++def listing(session: Session, statement: str = "SHOW INDEXES") -> list[tuple]:
++    return session.sql(statement).to_tuples()
++
++
++def reads(session: Session, statement: str) -> int:
++    """How many rows the statement reported reading."""
++
++    return session.sql(statement).metrics["rows_scanned"]
++
++
++def test_a_new_index_is_listed_with_its_shape():
++    session = loaded()
++    session.create_index("readings", "station")
++    assert listing(session) == [("readings", "station", "hash", 8, 3, "NO")]
++
++
++def test_a_sorted_index_reports_its_own_shape():
++    session = loaded()
++    session.create_index("readings", "station", kind="sorted")
++    assert listing(session) == [("readings", "station", "sorted", 8, 3, "NO")]
++
++
++def test_show_indexes_names_its_columns():
++    session = loaded()
++    session.create_index("readings", "station")
++    assert session.sql("SHOW INDEXES").columns == [
++        "table_name",
++        "column_name",
++        "kind",
++        "entries",
++        "distinct_keys",
++        "has_nulls",
++    ]
++
++
++def test_null_rows_are_part_of_a_hash_index_total():
++    session = loaded()
++    session.create_index("readings", "depth")
++    # Eight rows went in, three distinct depths came out, two rows had none.
++    assert listing(session) == [("readings", "depth", "hash", 8, 3, "YES")]
++
++
++def test_a_sorted_index_counts_the_null_rows_it_holds_no_key_for():
++    session = loaded()
++    session.create_index("readings", "depth", kind="sorted")
++    assert listing(session) == [("readings", "depth", "sorted", 8, 3, "YES")]
++
++
++def test_show_indexes_from_one_table_leaves_the_others_out():
++    session = loaded()
++    session.create_index("readings", "station")
++    session.create_index("stations", "region")
++    assert listing(session, "SHOW INDEXES FROM stations") == [
++        ("stations", "region", "hash", 3, 3, "NO")
++    ]
++
++
++def test_indexes_are_listed_by_table_and_then_by_column():
++    session = loaded()
++    # Registered back to front, so registration order cannot be what shows.
++    session.create_index("stations", "region")
++    session.create_index("readings", "station")
++    session.create_index("readings", "depth", kind="sorted")
++    assert [row[:2] for row in listing(session)] == [
++        ("readings", "depth"),
++        ("readings", "station"),
++        ("stations", "region"),
++    ]
++
++
++def test_a_catalog_without_indexes_lists_nothing():
++    assert listing(loaded()) == []
++
++
++def test_building_a_second_index_over_a_column_replaces_the_first():
++    session = loaded()
++    session.create_index("readings", "station")
++    session.create_index("readings", "station", kind="sorted")
++    assert listing(session) == [("readings", "station", "sorted", 8, 3, "NO")]
++
++
++def test_dropping_twice_answers_true_then_false():
++    session = loaded()
++    session.create_index("readings", "station")
++    assert session.drop_index("readings", "station") is True
++    assert session.drop_index("readings", "station") is False
++
++
++def test_a_dropped_index_is_no_longer_listed():
++    session = loaded()
++    session.create_index("readings", "station")
++    session.create_index("readings", "depth", kind="sorted")
++    session.drop_index("readings", "station")
++    assert [row[:2] for row in listing(session)] == [("readings", "depth")]
++
++
++def test_a_dropped_index_stops_serving_queries():
++    session = loaded()
++    session.create_index("readings", "station")
++    statement = "SELECT reading_id FROM readings WHERE station = 'vale'"
++    served = session.sql(statement)
++    session.drop_index("readings", "station")
++    scanned = session.sql(statement)
++    assert served.to_tuples() == scanned.to_tuples() == [(1,), (3,), (6,)]
++    assert served.metrics["rows_scanned"] == 3
++    assert scanned.metrics["rows_scanned"] == 8
++
++
++def test_each_table_keeps_its_own_indexes():
++    session = loaded()
++    session.create_index("stations", "station")
++    # Both tables have a station column; only one of them is indexed.
++    assert reads(session, "SELECT region FROM stations WHERE station = 'vale'") == 1
++    assert (
++        reads(session, "SELECT reading_id FROM readings WHERE station = 'vale'") == 8
++    )
++
++
++def test_indexing_a_table_that_is_not_there_fails_like_a_query():
++    session = loaded()
++    with pytest.raises(UnknownTableError):
++        session.create_index("rainfall", "station")
++
++
++def test_indexing_a_column_that_is_not_there_fails_like_a_query():
++    session = loaded()
++    with pytest.raises(UnknownColumnError):
++        session.create_index("readings", "altitude")
++
++
++def test_dropping_an_index_on_an_unknown_column_raises_too():
++    session = loaded()
++    with pytest.raises(UnknownColumnError):
++        session.drop_index("readings", "altitude")

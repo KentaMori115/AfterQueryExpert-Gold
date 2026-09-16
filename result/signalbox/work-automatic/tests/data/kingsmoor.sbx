@@ -1,0 +1,99 @@
+# Kingsmoor Junction, resignalled 2025. Down and up mains running west to east
+# with a facing junction to the Ashcombe branch, a crossover at the west end and
+# a bay platform off the up line.
+#
+# There is an insulated joint at every signal, so each edge carries one section
+# and no route shares a section with the route in front of it.
+
+scheme kingsmoor {
+    area "Kingsmoor Junction"
+    prefix K
+}
+
+node WD boundary
+node WU boundary
+node ED boundary
+node EU boundary
+node BRD boundary
+node BRU boundary
+node BAY buffer
+
+node P101 points
+node P102 points
+node P103 points
+node P104 points
+node P105 points
+
+node J1 plain
+node J3 plain
+node J5 plain
+node J7 plain
+node J2 plain
+node J4 plain
+node J6 plain
+node J8 plain
+node J9 plain
+
+# down main, west to east
+edge D1 from WD to J1 length 560 speed 90 gradient 1 in 330 direction down
+edge D2 from J1 to P103.toe length 40 speed 90 direction down
+edge D3 from P103.normal to J3 length 460 speed 90 direction down
+edge D4 from J3 to P101.toe length 40 speed 90 direction down
+edge D5 from P101.normal to J5 length 620 speed 90 gradient 1 in -220 direction down
+edge D6 from J5 to ED length 80 speed 90 direction down
+
+# the Ashcombe branch, down side
+edge D7 from P101.reverse to J7 length 250 speed 40 direction down
+edge D8 from J7 to BRD length 50 speed 40 direction down
+
+# the west end crossover
+edge CX from P103.reverse to P104.reverse length 80 speed 25 direction bidirectional
+
+# up main, still drawn west to east
+edge U1 from WU to J6 length 560 speed 90 direction up
+edge U2 from J6 to P104.normal length 40 speed 90 direction up
+edge U3 from P104.toe to J4 length 360 speed 60 direction bidirectional
+edge U4 from J4 to P105.toe length 40 speed 60 direction bidirectional
+edge U5 from P105.normal to J2 length 460 speed 90 direction up
+edge U6 from J2 to P102.toe length 40 speed 90 direction up
+edge U7 from P102.normal to J8 length 360 speed 90 direction up
+edge U8 from J8 to EU length 40 speed 90 direction up
+
+# the Ashcombe branch, up side
+edge BJ from P102.reverse to J9 length 250 speed 40 direction up
+edge BK from J9 to BRU length 50 speed 40 direction up
+
+# the bay platform
+edge BE from P105.reverse to BAY length 150 speed 15 direction bidirectional
+
+section TA over D1
+section TB over D2
+section TC over D3
+section TD over D4
+section TE over D5
+section TF over D6
+section TG over D7
+section TH over D8
+section TJ over U1
+section TK over U2
+section TL over U3
+section TM over U4
+section TN over U5
+section TP over U6
+section TQ over U7
+section TR over U8
+section TS over BJ
+section TT over BK
+section TV over CX
+section TU counted over BE
+
+signal K1 on D1 at 560 facing forward direction down aspects 4
+signal K3 on D3 at 460 facing forward direction down aspects 3
+signal K5 on D5 at 620 facing forward direction down aspects 3
+signal K7 on D7 at 250 facing forward direction down aspects 2
+signal K2 on U8 at 0 facing backward direction up aspects 4
+signal K4 on U4 at 0 facing backward direction up aspects 3
+signal K6 on U2 at 0 facing backward direction up aspects 3
+signal K8 on BK at 0 facing backward direction up aspects 2
+signal K20 on U3 at 360 facing forward aspects 2 type shunt
+signal K22 on BE at 0 facing backward aspects 2 type shunt

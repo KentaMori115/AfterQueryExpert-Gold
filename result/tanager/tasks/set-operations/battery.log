@@ -1,0 +1,43 @@
+frame: unchanged outside the markers
+instruction: 294 words, trailer exact, no tells, no placeholders
+== rows ==
+  oracle                               f2p 48   p2p 99   reward 1    ok
+  base                                 f2p 0    p2p 99   reward 0    ok
+  empty                                f2p 0    p2p 99   reward 0    ok
+  union_keeps_duplicates               f2p 39   p2p 99   reward 0    ok
+  intersect_all_keeps_every_left_copy  f2p 47   p2p 99   reward 0    ok
+  except_all_drops_every_matched_copy  f2p 45   p2p 99   reward 0    ok
+  except_distinct_counts_copies        f2p 46   p2p 99   reward 0    ok
+  copies_kept_are_the_trailing_ones    f2p 47   p2p 99   reward 0    ok
+  nulls_never_pair                     f2p 47   p2p 99   reward 0    ok
+  a_narrow_branch_keeps_its_own_values f2p 46   p2p 99   reward 0    ok
+  names_come_from_the_right_branch     f2p 46   p2p 99   reward 0    ok
+  every_operator_folds_from_the_left   f2p 46   p2p 99   reward 0    ok
+  order_by_takes_a_hidden_column       f2p 48   p2p 99   reward 1    EXPECTED f2p <48 p2p 99
+FAIL: order_by_takes_a_hidden_column
+  trailing_clauses_bind_to_the_last_branch f2p 26   p2p 99   reward 0    ok
+  branches_need_not_line_up            f2p 47   p2p 99   reward 0    ok
+  the_bound_is_the_limit_alone         f2p 42   p2p 99   reward 0    ok
+  every_set_operator_is_bounded        f2p 45   p2p 99   reward 0    ok
+  the_bound_is_reapplied_every_pass    f2p 47   p2p 99   reward 0    ok
+  a_sort_no_longer_blocks_the_bound    f2p 47   p2p 98   reward 0    EXPECTED f2p <48 p2p 99
+FAIL: a_sort_no_longer_blocks_the_bound
+  explain_names_the_node_not_the_operator f2p 47   p2p 99   reward 0    ok
+  build_script                         f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/build.rs is present and is not part of this repository
+  cargo_rustc_wrapper                  f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/.cargo/config.toml redirects the compiler or the test runner
+  harness_false_manifest               f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/Cargo.toml declares a target named branch_pairing
+      [verifier] INTEGRITY: /app/Cargo.toml declares a test target with harness = false
+  claims_a_graded_target_name          f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/Cargo.toml declares a target named aggregation
+  toolchain_file                       f2p 0    p2p 0    reward 0    ok
+      [verifier] INTEGRITY: /app/rust-toolchain.toml is present and is not part of this repository
+  rewrites_an_inherited_suite          f2p 48   p2p 99   reward 1    ok
+  rewrites_a_held_out_suite            f2p 48   p2p 99   reward 1    ok
+  harmless_cargo_config                f2p 48   p2p 99   reward 1    ok
+  adds_its_own_test_file               f2p 48   p2p 99   reward 1    ok
+
+2 row(s) did not
+work tree: /tmp/claude-0/-root-mindriftwork/4e7e81c4-cfcc-49fd-9915-48fb7516df1d/scratchpad/battery

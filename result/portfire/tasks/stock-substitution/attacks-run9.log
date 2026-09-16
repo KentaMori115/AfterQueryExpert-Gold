@@ -1,0 +1,208 @@
+built chai-tamper: 1 file(s)
+built fake-heldout: 2 file(s)
+built config-and-setup: 3 file(s)
+built node-modules: 1 file(s)
+built report-rewrite: 1 file(s)
+built solution-edits-base-test: 19 file(s)
+built chai-esm-tamper: 1 file(s)
+built guard-rewrite: 19 file(s)
+built junit-watcher: 1 file(s)
+built junit-late-writer: 1 file(s)
+
+=== staging the base tree
+local base commit: c4a886aa0c8f3675fc72e74261bfd21d693b5f03
+
+=== building the environment image
+
+=== building the verifier image
+
+=== oracle run (reference solution applied)
+oracle     reward.json = {"reward": 1, "f2p_total": 49, "f2p_passed": 49, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== nop run (base state, nothing applied)
+nop        reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9773672055427252}
+
+=== guard-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/guard-rewrite.patch)
+guard-rewrite reward.json = {"reward": 1, "f2p_total": 49, "f2p_passed": 49, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== chai-tamper run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/chai-tamper.patch)
+chai-tamper reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9773672055427252}
+
+=== chai-esm-tamper run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/chai-esm-tamper.patch)
+chai-esm-tamper reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9773672055427252}
+
+=== fake-heldout run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/fake-heldout.patch)
+fake-heldout reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9773672055427252}
+
+=== config-and-setup run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/config-and-setup.patch)
+config-and-setup reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9773672055427252}
+
+=== node-modules run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/node-modules.patch)
+node-modules reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0, "apply_failed": 1}
+
+=== report-rewrite run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/report-rewrite.patch)
+report-rewrite reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9773672055427252}
+
+=== junit-watcher run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/junit-watcher.patch)
+junit-watcher reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 0.0, "p2p": 1.0, "partial": 0.9773672055427252}
+
+=== junit-late-writer run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/junit-late-writer.patch)
+junit-late-writer reward.json = {"reward": 0, "f2p_total": 49, "f2p_passed": 0, "p2p_total": 2116, "p2p_passed": 0, "f2p": 0.0, "p2p": 0.0, "partial": 0.0}
+
+=== solution-edits-base-test run (/root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/attacks/solution-edits-base-test.patch)
+solution-edits-base-test reward.json = {"reward": 1, "f2p_total": 49, "f2p_passed": 49, "p2p_total": 2116, "p2p_passed": 2116, "f2p": 1.0, "p2p": 1.0, "partial": 1.0}
+
+=== summary
+--- oracle
+P2P 2116/2116 pass 0 fail; F2P 49/49 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- nop
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > is ready when every shortfall has an exact stand-in
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > fails the show when a cue has nothing to fire
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > says nothing about stock until a magazine is given
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > leaves nothing to cover the palms once the willow lot is pulled
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > takes several lots, comma separated
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > shows which delivery each cue fires from
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > leaves the lot blank on a cue nothing covered
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > keeps the column, every cell empty, for a book holding nothing
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.inventory --magazine > keeps the shortfall on the order list after a stand-in covers it
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.explain --magazine > names the lot and what the script asked for on a covered cue
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > takes the flags wherever the catalog flag is taken
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > puts the stand-in in front of whatever reads the compile
+--- guard-rewrite
+P2P 2116/2116 pass 0 fail; F2P 49/49 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- chai-tamper
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > is ready when every shortfall has an exact stand-in
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > fails the show when a cue has nothing to fire
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > says nothing about stock until a magazine is given
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > leaves nothing to cover the palms once the willow lot is pulled
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > takes several lots, comma separated
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > shows which delivery each cue fires from
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > leaves the lot blank on a cue nothing covered
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > keeps the column, every cell empty, for a book holding nothing
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.inventory --magazine > keeps the shortfall on the order list after a stand-in covers it
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.explain --magazine > names the lot and what the script asked for on a covered cue
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > takes the flags wherever the catalog flag is taken
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > puts the stand-in in front of whatever reads the compile
+--- chai-esm-tamper
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > is ready when every shortfall has an exact stand-in
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > fails the show when a cue has nothing to fire
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > says nothing about stock until a magazine is given
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > leaves nothing to cover the palms once the willow lot is pulled
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > takes several lots, comma separated
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > shows which delivery each cue fires from
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > leaves the lot blank on a cue nothing covered
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > keeps the column, every cell empty, for a book holding nothing
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.inventory --magazine > keeps the shortfall on the order list after a stand-in covers it
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.explain --magazine > names the lot and what the script asked for on a covered cue
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > takes the flags wherever the catalog flag is taken
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > puts the stand-in in front of whatever reads the compile
+--- fake-heldout
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > is ready when every shortfall has an exact stand-in
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > fails the show when a cue has nothing to fire
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > says nothing about stock until a magazine is given
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > leaves nothing to cover the palms once the willow lot is pulled
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > takes several lots, comma separated
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > shows which delivery each cue fires from
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > leaves the lot blank on a cue nothing covered
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > keeps the column, every cell empty, for a book holding nothing
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.inventory --magazine > keeps the shortfall on the order list after a stand-in covers it
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.explain --magazine > names the lot and what the script asked for on a covered cue
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > takes the flags wherever the catalog flag is taken
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > puts the stand-in in front of whatever reads the compile
+--- config-and-setup
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > is ready when every shortfall has an exact stand-in
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > fails the show when a cue has nothing to fire
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > says nothing about stock until a magazine is given
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > leaves nothing to cover the palms once the willow lot is pulled
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > takes several lots, comma separated
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > shows which delivery each cue fires from
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > leaves the lot blank on a cue nothing covered
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > keeps the column, every cell empty, for a book holding nothing
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.inventory --magazine > keeps the shortfall on the order list after a stand-in covers it
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.explain --magazine > names the lot and what the script asked for on a covered cue
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > takes the flags wherever the catalog flag is taken
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > puts the stand-in in front of whatever reads the compile
+--- node-modules
+[verifier] ERROR: submitted model.patch failed to apply
+--- report-rewrite
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > is ready when every shortfall has an exact stand-in
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > fails the show when a cue has nothing to fire
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > says nothing about stock until a magazine is given
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > leaves nothing to cover the palms once the willow lot is pulled
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > takes several lots, comma separated
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > shows which delivery each cue fires from
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > leaves the lot blank on a cue nothing covered
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > keeps the column, every cell empty, for a book holding nothing
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.inventory --magazine > keeps the shortfall on the order list after a stand-in covers it
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.explain --magazine > names the lot and what the script asked for on a covered cue
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > takes the flags wherever the catalog flag is taken
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > puts the stand-in in front of whatever reads the compile
+--- junit-watcher
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > is ready when every shortfall has an exact stand-in
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > fails the show when a cue has nothing to fire
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.check --magazine > says nothing about stock until a magazine is given
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > leaves nothing to cover the palms once the willow lot is pulled
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.--pull > takes several lots, comma separated
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > shows which delivery each cue fires from
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > leaves the lot blank on a cue nothing covered
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.sheet --magazine > keeps the column, every cell empty, for a book holding nothing
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.inventory --magazine > keeps the shortfall on the order list after a stand-in covers it
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.explain --magazine > names the lot and what the script asked for on a covered cue
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > takes the flags wherever the catalog flag is taken
+[verifier] ✗ [f2p] tests/cli/bookFlags.test.ts.every show command > puts the stand-in in front of whatever reads the compile
+--- junit-late-writer
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > compiles to a schedule
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > raises nothing
+[verifier] ✗ [p2p] tests/compile.test.ts.a clean script > keeps the parsed script
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > takes the rate the script names over the caller's
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the caller's rate
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > defaults to twenty five
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > uses the script's seed for jitter
+[verifier] ✗ [p2p] tests/compile.test.ts.frame rate and seed > falls back to the show name as a seed
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > stops at a parse error rather than reporting an empty show
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > carries on past an unresolved name
+[verifier] ✗ [p2p] tests/compile.test.ts.stopping and carrying on > still runs the load check on what did resolve
+[verifier] ✗ [p2p] tests/compile.test.ts.pre roll > reports the pre roll a big opener needs
+--- solution-edits-base-test
+P2P 2116/2116 pass 0 fail; F2P 49/49 pass 0 fail; PARTIAL 1.0; BINARY 1
+
+logs kept under /root/mindriftwork/AQ_dragan/result/portfire/tasks/stock-substitution/runs/
+
+=== why each attack scored what it did
+--- guard-rewrite
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 49 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 49/49 pass 0 fail; PARTIAL 1.0; BINARY 1
+--- chai-tamper
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 49 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/49 pass 49 fail; PARTIAL 0.9773672055427252; BINARY 0
+--- fake-heldout
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 49 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/49 pass 49 fail; PARTIAL 0.9773672055427252; BINARY 0
+--- config-and-setup
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 49 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/49 pass 49 fail; PARTIAL 0.9773672055427252; BINARY 0
+--- node-modules
+--- report-rewrite
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 49 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/49 pass 49 fail; PARTIAL 0.9773672055427252; BINARY 0
+--- junit-watcher
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 49 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2117 cases (0 declared ids added as failed)
+      1 P2P 2116/2116 pass 0 fail; F2P 0/49 pass 49 fail; PARTIAL 0.9773672055427252; BINARY 0
+--- junit-late-writer
+   2116     no usable junit report from the run (the stream carried 2/2 testsuites open/close tags and 2 prologs; one document was expected); every declared id is published as failed
+      1 [verifier] vitest child runs as uid 65534 gid 65534
+      1 [publish] wrote /verify/reports/new.xml: 49 cases (0 declared ids added as failed)
+      1 [publish] wrote /verify/reports/base.xml: 2116 cases (2116 declared ids added as failed)
+      1 P2P 0/2116 pass 2116 fail; F2P 0/49 pass 49 fail; PARTIAL 0.0; BINARY 0

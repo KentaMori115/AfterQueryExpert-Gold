@@ -1,0 +1,177 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface-page);
+  color: var(--ink-primary);
+  font-family: var(--font-ui);
+  font-size: var(--type-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+h1 {
+  font-size: var(--type-2xl);
+}
+h2 {
+  font-size: var(--type-xl);
+}
+h3 {
+  font-size: var(--type-lg);
+}
+h4 {
+  font-size: var(--type-md);
+}
+
+p {
+  margin: 0 0 var(--gap-3);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+code,
+kbd,
+samp,
+.tabular {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+::selection {
+  background: var(--sea-200);
+  color: var(--slate-900);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Form controls and the plain buttons beside them.
+ *
+ * These were written out in eleven scoped blocks, one per component, and the
+ * copies had already diverged: the register's export button had a different
+ * radius from the one on the pen page, and two selects had picked up different
+ * padding, which is visible the moment they sit in the same row.
+ *
+ * They live here rather than in a component because that is all they are:
+ * a native select is a better select than anything wrapped around one, and the
+ * only thing the copies were carrying was the paint. The classes are opt in,
+ * so a component that genuinely needs its own control still can.
+ */
+.control,
+.control-button {
+  padding: var(--gap-2) var(--gap-3);
+  border: 1px solid var(--rule-firm);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+  color: var(--ink-primary);
+  font: inherit;
+  font-size: var(--type-sm);
+}
+
+.control {
+  background: var(--surface-page);
+}
+
+.control-button {
+  cursor: pointer;
+}
+
+.control-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.control-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The one that commits: exactly one per form, and never two side by side. */
+.control-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--ink-inverse);
+}
+
+.control-primary:hover:not(:disabled) {
+  color: var(--ink-inverse);
+  filter: brightness(1.08);
+}
+
+.control-small {
+  padding: var(--gap-1) var(--gap-3);
+  font-size: var(--type-xs);
+}

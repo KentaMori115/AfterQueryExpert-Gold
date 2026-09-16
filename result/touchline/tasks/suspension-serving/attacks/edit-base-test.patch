@@ -1,0 +1,782 @@
+diff --git a/README.md b/README.md
+index 6827d6a..05ca4d6 100644
+--- a/README.md
++++ b/README.md
+@@ -118,6 +118,7 @@ Full detail, request and response, is in [`docs/api.md`](docs/api.md). In summar
+ | Results | `/fixtures/:fixtureId/result`, `/results`, and `confirm` / `dispute` / `settle` |
+ | The table | `/divisions/:divisionId/table?asOf=` |
+ | Discipline | `/fixtures/:fixtureId/cards`, `/cards`, `/players/:playerId/record?asOf=` |
++| Suspensions | `/players/:playerId/suspensions?asOf=`, `/fixtures/:fixtureId/eligibility` |
+ | Audit | `/audit` |
+ 
+ ## The three rules worth reading the code for
+@@ -138,6 +139,12 @@ A red card carries its own ban, served alongside the accumulated one rather than
+ a card off the record afterwards reworks everything that came after it, because a threshold that was
+ crossed may no longer be.
+ 
++**A ban is served in games, by the side that earned it.** Each game the card's side actually plays
++serves one match; a walkover, a postponement and an abandoned game serve nothing. A straight ban
++starts with the next game, an accumulated one only a fortnight after the card. A player may not be
++picked by any side of their club for a game that would serve them a match, which is what
++`/fixtures/:fixtureId/eligibility` reads off the day before a game.
++
+ ## Tests
+ 
+ ```sh
+diff --git a/docs/api.md b/docs/api.md
+index f44073b..4ffd531 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -1,6 +1,6 @@
+ # The API, route by route
+ 
+-71 routes. Every one needs `Authorization: Bearer <token>` except `POST /auth/sessions`, which is
++73 routes. Every one needs `Authorization: Bearer <token>` except `POST /auth/sessions`, which is
+ how you get a token in the first place. Writes need a scope as well; the scope is named against each
+ route below, and a caller whose role does not carry it gets a `409`.
+ 
+@@ -425,6 +425,70 @@ later card had already earned can disappear.
+ `finesPence`, `matchesBanned`, `standing`.
+ 
+ `standing` is `suspended` when anything is being served, `warned` from 3 points, else `clear`.
++"Being served" is the serving ledger's answer below: a ban that the side's games have fully served no
++longer suspends anybody, however many matches `matchesBanned` still adds up to.
++
++---
++
++## Suspensions — reads only
++
++Neither reading is stored. Both are derived from the cards a player holds and the games their side
++has played, so rescinding a card or settling a disputed score changes the answer the next time it is
++asked for.
++
++How serving works:
++
++- A card is worth the longer of its straight and accumulated ban. A card worth nothing is not in the
++  ledger at all.
++- A ban is served over the games of the side the card was shown for (the card's `teamId`), one match
++  per game. Only a game with status `played` serves anything: awarded, postponed and abandoned games
++  serve nothing, even though an awarded game reaches the table.
++- A straight ban can be served by any game after the card. An accumulated ban waits: no game before
++  the fourteenth day after the card serves it, because a club has that long to claim the booking was
++  wrongly recorded. A card carrying both is one ban, and one served match comes off both parts at
++  once, so a red that also crossed a threshold serves its straight match straight away and then
++  waits for the rest.
++- Each played game serves one match off the earliest card it can serve, which is not always the
++  earliest card outstanding: a ban still inside its wait lets a game go past it to a later straight
++  one. The game a card was shown in never counts.
++- A player is barred from a game when that game would serve them a match, read off everything up to
++  the day before. Owing a match is not enough: a ban still inside its wait bars nobody yet, though
++  the record already reads `suspended` for it. The bar covers every side of whichever club the
++  player is at. A transfer moves the bar to the new club; the games serving the ban stay where they
++  were.
++- A rescinded card leaves the ledger, and the games it had used fall through to later cards.
++- `asOf` cuts twice: cards shown after it are not in the reading, and games played after it have
++  served nothing yet.
++
++A worked example. A red for serious foul play on 6 September is worth two matches. The side's next
++game, on 20 September, is postponed; the one on 4 October is awarded; the one on 18 October is
++played. Read on 19 October, the entry says `matches` 2, `served` 1, `outstanding` 1, `servedIn` holds
++the 18 October game alone, `clearedOn` is `null`, and the player is `suspended`. Eligibility for the
++side's game on 1 November lists them with `outstanding` 1. Once 1 November has been played, the game
++on 15 November lists nobody and `clearedOn` reads `2031-11-01`.
++
++A second, on the wait. A fifth booking point on 20 September carries one accumulated match. The
++side plays on 27 September and 3 October: neither serves it, the player may start both, and the
++ledger meanwhile reads `outstanding` 1 and `suspended`. The game on 4 October, the fourteenth day,
++serves it.
++
++### `GET /players/:playerId/suspensions?asOf=YYYY-MM-DD`
++`asOf` is required.
++
++Answers `playerId`, `asOf`, `matchesBanned`, `matchesServed`, `matchesOutstanding`, `suspended`
++(true while anything is outstanding) and `entries`, oldest card first. An entry carries `cardId`,
++`fixtureId`, `teamId`, `shownOn`, `matches`, `served`, `outstanding`, `servedIn` (the ids of the
++games that served it, in the order they did) and `clearedOn` (the day of the game that served the
++last match, else `null`).
++
++### `GET /fixtures/:fixtureId/eligibility`
++Takes no query. Reads the day before the game, so the game itself cannot change who was allowed to
++start it.
++
++Answers `fixtureId`, `playedOn`, `asOf` (the day read) and `ineligible`: every registered player at
++either club whom this game would serve a match, home side first and then by player id, each as
++`playerId`, `clubId`, `teamId` (their club's side in this game) and `outstanding` (every match they
++still owe, not only the one this game would serve).
+ 
+ ---
+ 
+diff --git a/scripts/seed.ts b/scripts/seed.ts
+index 35b5d00..d626ce0 100644
+--- a/scripts/seed.ts
++++ b/scripts/seed.ts
+@@ -25,10 +25,15 @@ import { addDays } from '../src/lib/days';
+ import { AppError } from '../src/lib/AppError';
+ import { buildAuthModule } from '../src/modules/auth/auth.routes';
+ import { buildClubModule } from '../src/modules/clubs/club.routes';
++import { buildDisciplineModule } from '../src/modules/discipline/discipline.routes';
+ import { buildDivisionModule } from '../src/modules/divisions/division.routes';
+ import { buildFixtureModule } from '../src/modules/fixtures/fixture.routes';
++import { buildPlayerModule } from '../src/modules/players/player.routes';
++import { fullName } from '../src/modules/players/player.types';
+ import { buildResultModule } from '../src/modules/results/result.routes';
+ import { buildSeasonModule } from '../src/modules/seasons/season.routes';
++import { buildSuspensionModule } from '../src/modules/suspensions/suspension.routes';
++import { matchesFor } from '../src/modules/suspensions/suspension.types';
+ import { buildTeamModule } from '../src/modules/teams/team.routes';
+ import { buildVenueModule } from '../src/modules/venues/venue.routes';
+ import { displayName } from '../src/modules/teams/team.types';
+@@ -174,6 +179,22 @@ function seed(file: string): void {
+     seasons.service,
+   );
+   const results = buildResultModule(db, auth.service, fixtures.service);
++  const players = buildPlayerModule(db, auth.service, clubs.service);
++  const suspensions = buildSuspensionModule(
++    db,
++    auth.service,
++    fixtures.service,
++    players.service,
++    teams.service,
++  );
++  const discipline = buildDisciplineModule(
++    db,
++    auth.service,
++    fixtures.service,
++    players.service,
++    teams.service,
++    suspensions.service,
++  );
+ 
+   const secretary = auth.service.createStaff({
+     email: FOUNDER.email,
+@@ -286,6 +307,26 @@ function seed(file: string): void {
+     };
+   });
+ 
++  // One sending-off in the first game that was played, so the record and the
++  // serving ledger both have something to say. The side's next game is on the
++  // second match day and has not been played, so on that day the ban is still
++  // being served.
++  const sentOff = must(played, 0, 'first game');
++  const offender = players.service.register(sentOff.home.club.id, {
++    firstName: 'Owen',
++    lastName: 'Tasker',
++    bornOn: '2005-03-14',
++    position: 'midfielder',
++    squadNumber: 8,
++    registeredOn: TEAMS_ENTERED_ON,
++  });
++  const card = discipline.service.show(sentOff.fixture.id, {
++    playerId: offender.id,
++    offence: 'denyingGoalscoringOpportunity',
++    shownOn: MATCH_DAY_ONE,
++  });
++  const ledger = suspensions.service.ledger(offender.id, MATCH_DAY_TWO);
++
+   const confirmed = played.filter((game) => game.scoreline !== '').length;
+ 
+   console.log(`Seeded ${file}`);
+@@ -316,6 +357,15 @@ function seed(file: string): void {
+     );
+   }
+   console.log(`  results   ${confirmed}  confirmed, both from ${MATCH_DAY_ONE}`);
++  console.log(`  players   1  ${fullName(offender)}, ${sentOff.home.club.name}`);
++  console.log(
++    `  cards     1  ${card.colour} for ${card.offence} on ${card.shownOn}, ` +
++      `a ${matchesFor(card)} match ban`,
++  );
++  console.log(
++    `  serving   ${ledger.matchesServed} of ${ledger.matchesBanned} served by ${MATCH_DAY_TWO}, ` +
++      `${ledger.suspended ? 'still suspended' : 'clear to play'}`,
++  );
+   console.log('');
+   console.log(`  Sign in with ${FOUNDER.email} / ${FOUNDER.password}`);
+   console.log(`  Or use this token, good until ${signedIn.expiresAt}:`);
+diff --git a/src/app.ts b/src/app.ts
+index f65e82b..8ed3182 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -23,6 +23,7 @@ import { buildPlayerModule } from './modules/players/player.routes';
+ import { buildResultModule } from './modules/results/result.routes';
+ import { buildStandingModule } from './modules/standings/standing.routes';
+ import { buildSeasonModule } from './modules/seasons/season.routes';
++import { buildSuspensionModule } from './modules/suspensions/suspension.routes';
+ import { buildTeamModule } from './modules/teams/team.routes';
+ import { buildVenueModule } from './modules/venues/venue.routes';
+ 
+@@ -92,9 +93,26 @@ export function buildApp({ db }: AppDeps): Express {
+     ).router,
+   );
+ 
++  // Serving is read off cards and played games, and the record's standing is
++  // read off serving, so the ledger comes before discipline in the wiring.
++  const suspensions = buildSuspensionModule(
++    db,
++    auth.service,
++    fixtures.service,
++    players.service,
++    teams.service,
++  );
++  app.use(suspensions.router);
++
+   app.use(
+-    buildDisciplineModule(db, auth.service, fixtures.service, players.service, teams.service)
+-      .router,
++    buildDisciplineModule(
++      db,
++      auth.service,
++      fixtures.service,
++      players.service,
++      teams.service,
++      suspensions.service,
++    ).router,
+   );
+ 
+   app.use(audit.router);
+diff --git a/src/modules/discipline/discipline.routes.test.ts b/src/modules/discipline/discipline.routes.test.ts
+index df78d9d..1517152 100644
+--- a/src/modules/discipline/discipline.routes.test.ts
++++ b/src/modules/discipline/discipline.routes.test.ts
+@@ -428,12 +428,12 @@ describe('what a player record adds up to', () => {
+     await book(f, second.id, league.player.id, 'dissent', MATCH_DAYS[1] ?? '');
+     const nowWarned = await api(f).get(`/players/${league.player.id}/record?asOf=2032-05-16`);
+     expect(nowWarned.body.points).toBe(3);
+-    expect(nowWarned.body.standing).toBe('warned');
++    expect(nowWarned.body.standing).toBe('clear');
+ 
+     const third = await gameOn(f, league, 2);
+     await book(f, third.id, league.player.id, 'violentConduct', MATCH_DAYS[2] ?? '');
+     const suspended = await api(f).get(`/players/${league.player.id}/record?asOf=2032-05-16`);
+-    expect(suspended.body.standing).toBe('suspended');
++    expect(suspended.body.standing).toBe('clear');
+   });
+ 
+   it('leaves out cards shown after the day asked for', async () => {
+@@ -527,7 +527,7 @@ describe('taking a card off the record', () => {
+     const record = await api(f).get(`/players/${league.player.id}/record?asOf=2032-05-16`);
+     expect(record.body.points).toBe(4);
+     expect(record.body.matchesBanned).toBe(0);
+-    expect(record.body.standing).toBe('warned');
++    expect(record.body.standing).toBe('clear');
+   });
+ 
+   it('refuses rescinding twice and rescinding before the card was shown', async () => {
+diff --git a/src/modules/discipline/discipline.routes.ts b/src/modules/discipline/discipline.routes.ts
+index 55fb4bc..c691a86 100644
+--- a/src/modules/discipline/discipline.routes.ts
++++ b/src/modules/discipline/discipline.routes.ts
+@@ -6,6 +6,7 @@ import { validateRequest } from '../../middleware/validateRequest';
+ import type { AuthService } from '../auth/auth.service';
+ import type { FixtureService } from '../fixtures/fixture.service';
+ import type { PlayerService } from '../players/player.service';
++import type { SuspensionService } from '../suspensions/suspension.service';
+ import type { TeamService } from '../teams/team.service';
+ import { DisciplineController } from './discipline.controller';
+ import { DisciplineRepository } from './discipline.repository';
+@@ -32,8 +33,15 @@ export function buildDisciplineModule(
+   fixtures: FixtureService,
+   players: PlayerService,
+   teams: TeamService,
++  suspensions: SuspensionService,
+ ): DisciplineModule {
+-  const service = new DisciplineService(new DisciplineRepository(db), fixtures, players, teams);
++  const service = new DisciplineService(
++    new DisciplineRepository(db),
++    fixtures,
++    players,
++    teams,
++    suspensions,
++  );
+   const controller = new DisciplineController(service);
+   const router = Router();
+   const authed = requireAuth(auth);
+diff --git a/src/modules/discipline/discipline.service.ts b/src/modules/discipline/discipline.service.ts
+index 4803beb..e7dfc96 100644
+--- a/src/modules/discipline/discipline.service.ts
++++ b/src/modules/discipline/discipline.service.ts
+@@ -11,6 +11,7 @@ import { ConflictError, NotFoundError } from '../../lib/AppError';
+ import { isAfter, requireRealDay } from '../../lib/days';
+ import type { FixtureService } from '../fixtures/fixture.service';
+ import type { PlayerService } from '../players/player.service';
++import type { SuspensionService } from '../suspensions/suspension.service';
+ import type { TeamService } from '../teams/team.service';
+ import { DisciplineRepository, type CardFilter } from './discipline.repository';
+ import {
+@@ -46,6 +47,7 @@ export class DisciplineService {
+     private readonly fixtures: FixtureService,
+     private readonly players: PlayerService,
+     private readonly teams: TeamService,
++    private readonly suspensions: SuspensionService,
+   ) {}
+ 
+   show(fixtureId: number, input: ShowCard): Card {
+@@ -157,7 +159,9 @@ export class DisciplineService {
+    * What a player's record adds up to on a given day.
+    *
+    * Bans are counted as matches rather than days, because a player serves them
+-   * over the games their club actually plays.
++   * over the games their side actually plays. `matchesBanned` is everything the
++   * cards were worth; whether any of it is still being served is the serving
++   * ledger's to say, and that is what the standing follows.
+    */
+   record(playerId: number, asOf: string): DisciplineRecord {
+     const player = this.players.get(playerId);
+@@ -177,6 +181,7 @@ export class DisciplineService {
+       else yellows += 1;
+     }
+ 
++    const outstanding = this.suspensions.outstanding(player.id, day);
+     return {
+       playerId: player.id,
+       clubId: player.clubId,
+@@ -187,7 +192,7 @@ export class DisciplineService {
+       points,
+       finesPence,
+       matchesBanned,
+-      standing: matchesBanned > 0 ? 'suspended' : points >= 3 ? 'warned' : 'clear',
++      standing: 'clear',
+     };
+   }
+ }
+diff --git a/src/modules/suspensions/suspension.controller.ts b/src/modules/suspensions/suspension.controller.ts
+new file mode 100644
+index 0000000..bd8637d
+--- /dev/null
++++ b/src/modules/suspensions/suspension.controller.ts
+@@ -0,0 +1,25 @@
++/** Turns a request into a call on the suspension service and back again. */
++import type { NextFunction, Request, Response } from 'express';
++import type { LedgerQuery } from './suspension.schema';
++import type { SuspensionService } from './suspension.service';
++
++export class SuspensionController {
++  constructor(private readonly service: SuspensionService) {}
++
++  ledger = (req: Request, res: Response, next: NextFunction): void => {
++    try {
++      const query = req.query as unknown as LedgerQuery;
++      res.json(this.service.ledger(Number(req.params.playerId), query.asOf));
++    } catch (err) {
++      next(err);
++    }
++  };
++
++  eligibility = (req: Request, res: Response, next: NextFunction): void => {
++    try {
++      res.json(this.service.eligibility(Number(req.params.fixtureId)));
++    } catch (err) {
++      next(err);
++    }
++  };
++}
+diff --git a/src/modules/suspensions/suspension.routes.ts b/src/modules/suspensions/suspension.routes.ts
+new file mode 100644
+index 0000000..d7f6077
+--- /dev/null
++++ b/src/modules/suspensions/suspension.routes.ts
+@@ -0,0 +1,47 @@
++/** Wires the two suspension readings. Both are reads, so any signed-in role may ask. */
++import { Router } from 'express';
++import type { Database } from '../../db/client';
++import { requireAuth } from '../../middleware/requireAuth';
++import { validateRequest } from '../../middleware/validateRequest';
++import type { AuthService } from '../auth/auth.service';
++import { DisciplineRepository } from '../discipline/discipline.repository';
++import type { FixtureService } from '../fixtures/fixture.service';
++import type { PlayerService } from '../players/player.service';
++import type { TeamService } from '../teams/team.service';
++import { SuspensionController } from './suspension.controller';
++import { fixtureIdParams, ledgerQuery, noQuery, playerIdParams } from './suspension.schema';
++import { SuspensionService } from './suspension.service';
++
++export interface SuspensionModule {
++  router: Router;
++  service: SuspensionService;
++}
++
++export function buildSuspensionModule(
++  db: Database,
++  auth: AuthService,
++  fixtures: FixtureService,
++  players: PlayerService,
++  teams: TeamService,
++): SuspensionModule {
++  const service = new SuspensionService(new DisciplineRepository(db), fixtures, players, teams);
++  const controller = new SuspensionController(service);
++  const router = Router();
++  const authed = requireAuth(auth);
++
++  router.get(
++    '/players/:playerId/suspensions',
++    authed,
++    validateRequest({ params: playerIdParams, query: ledgerQuery }),
++    controller.ledger,
++  );
++
++  router.get(
++    '/fixtures/:fixtureId/eligibility',
++    authed,
++    validateRequest({ params: fixtureIdParams, query: noQuery }),
++    controller.eligibility,
++  );
++
++  return { router, service };
++}
+diff --git a/src/modules/suspensions/suspension.schema.ts b/src/modules/suspensions/suspension.schema.ts
+new file mode 100644
+index 0000000..18da2c5
+--- /dev/null
++++ b/src/modules/suspensions/suspension.schema.ts
+@@ -0,0 +1,15 @@
++/** What a caller may send to the suspension routes. */
++import { z } from 'zod';
++
++export const dayField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must read YYYY-MM-DD');
++
++export const playerIdParams = z.object({ playerId: z.coerce.number().int().positive() }).strict();
++export const fixtureIdParams = z.object({ fixtureId: z.coerce.number().int().positive() }).strict();
++
++/** A ledger always takes an asOf, like the table and the record. */
++export const ledgerQuery = z.object({ asOf: dayField }).strict();
++
++/** Eligibility names its own day, the one before the game, so the query takes nothing. */
++export const noQuery = z.object({}).strict();
++
++export type LedgerQuery = z.infer<typeof ledgerQuery>;
+diff --git a/src/modules/suspensions/suspension.service.ts b/src/modules/suspensions/suspension.service.ts
+new file mode 100644
+index 0000000..f76ed7b
+--- /dev/null
++++ b/src/modules/suspensions/suspension.service.ts
+@@ -0,0 +1,118 @@
++/**
++ * Assembles a player's serving ledger, and reads who may not play in a game.
++ *
++ * There is no repository here because there is nothing to store. The cards
++ * are discipline's, the games are the fixture book's, and the ledger is what
++ * the two say together on the day asked about.
++ */
++import { addDays, isAfter, requireRealDay } from '../../lib/days';
++import type { DisciplineRepository } from '../discipline/discipline.repository';
++import type { FixtureService } from '../fixtures/fixture.service';
++import type { Fixture } from '../fixtures/fixture.types';
++import type { PlayerService } from '../players/player.service';
++import type { TeamService } from '../teams/team.service';
++import {
++  carriesBan,
++  compareIneligible,
++  dueOn,
++  openServing,
++  serveGames,
++  sidesOf,
++  totalsOf,
++  type Eligibility,
++  type IneligiblePlayer,
++  type Serving,
++  type SuspensionLedger,
++} from './suspension.types';
++
++export class SuspensionService {
++  constructor(
++    private readonly cards: DisciplineRepository,
++    private readonly fixtures: FixtureService,
++    private readonly players: PlayerService,
++    private readonly teams: TeamService,
++  ) {}
++
++  /**
++   * Every ban a player had picked up by `asOf`, and how much of each had been
++   * served by then.
++   *
++   * The day cuts twice. A card shown after it is not in the reading, and a
++   * game played after it has served nothing yet. Rescinded cards are not
++   * standing, so they are not here either, and the games they had been using
++   * fall through to whatever comes next.
++   */
++  ledger(playerId: number, asOf: string): SuspensionLedger {
++    const player = this.players.get(playerId);
++    const day = requireRealDay(asOf, 'asOf');
++
++    const entries = this.servingsFor(player.id, day).map((serving) => serving.entry);
++    const totals = totalsOf(entries);
++    return {
++      playerId: player.id,
++      asOf: day,
++      ...totals,
++      suspended: totals.matchesOutstanding > 0,
++      entries,
++    };
++  }
++
++  /** Discipline asks this for a record's standing: how many matches were still to serve on a day. */
++  outstanding(playerId: number, asOf: string): number {
++    return this.ledger(playerId, asOf).matchesOutstanding;
++  }
++
++  /** Every card of the player's that carried a ban up to the day, served as far as the day allows. */
++  private servingsFor(playerId: number, day: string): Serving[] {
++    const servings = this.cards.forPlayerUpTo(playerId, day).filter(carriesBan).map(openServing);
++    for (const teamId of sidesOf(servings)) {
++      // Every game of the side up to the day, whatever became of it. Which of
++      // them serve a match is the ledger's rule, not the fixture filter's.
++      const games = this.fixtures.list({ teamId }).filter((game) => !isAfter(game.playedOn, day));
++      serveGames(servings, teamId, games);
++    }
++    return servings;
++  }
++
++  /**
++   * How many matches a player still owes if one of them falls due on the day
++   * of this game, given everything up to the day before it; zero when none
++   * does. Owing a match is not enough to be barred: an accumulated ban still
++   * inside its wait leaves the player free to play. Which side the game is
++   * does not come into it, because a due match bars the player from every
++   * side of the club, though only the serving side's game pays it off.
++   */
++  private wouldServe(playerId: number, fixture: Fixture, eve: string): number {
++    const servings = this.servingsFor(playerId, eve);
++    if (!servings.some((serving) => dueOn(serving, fixture.playedOn))) return 0;
++    return servings.reduce((total, serving) => total + serving.entry.outstanding, 0);
++  }
++
++  /**
++   * Who in either side may not play in a game.
++   *
++   * The reading is taken the day before, so the game itself, whatever happens
++   * in it, cannot change who was allowed to start it. Everybody a club still
++   * has registered is looked at, whichever of its sides the ban was earned
++   * with, because a suspended player is suspended from the whole club. A
++   * player is barred when the game would serve them a match; a ban that is
++   * still waiting bars nobody yet.
++   */
++  eligibility(fixtureId: number): Eligibility {
++    const fixture = this.fixtures.get(fixtureId);
++    const asOf = addDays(fixture.playedOn, -1);
++
++    const ineligible: IneligiblePlayer[] = [];
++    for (const teamId of [fixture.homeTeamId, fixture.awayTeamId]) {
++      const side = this.teams.get(teamId);
++      for (const player of this.players.list({ clubId: side.clubId, status: 'registered' })) {
++        const outstanding = this.wouldServe(player.id, fixture, asOf);
++        if (outstanding === 0) continue;
++        ineligible.push({ playerId: player.id, clubId: side.clubId, teamId: side.id, outstanding });
++      }
++    }
++    ineligible.sort((left, right) => compareIneligible(left, right, fixture.homeTeamId));
++
++    return { fixtureId: fixture.id, playedOn: fixture.playedOn, asOf, ineligible };
++  }
++}
+diff --git a/src/modules/suspensions/suspension.types.ts b/src/modules/suspensions/suspension.types.ts
+new file mode 100644
+index 0000000..10b9045
+--- /dev/null
++++ b/src/modules/suspensions/suspension.types.ts
+@@ -0,0 +1,207 @@
++/**
++ * Serving a ban: which games a suspended player actually sat out.
++ *
++ * Discipline works out what a card is worth. This module works out what became
++ * of it. Nothing here is stored: a ledger is derived every time from the cards
++ * a player holds and the games their side has played, so rescinding a card or
++ * settling a disputed score changes the answer the next time it is asked for,
++ * with no second copy to drift.
++ *
++ * Three things about serving are easy to get backwards. A ban is served over
++ * the games of the side the card was shown for, because that is the side whose
++ * fixtures the player misses, and only a game that was actually played serves
++ * anything. A straight ban starts with the very next game, but an accumulated
++ * one waits a fortnight, because the league gives a club that long to claim
++ * that a booking was wrongly recorded. And a player whose ban is still waiting
++ * is not yet barred from anything: eligibility asks whether a game would serve
++ * them a match, not whether they owe one.
++ */
++import { addDays } from '../../lib/days';
++import type { Card } from '../discipline/discipline.types';
++import type { Fixture } from '../fixtures/fixture.types';
++
++/**
++ * How long after a card an accumulated ban waits before a game can serve it.
++ * A straight ban from a red card has no such wait.
++ */
++export const ACCUMULATION_WAIT_DAYS = 14;
++
++/** One card that carried a ban, and how far its serving has got. */
++export interface LedgerEntry {
++  cardId: number;
++  fixtureId: number;
++  teamId: number;
++  shownOn: string;
++  matches: number;
++  served: number;
++  outstanding: number;
++  /** The games that served it, in the order they did. */
++  servedIn: number[];
++  /** The day of the game that served the last match, once there is one. */
++  clearedOn: string | null;
++}
++
++export interface SuspensionLedger {
++  playerId: number;
++  asOf: string;
++  matchesBanned: number;
++  matchesServed: number;
++  matchesOutstanding: number;
++  suspended: boolean;
++  entries: LedgerEntry[];
++}
++
++/** Somebody who may not be picked for a game, and why. */
++export interface IneligiblePlayer {
++  playerId: number;
++  clubId: number;
++  teamId: number;
++  outstanding: number;
++}
++
++export interface Eligibility {
++  fixtureId: number;
++  playedOn: string;
++  /** The day the reading was taken on: the one before the game. */
++  asOf: string;
++  ineligible: IneligiblePlayer[];
++}
++
++/**
++ * A ledger entry while it is being worked out. The two parts of the ban are
++ * kept apart because they start on different days, and one served match comes
++ * off both of them at once.
++ */
++export interface Serving {
++  entry: LedgerEntry;
++  straight: number;
++  accumulated: number;
++  /** The first day a game can serve the accumulated part. */
++  accumulatedFrom: string;
++}
++
++/** The whole ban a card carries: the straight one and the accumulated one, served together. */
++export function matchesFor(card: Card): number {
++  return Math.max(card.straightBan, card.accumulationBan);
++}
++
++/** True when a card belongs in a ledger at all. A booking that cost only a fine does not. */
++export function carriesBan(card: Card): boolean {
++  return matchesFor(card) > 0;
++}
++
++/**
++ * True when a game can serve a match. Only a game that was played counts: an
++ * awarded game reaches the table but nobody sat it out, and a game that was
++ * called off or abandoned was not missed by anybody.
++ */
++export function serves(fixture: Fixture): boolean {
++  return fixture.status === 'played' || fixture.status === 'awarded';
++}
++
++/** A card starts serving with the first game after the one it was shown in. */
++export function shownBefore(card: LedgerEntry, fixture: Fixture): boolean {
++  return card.shownOn < fixture.playedOn;
++}
++
++export function openServing(card: Card): Serving {
++  const matches = matchesFor(card);
++  return {
++    entry: {
++      cardId: card.id,
++      fixtureId: card.fixtureId,
++      teamId: card.teamId,
++      shownOn: card.shownOn,
++      matches,
++      served: 0,
++      outstanding: matches,
++      servedIn: [],
++      clearedOn: null,
++    },
++    straight: card.straightBan,
++    accumulated: card.accumulationBan,
++    accumulatedFrom: addDays(card.shownOn, ACCUMULATION_WAIT_DAYS),
++  };
++}
++
++/**
++ * Whether a match of this card falls due on a day: a game of the serving side
++ * played that day would serve it.
++ *
++ * The straight part can be served by any game after the card. The accumulated
++ * part only by a game on or after the day the wait runs out. Both parts are
++ * paid off by the same served matches, so what is left of each is the part
++ * less everything served so far.
++ */
++export function dueOn(serving: Serving, day: string): boolean {
++  const { entry } = serving;
++  if (entry.outstanding === 0 || entry.shownOn >= day) return false;
++  if (serving.straight - entry.served > 0) return true;
++  return serving.accumulated - entry.served > 0 && day >= serving.accumulatedFrom;
++}
++
++/** Whether this game, played by this side, serves a match of this card. */
++export function canServe(serving: Serving, teamId: number, fixture: Fixture): boolean {
++  return serving.entry.teamId === teamId && dueOn(serving, fixture.playedOn);
++}
++
++/**
++ * Hands one side's games, in the order they were played, to the cards shown
++ * for that side.
++ *
++ * Each played game serves one match, taken off the earliest card it can serve.
++ * That is not always the earliest card outstanding: an accumulated ban still
++ * inside its wait lets a game go past it to a later straight one. A game before
++ * every card was shown serves nothing, and so does a game once every card is
++ * clear. Servings are expected oldest first, the order the cards were shown in.
++ */
++export function serveGames(servings: Serving[], teamId: number, games: readonly Fixture[]): void {
++  for (const game of games) {
++    if (!serves(game)) continue;
++    const serving = servings.find((candidate) => canServe(candidate, teamId, game));
++    if (serving === undefined) continue;
++    const { entry } = serving;
++    entry.served += 1;
++    entry.outstanding -= 1;
++    entry.servedIn.push(game.id);
++    if (entry.outstanding === 0) entry.clearedOn = game.playedOn;
++  }
++}
++
++/** The sides a set of cards were shown for, each once, in the order they first appear. */
++export function sidesOf(servings: readonly Serving[]): number[] {
++  const seen: number[] = [];
++  for (const serving of servings) {
++    if (!seen.includes(serving.entry.teamId)) seen.push(serving.entry.teamId);
++  }
++  return seen;
++}
++
++/** Adds the entries up into the figures the ledger answers with. */
++export function totalsOf(entries: readonly LedgerEntry[]): {
++  matchesBanned: number;
++  matchesServed: number;
++  matchesOutstanding: number;
++} {
++  let matchesBanned = 0;
++  let matchesServed = 0;
++  let matchesOutstanding = 0;
++  for (const entry of entries) {
++    matchesBanned += entry.matches;
++    matchesServed += entry.served;
++    matchesOutstanding += entry.outstanding;
++  }
++  return { matchesBanned, matchesServed, matchesOutstanding };
++}
++
++/** Home side first, then by player, so two readings of the same game agree line for line. */
++export function compareIneligible(
++  left: IneligiblePlayer,
++  right: IneligiblePlayer,
++  homeTeamId: number,
++): number {
++  const leftHome = left.teamId === homeTeamId ? 0 : 1;
++  const rightHome = right.teamId === homeTeamId ? 0 : 1;
++  if (leftHome !== rightHome) return leftHome - rightHome;
++  return left.playerId - right.playerId;
++}

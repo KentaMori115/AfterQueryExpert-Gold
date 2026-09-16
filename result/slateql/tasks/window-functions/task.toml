@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+
+[task]
+name = "afterquery/window-functions"
+
+[metadata]
+task_id = "window-functions"
+display_title = "Window functions with OVER, PARTITION BY and ranking"
+display_description = "Teach the SlateQL engine window functions: an OVER clause on any aggregate plus ROW_NUMBER, RANK and DENSE_RANK, partitioned and ordered, without disturbing the row order the rest of the engine promises."
+category = "feature_request"
+language = "python"
+repository_url = "platform://gold/repos/HJkKKkPJZJW1HJNijy50"
+base_commit_hash = "54f89d40389ec4ee4123a5681e13ed224a2d2f90"
+
+[agent]
+timeout_sec = 5400
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800
+
+[verifier.environment]
+build_timeout_sec = 1800
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+allow_internet = false
+
+[environment]
+build_timeout_sec = 1800
+docker_image = "us-docker.pkg.dev/afterquery-compute/compute-images/gold-repo-kukarepo-hjkkkk:v1"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+allow_internet = false

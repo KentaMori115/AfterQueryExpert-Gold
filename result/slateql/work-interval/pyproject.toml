@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slateql"
+version = "0.6.0"
+description = "An embeddable analytical SQL engine written in pure Python."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = []
+keywords = ["sql", "query-engine", "analytics", "csv", "jsonl"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database :: Database Engines/Servers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.16"]
+
+[project.scripts]
+slateql = "slateql.cli.main:main"
+
+[tool.setuptools.packages.find]
+include = ["slateql*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 90
+target-version = "py310"
+
+[tool.ruff.lint]
+# Formatting is left to the author; this set catches real defects (F),
+# style slips (E, W) and import drift (I). Line length is enforced by
+# review rather than by the linter, hence the E501 exemption.
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

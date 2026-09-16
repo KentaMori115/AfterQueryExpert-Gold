@@ -1,0 +1,951 @@
+diff --git a/README.md b/README.md
+index 210e6d3..333820b 100644
+--- a/README.md
++++ b/README.md
+@@ -37,6 +37,7 @@ From a shell:
+ ```
+ python -m layover board hbf-u1 --after 08:00 --limit 5
+ python -m layover plan westtor flughafen --after 08:00 --itinerary --fare
++python -m layover arrive westtor flughafen --by 09:00 --latest
+ python -m layover timetable u1 --window 08:00-10:00
+ python -m layover diagram u2
+ python -m layover frequency --routes
+@@ -56,6 +57,8 @@ python -m layover --feed path/to/feed check
+   included, and answers boards, printed timetables and how often things run.
+ - **Plans journeys** with a round based search over time and changes, returning
+   the journeys worth offering rather than only the quickest.
++- **Plans backwards** from a deadline, working out the last moment a passenger
++  may leave and still be there in time.
+ - **Prices them** against zone based fare rules.
+ - **Checks a feed** with twenty checks, from stops nothing calls at to trips
+   that overtake each other.
+@@ -109,27 +112,25 @@ room for and does not do, and the code does not pretend otherwise.
+    static timetable, and a search that respects them.
+ 2. **Frequency based services.** A headway written once and expanded into trips
+    on demand, rather than every trip written out.
+-3. **Arrive by search.** Planning backwards from a time you have to be there,
+-   which is not the same search run in reverse.
+-4. **More criteria.** Trading off walking distance and fare as well as arrival
++3. **More criteria.** Trading off walking distance and fare as well as arrival
+    and changes, and returning the whole frontier.
+-5. **Isochrones.** Everywhere reachable inside a time budget, as an area rather
++4. **Isochrones.** Everywhere reachable inside a time budget, as an area rather
+    than a list of stops.
+-6. **Fare capping and whole journey pricing.** Daily and weekly caps, period
++5. **Fare capping and whole journey pricing.** Daily and weekly caps, period
+    passes, transfer discounts, and choosing the product from the journey's own
+    zones rather than from the first ride of each ticket.
+-7. **Generated footpaths.** Working out that two stops are walkable from where
++6. **Generated footpaths.** Working out that two stops are walkable from where
+    they are, instead of using only the transfers a feed declares.
+-8. **Blocks and interlining.** Staying aboard when one trip becomes the next.
+-9. **Time zones.** Daylight saving and feeds that span more than one zone; the
++7. **Blocks and interlining.** Staying aboard when one trip becomes the next.
++8. **Time zones.** Daylight saving and feeds that span more than one zone; the
+    timezone an agency declares is recorded and not interpreted.
+-10. **Shapes.** The line a route follows on the ground, and distance along it.
+-11. **Accessibility.** Step free stops, wheelchair and bicycle rules, and
++9. **Shapes.** The line a route follows on the ground, and distance along it.
++10. **Accessibility.** Step free stops, wheelchair and bicycle rules, and
+     searches that respect them.
+-12. **Pattern compression.** Folding thousands of near identical patterns
++11. **Pattern compression.** Folding thousands of near identical patterns
+     together, for feeds that write one per trip.
+-13. **Feed differencing.** What changed between two versions of the same feed.
+-14. **A packed index.** Holding a national feed without reading it all into
++12. **Feed differencing.** What changed between two versions of the same feed.
++13. **A packed index.** Holding a national feed without reading it all into
+     memory.
+-15. **Booking rules.** On demand services, call ahead windows and pickup by
++14. **Booking rules.** On demand services, call ahead windows and pickup by
+     arrangement.
+diff --git a/docs/design.md b/docs/design.md
+index 6e8f241..a2ef8df 100644
+--- a/docs/design.md
++++ b/docs/design.md
+@@ -39,6 +39,32 @@ if an import crosses them.
+ - **Errors carry a code and a place.** Every failure names the table, the row and
+   the field it came from, so a feed with a thousand problems reports all of them.
+ 
++## Why the backward search is its own module
++
++Planning from a deadline is the same shape of search as planning from a
++departure, and it is not the same search. The rounds run from the destination
++outward, every label holds the latest moment a passenger may still be at a stop
++rather than the earliest they can reach it, and a pattern is walked from its
++last call down to its first, so alighting is what a round enters a pattern by
++and boarding is what it leaves by. Declared transfers are directional, and
++walking one backward means asking which walks end at a stop, which is the index
++the network does not keep and the search builds for itself.
++
++There is a smaller difference that costs more than it looks. Running the
++forward search from an early hour and keeping the last journey that arrives in
++time answers a different question: it finds journeys leaving early, not the
++last one worth catching, and on a network where the quick way runs twice an
++hour and the slow way runs constantly it will hand back the slow one. The
++backward pass is what makes the late departure the thing being maximised.
++
++Sharing one module with the forward search would mean a comparison operator and
++a direction flag threaded through every line of it, and the two would then be
++wrong together. They sit side by side in `plan` instead, and the backward one
++leans on the forward one for the last step: once it knows the last workable
++departure, the journeys it offers are the ones the ordinary search finds from
++that moment, which is what keeps a passenger who leaves on time from waiting
++around at every change on the way.
++
+ ## Why fares sit under the search rather than over it
+ 
+ Pricing takes a sequence of rides, where a ride is a route, two stops and two
+@@ -49,7 +75,7 @@ what a fare is.
+ 
+ ## What is deliberately missing
+ 
+-`README.md` ends with fifteen numbered gaps. They are not oversights and they
++`README.md` ends with fourteen numbered gaps. They are not oversights and they
+ are not to be filled in passing. The ones that touch this table are the packed
+ on-disk index, which would go under `feed`, and the real time layer, which would
+ sit between `timetable` and `plan`.
+diff --git a/docs/glossary.md b/docs/glossary.md
+index d9a239e..da3f762 100644
+--- a/docs/glossary.md
++++ b/docs/glossary.md
+@@ -21,6 +21,10 @@ in the pattern.
+ **Component** — a group of stops that connect to each other and not to the rest
+ of the feed. A feed with two components is two networks in one file.
+ 
++**Deadline** — the latest arrival a passenger will accept, which is what a
++backward search is given instead of a departure. The search answers with the
++last moment they may set off.
++
+ **Dwell** — how long a vehicle stands at a call, the departure less the arrival.
+ 
+ **Feed** — a directory of comma separated tables describing a network, its
+@@ -58,6 +62,8 @@ sliced across the day. The two live in `layover.plan` and
+ 
+ **Round** — one iteration of the journey search. Round one uses one vehicle,
+ round two uses two, and walking a declared transfer does not start a new round.
++A backward round counts the same vehicles from the other end: its round one is
++the vehicle the passenger gets off last.
+ 
+ **Route** — the name on the front of the vehicle. It does not say where the
+ vehicle goes; a pattern does.
+diff --git a/docs/guide.md b/docs/guide.md
+index f8cd9f5..061544d 100644
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -102,6 +102,48 @@ for journey in session.plan_window(
+ 08:40-08:55 (15m, 0 changes)
+ ```
+ 
++## When do I have to leave
++
++```python
++from layover.times import format_short
++
++print(format_short(
++    session.latest_departure("westtor", "flughafen", date(2026, 7, 15), parse_clock("09:00"))
++))
++
++for journey in session.plan_arriving_by(
++    "westtor", "flughafen", date(2026, 7, 15), parse_clock("09:00")
++):
++    print(journey)
++```
++
++```
++08:00
++08:00-08:41 (41m, 1 changes)
++```
++
++The first answer is a moment, not a journey: the last one at which setting off
++still works. The second is what the ordinary search offers from that moment,
++less anything that would turn up late. `session.reaching("flughafen", day, by)`
++gives the same answer for every stop at once, which is the backward twin of
++`session.reachable`:
++
++```python
++latest = session.reaching("flughafen", date(2026, 7, 15), parse_clock("09:00"))
++for stop_id in ("ostfeld", "marktplatz", "westtor"):
++    print(stop_id, format_short(latest[stop_id]))
++```
++
++```
++ostfeld 08:26
++marktplatz 08:10
++westtor 08:00
++```
++
++Read that as a promise about each stop on its own: stand at Marktplatz at any
++time up to 08:10 and Flughafen by nine is still possible. The destination is
++not in the answer, the way the origin is not in `reachable`.
++
+ ## How often does it run
+ 
+ ```python
+@@ -138,6 +180,7 @@ of them refuse to work; they say what will surprise a passenger.
+ ```
+ python -m layover board hbf-u1 --after 08:00 --limit 5
+ python -m layover plan westtor flughafen --after 08:00 --itinerary --fare
++python -m layover arrive westtor flughafen --by 09:00 --itinerary
+ python -m layover timetable u1 --window 08:00-10:00
+ python -m layover diagram u2
+ python -m layover frequency --routes
+diff --git a/docs/performance.md b/docs/performance.md
+index 2e93fd7..f5789e4 100644
+--- a/docs/performance.md
++++ b/docs/performance.md
+@@ -42,6 +42,15 @@ a binary search over the departures at that position. Doubling the number of
+ trips barely moves it; doubling the number of stops moves it a lot. Corner to
+ corner on the larger grid crosses more lines and needs more rounds.
+ 
++**Planning backwards costs about what planning forwards costs, and then some.**
++`BackwardSearch` runs the same number of rounds over the same patterns, with an
++alighting index of its own and a transfer index built once per search from the
++network's declared walks. What it hands back costs one ordinary forward search
++on top, because the journeys it offers are the ones the forward search finds
++from the departure the backward pass settled on. Budget for two searches when a
++deadline is what the passenger has, one when only the moment is wanted:
++`latest_departure` and `reaching` stop after the backward pass.
++
+ ## Where the memory goes
+ 
+ Everything is held in memory as Python objects: a `Trip` per trip with two
+@@ -50,10 +59,11 @@ and the indexes above. A feed with a hundred thousand trips is comfortable; a
+ national feed with several million is not, and that is what the packed on-disk
+ index in the README's gap list is for.
+ 
+-The one cache that grows without being asked is the boarding index inside
+-`JourneySearch`, which is keyed by date, pattern and position. A session that
+-plans over one date touches a bounded part of it. A long lived session planning
+-over many dates should be given a fresh search rather than kept forever.
++The two caches that grow without being asked are the boarding index inside
++`JourneySearch` and the alighting index inside `BackwardSearch`, both keyed by
++date, pattern and position. A session that plans over one date touches a bounded
++part of either. A long lived session planning over many dates should be given a
++fresh search rather than kept forever.
+ 
+ ## Rules of thumb
+ 
+@@ -64,3 +74,5 @@ over many dates should be given a fresh search rather than kept forever.
+   to every stop in turn.
+ - `plan_profile` runs the search again for every departure it finds. Ask for a
+   window you actually want, and pass a limit.
++- `reaching` costs one backward search, so use it instead of asking for the
++  latest departure from every stop in turn.
+diff --git a/layover/cli/args.py b/layover/cli/args.py
+index 2ee3c16..74d21c1 100644
+--- a/layover/cli/args.py
++++ b/layover/cli/args.py
+@@ -88,6 +88,19 @@ def build_parser() -> argparse.ArgumentParser:
+     plan.add_argument("--fare", action="store_true", help="price the journey")
+     plan.add_argument("--itinerary", action="store_true", help="show every leg")
+ 
++    arrive = commands.add_parser(
++        "arrive", help="journeys that arrive by a deadline", parents=[common]
++    )
++    arrive.add_argument("origin")
++    arrive.add_argument("destination")
++    arrive.add_argument("--by", default="09:00", help="the latest acceptable arrival")
++    arrive.add_argument("--changes", type=int, help="how many changes to allow")
++    arrive.add_argument("--fare", action="store_true", help="price the journey")
++    arrive.add_argument("--itinerary", action="store_true", help="show every leg")
++    arrive.add_argument(
++        "--latest", action="store_true", help="print only the latest departure"
++    )
++
+     timetable = commands.add_parser("timetable", help="the printed timetable of a route", parents=[common])
+     timetable.add_argument("route", nargs="?")
+     timetable.add_argument("--pattern", help="one pattern instead of a whole route")
+@@ -142,6 +155,7 @@ def _commands() -> tuple[str, ...]:
+         "board",
+         "arrivals",
+         "plan",
++        "arrive",
+         "timetable",
+         "diagram",
+         "frequency",
+diff --git a/layover/cli/commands.py b/layover/cli/commands.py
+index 7615306..d86dbd9 100644
+--- a/layover/cli/commands.py
++++ b/layover/cli/commands.py
+@@ -20,7 +20,7 @@ from layover.feed.writer import write_feed
+ from layover.plan.criteria import SearchOptions
+ from layover.report.render import Rendering
+ from layover.session import Session
+-from layover.times import TimeWindow, parse_clock
++from layover.times import TimeWindow, format_short, parse_clock
+ 
+ __all__ = ["open_session", "run_command", "when"]
+ 
+@@ -109,6 +109,34 @@ def _plan(arguments) -> Result:
+     return (OK, _render(arguments, report))
+ 
+ 
++def _arrive(arguments) -> Result:
++    session = open_session(arguments)
++    day = when(arguments)
++    deadline = parse_clock(arguments.by)
++    if arguments.latest:
++        latest = session.latest_departure(arguments.origin, arguments.destination, day, deadline)
++        if latest is None:
++            return (NOTHING_FOUND, "No journey was found.")
++        return (OK, format_short(latest))
++    journeys = session.plan_arriving_by(
++        arguments.origin, arguments.destination, day, deadline
++    )
++    if not journeys:
++        return (NOTHING_FOUND, "No journey was found.")
++    if arguments.itinerary:
++        parts = [
++            _render(arguments, session.itinerary(journey, arguments.fare))
++            for journey in journeys
++        ]
++        return (OK, "\n\n".join(parts))
++    report = session.arrive_by_report(journeys, deadline)
++    if arguments.fare and session.fares is not None:
++        report = report.with_notes(
++            ["Cheapest fare %s." % min(session.price(journey).total for journey in journeys)]
++        )
++    return (OK, _render(arguments, report))
++
++
+ def _timetable(arguments) -> Result:
+     session = open_session(arguments)
+     day = when(arguments)
+@@ -203,6 +231,7 @@ _HANDLERS = {
+     "board": _board,
+     "arrivals": _arrivals,
+     "plan": _plan,
++    "arrive": _arrive,
+     "timetable": _timetable,
+     "diagram": _diagram,
+     "frequency": _frequency,
+diff --git a/layover/plan/__init__.py b/layover/plan/__init__.py
+index eaa436c..fb77796 100644
+--- a/layover/plan/__init__.py
++++ b/layover/plan/__init__.py
+@@ -1,24 +1,28 @@
+ """Journey planning: the search, what it returns, and the limits it runs under.
+ 
+-:func:`plan_journeys` answers "how do I get there leaving now", and
+-:func:`plan_profile` answers "what are my options this morning". Both hand back
+-:class:`Journey` objects made of :class:`Leg` objects.
++:func:`plan_journeys` answers "how do I get there leaving now",
++:func:`plan_profile` answers "what are my options this morning", and
++:func:`plan_arriving_by` answers "what is the last moment I can leave". All
++three hand back :class:`Journey` objects made of :class:`Leg` objects.
+ """
+ 
+ from __future__ import annotations
+ 
++from layover.plan.backward import BackwardSearch, plan_arriving_by
+ from layover.plan.criteria import SearchOptions
+ from layover.plan.leg import Journey, Leg, LegKind
+ from layover.plan.profile import plan_journeys, plan_profile
+ from layover.plan.scan import JourneySearch, Label
+ 
+ __all__ = [
++    "BackwardSearch",
+     "Journey",
+     "JourneySearch",
+     "Label",
+     "Leg",
+     "LegKind",
+     "SearchOptions",
++    "plan_arriving_by",
+     "plan_journeys",
+     "plan_profile",
+ ]
+diff --git a/layover/plan/backward.py b/layover/plan/backward.py
+new file mode 100644
+index 0000000..e9da624
+--- /dev/null
++++ b/layover/plan/backward.py
+@@ -0,0 +1,426 @@
++"""The backward search: planning from a time you have to be there.
++
++The ordinary search in :mod:`layover.plan.scan` starts where the passenger is
++standing and pushes forward, keeping the earliest arrival it has found at every
++stop. This one starts at the destination and pulls backward, keeping the latest
++moment a passenger may still be at every stop and get there on time. Round one
++uses one vehicle, round two uses two, and walking a declared transfer does not
++start a round of its own, exactly as in the forward search.
++
++Backward is not forward turned around, and the two places it differs are the
++two a reader will look for. A pattern is walked from its last call down to its
++first, so the position a passenger gets off at is the one the round enters the
++pattern by and the position they get on at is the one it leaves by: the flag
++that matters at each end is the opposite of the one the forward search reads.
++And a declared transfer runs one way. Walking backward over one means looking
++for the walks that END at a stop, which is the index the network does not keep,
++so this module builds it once per search.
++
++A change costs the same either way round. ``min_transfer_seconds`` sits between
++getting off one vehicle and getting on the next, so backward it is subtracted
++from the moment a stop has to be left by, and only when the leg leaving that
++stop is a ride. A walk out of a stop needs no buffer, because a walk is not a
++vehicle to miss.
++
++The service days are the ones the forward search reads: the date asked about
++and the days behind it the timetable keeps. A trip that set off at 24:50 the
++night before arrives at 00:50 under the asking date's clock and is a perfectly
++good way of being somewhere by one in the morning, so it is offered here the
++same way a board offers it.
++
++What the backward pass answers is a moment, not a journey: the latest departure
++that still works. The journeys themselves come from the ordinary forward search
++run from that moment, which is what stops a passenger being told to leave on
++time and then dawdle at every change.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from datetime import date, timedelta
++from typing import Dict, List, Optional, Tuple
++
++from layover.errors import PlanError
++from layover.network.transfers import Transfer
++from layover.plan.criteria import SearchOptions
++from layover.plan.leg import Journey, Leg
++from layover.plan.scan import JourneySearch
++from layover.timetable.table import Timetable
++from layover.times import SECONDS_PER_DAY
++
++__all__ = ["BackwardSearch", "plan_arriving_by"]
++
++_NEVER = -(1 << 40)
++
++
++@dataclass(frozen=True)
++class _Reach:
++    """How the backward search reached one stop in one round.
++
++    ``departure`` is the latest moment a passenger may leave this stop and
++    still make the deadline with the legs this label hangs off. ``leg`` is the
++    first of those legs, and ``parent_stop`` is where it ends.
++    """
++
++    stop_id: str
++    departure: int
++    round_number: int
++    leg: Optional[Leg] = None
++    parent_stop: Optional[str] = None
++    parent_round: Optional[int] = None
++
++    @property
++    def by_ride(self) -> bool:
++        """Whether the passenger leaves this stop on a vehicle."""
++        return self.leg is not None and self.leg.is_ride
++
++    def __str__(self) -> str:
++        return "%s by %d in round %d" % (self.stop_id, self.departure, self.round_number)
++
++
++class BackwardSearch:
++    """Plans backward from a deadline over a timetable, under one set of settings."""
++
++    def __init__(self, timetable: Timetable, options: Optional[SearchOptions] = None) -> None:
++        self.timetable = timetable
++        self.options = options or SearchOptions()
++        self._alightings: Dict[Tuple[date, str, int], Tuple[tuple, ...]] = {}
++        self._walks_in: Optional[Dict[str, Tuple[Transfer, ...]]] = None
++
++    @property
++    def network(self):
++        """The network being searched."""
++        return self.timetable.network
++
++    def plan(self, origin: str, destination: str, day: date, by: int) -> tuple[Journey, ...]:
++        """Journeys that leave as late as they can and still arrive in time.
++
++        The latest workable departure is found first, and the journeys are then
++        the ones the ordinary forward search offers from that moment, less any
++        that would arrive after the deadline.
++
++        Going through the forward search for the last step is what makes this
++        an answer a passenger can use. The backward pass knows when to set off
++        and nothing else: the legs it hangs off its labels are as late as they
++        can be at every step, which is right for working out the moment and
++        wrong for printing, because it would have somebody who left on time
++        stand about at every change for no reason. Planning forward from that
++        moment picks the same departure and the soonest arrival after it, and
++        the deadline then drops anything that would turn up late.
++        """
++        latest = self.latest_departure(origin, destination, day, by)
++        if latest is None:
++            return ()
++        forward = JourneySearch(self.timetable, self.options)
++        found = forward.plan(origin, destination, day, latest)
++        return tuple(journey for journey in found if journey.arrival <= by)
++
++    def latest_departure(
++        self, origin: str, destination: str, day: date, by: int
++    ) -> Optional[int]:
++        """The last moment a passenger may leave and still be there by ``by``.
++
++        ``None`` when nothing works: no route at all, nothing inside the search
++        window, or nothing that fits the limits the settings impose.
++        """
++        self._check(origin, destination, by)
++        rounds = self._search(destination, origin, day, by)
++        best: Optional[int] = None
++        for labels in rounds:
++            label = labels.get(origin)
++            if label is None:
++                continue
++            journey = self._reconstruct(rounds, label)
++            if journey is None:
++                continue
++            if best is None or journey.departure > best:
++                best = journey.departure
++        return best
++
++    def reaching(self, destination: str, day: date, by: int) -> Dict[str, int]:
++        """For every stop that can get there in time, the latest it may be left.
++
++        The destination itself is left out, the way :meth:`JourneySearch.reachable`
++        leaves the origin out.
++        """
++        self._check(None, destination, by)
++        rounds = self._search(destination, None, day, by)
++        best: Dict[str, int] = {}
++        for labels in rounds:
++            for stop_id, label in labels.items():
++                if stop_id not in best or label.departure > best[stop_id]:
++                    best[stop_id] = label.departure
++        best.pop(destination, None)
++        return best
++
++    def _check(self, origin: Optional[str], destination: str, by: int) -> None:
++        if origin is not None and origin == destination:
++            raise PlanError("a journey has to go somewhere: %r to itself" % origin)
++        if origin is not None:
++            self.network.stop(origin)
++        self.network.stop(destination)
++        if by < 0:
++            raise PlanError("a deadline cannot fall before the service day")
++
++    # -- the search ---------------------------------------------------------
++
++    def _search(
++        self, destination: str, origin: Optional[str], day: date, by: int
++    ) -> List[Dict[str, _Reach]]:
++        options = self.options
++        horizon = by - options.search_window
++        best: Dict[str, int] = {destination: by}
++        rounds: List[Dict[str, _Reach]] = [{destination: _Reach(destination, by, 0)}]
++        self._walk_to(rounds[0], best, {destination}, 0, horizon)
++        marked = set(rounds[0])
++        for number in range(1, options.max_rides + 1):
++            if not marked:
++                break
++            current: Dict[str, _Reach] = {}
++            previous = rounds[number - 1]
++            for pattern_id, start in self._patterns_to_scan(marked, previous):
++                self._ride(pattern_id, start, day, previous, current, best, horizon, number)
++            improved = set(current)
++            self._walk_to(current, best, improved, number, horizon)
++            if origin is not None and origin in best:
++                horizon = max(horizon, best[origin])
++            rounds.append(current)
++            marked = set(current)
++        return rounds
++
++    def _patterns_to_scan(self, marked, previous) -> tuple[tuple[str, int], ...]:
++        """Every pattern worth walking, and the highest call to start it from.
++
++        A backward round enters a pattern where the passenger gets off, so the
++        position has to allow alighting and the walk runs down from the last
++        such position rather than up from the first.
++        """
++        latest: Dict[str, int] = {}
++        for stop_id in marked:
++            if stop_id not in previous:
++                continue
++            for pattern_id, index in self.network.patterns_at(stop_id):
++                pattern = self.network.pattern(pattern_id)
++                if not pattern.can_alight(index):
++                    continue
++                if not self._pattern_allowed(pattern_id):
++                    continue
++                if pattern_id not in latest or index > latest[pattern_id]:
++                    latest[pattern_id] = index
++        return tuple(sorted(latest.items()))
++
++    def _pattern_allowed(self, pattern_id: str) -> bool:
++        route_id = self.network.pattern(pattern_id).route_id
++        if not self.options.allows_route(route_id):
++            return False
++        return self.options.allows_mode(self.network.route(route_id).mode)
++
++    def _ride(
++        self,
++        pattern_id: str,
++        start: int,
++        day: date,
++        previous: Dict[str, _Reach],
++        current: Dict[str, _Reach],
++        best: Dict[str, int],
++        horizon: int,
++        number: int,
++    ) -> None:
++        """Walk one pattern from ``start`` down to its first call.
++
++        Two things happen at every position on the way down. If a trip has
++        already been picked up further along, this position is somewhere the
++        passenger could have got on it, so its departure is the latest they may
++        be at this stop and still make the deadline. And if an earlier round
++        already reached this stop, this position is somewhere they could get
++        off, so the latest trip that arrives in time becomes the one to ride if
++        it beats whatever was picked up before.
++        """
++        pattern = self.network.pattern(pattern_id)
++        route_id = pattern.route_id
++        riding: Optional[tuple] = None
++        alight_index = 0
++        alight_time = 0
++        for index in range(start, -1, -1):
++            stop_id = pattern.stops[index]
++            if riding is not None and pattern.can_board(index):
++                trip, offset = riding[1], riding[2]
++                departure = trip.departure_at(index) + offset * SECONDS_PER_DAY
++                if departure > best.get(stop_id, _NEVER) and departure >= horizon:
++                    best[stop_id] = departure
++                    current[stop_id] = _Reach(
++                        stop_id,
++                        departure,
++                        number,
++                        Leg.ride(
++                            stop_id,
++                            pattern.stops[alight_index],
++                            departure,
++                            alight_time,
++                            route_id,
++                            trip.trip_id,
++                            pattern_id,
++                            trip.headsign or pattern.headsign,
++                            pattern.stops[index + 1 : alight_index],
++                        ),
++                        pattern.stops[alight_index],
++                        number - 1,
++                    )
++            label = previous.get(stop_id)
++            if label is None or not pattern.can_alight(index):
++                continue
++            ready = label.departure - (self.options.min_transfer_seconds if label.by_ride else 0)
++            if ready < horizon:
++                continue
++            candidate = self._latest_alighting(day, pattern_id, index, ready)
++            if candidate is None:
++                continue
++            if riding is None or candidate[0] > riding[0]:
++                riding = candidate
++                alight_index = index
++                alight_time = candidate[0]
++
++    def _walk_to(
++        self,
++        labels: Dict[str, _Reach],
++        best: Dict[str, int],
++        improved,
++        number: int,
++        horizon: int,
++    ) -> None:
++        """Follow every declared transfer that ends at a stop the round reached.
++
++        A transfer runs one way, from the stop it was declared at to the stop
++        it was declared to, and walking one backward means starting from the
++        second and arriving at the first. Which is why this reads the index
++        keyed by where a walk ends rather than the one the network keeps.
++        """
++        additions: Dict[str, _Reach] = {}
++        for stop_id in sorted(improved):
++            label = labels.get(stop_id)
++            if label is None:
++                continue
++            for transfer in self._transfers_to(stop_id):
++                if not self.options.allows_walk(transfer.seconds):
++                    continue
++                departure = label.departure - transfer.seconds
++                source = transfer.from_stop
++                if departure < horizon:
++                    continue
++                if departure <= best.get(source, _NEVER):
++                    continue
++                existing = additions.get(source)
++                if existing is not None and existing.departure >= departure:
++                    continue
++                best[source] = departure
++                additions[source] = _Reach(
++                    source,
++                    departure,
++                    number,
++                    Leg.walk(source, stop_id, departure, label.departure),
++                    stop_id,
++                    number,
++                )
++        labels.update(additions)
++
++    def _transfers_to(self, stop_id: str) -> tuple[Transfer, ...]:
++        """Declared transfers arriving at a stop, quickest first.
++
++        The network indexes transfers by where they start, because that is what
++        the forward search asks for. This is the other index, built once and
++        held for the life of the search.
++        """
++        if self._walks_in is None:
++            collected: Dict[str, List[Transfer]] = {}
++            for transfer in self.network.transfers():
++                collected.setdefault(transfer.to_stop, []).append(transfer)
++            self._walks_in = {
++                target: tuple(sorted(entries, key=lambda item: (item.seconds, item.from_stop)))
++                for target, entries in collected.items()
++            }
++        return self._walks_in.get(stop_id, ())
++
++    def _latest_alighting(
++        self, day: date, pattern_id: str, index: int, ready: int
++    ) -> Optional[tuple]:
++        """The last trip of a pattern that reaches one call by ``ready``.
++
++        The arrivals are sorted, so this is the entry before the first one that
++        lands too late. A trip arriving exactly at ``ready`` is in time. What is
++        left of the window is not checked here: every departure this trip could
++        be boarded at is tested against the horizon by the caller, and a trip
++        that fell outside it makes no label anywhere.
++        """
++        entries = self._alightings_at(day, pattern_id, index)
++        low, high = 0, len(entries)
++        while low < high:
++            middle = (low + high) // 2
++            if entries[middle][0] <= ready:
++                low = middle + 1
++            else:
++                high = middle
++        if low == 0:
++            return None
++        return entries[low - 1]
++
++    def _alightings_at(self, day: date, pattern_id: str, index: int) -> tuple[tuple, ...]:
++        """Every arrival at one call of one pattern, earliest first.
++
++        The service days this looks at are the ones the forward search looks
++        at: the date asked about and the days behind it the timetable keeps, so
++        a trip that left before midnight and arrives after it is offered here
++        under the arriving date's clock.
++        """
++        key = (day, pattern_id, index)
++        found = self._alightings.get(key)
++        if found is None:
++            entries = []
++            for offset in range(0, -self.timetable.days_back - 1, -1):
++                service_day = day + timedelta(days=offset)
++                for trip in self.timetable.trips_on(service_day, pattern_id):
++                    arrival = trip.arrival_at(index) + offset * SECONDS_PER_DAY
++                    if arrival < 0:
++                        continue
++                    entries.append((arrival, trip, offset))
++            entries.sort(key=lambda entry: (entry[0], entry[1].trip_id))
++            found = tuple(entries)
++            self._alightings[key] = found
++        return found
++
++    def _reconstruct(self, rounds: List[Dict[str, _Reach]], label: _Reach) -> Optional[Journey]:
++        """Follow a label to the deadline, collecting legs in travelling order."""
++        legs: List[Leg] = []
++        current: Optional[_Reach] = label
++        seen = 0
++        while current is not None and current.leg is not None:
++            legs.append(current.leg)
++            if current.parent_stop is None or current.parent_round is None:
++                break
++            parent = rounds[current.parent_round].get(current.parent_stop)
++            if parent is None or parent is current:
++                break
++            current = parent
++            seen += 1
++            if seen > 2 * (self.options.max_rides + 2):
++                raise PlanError("a reconstructed journey loops")
++        if not legs:
++            return None
++        try:
++            return Journey(tuple(legs))
++        except PlanError:
++            return None
++
++    def __str__(self) -> str:
++        return "backward search over %s" % self.timetable
++
++
++def plan_arriving_by(
++    timetable: Timetable,
++    origin: str,
++    destination: str,
++    day: date,
++    by: int,
++    options: Optional[SearchOptions] = None,
++) -> tuple[Journey, ...]:
++    """Plan from one stop to another, arriving at or before a time."""
++    return BackwardSearch(timetable, options).plan(origin, destination, day, by)
+diff --git a/layover/report/journey.py b/layover/report/journey.py
+index fe640d3..4312033 100644
+--- a/layover/report/journey.py
++++ b/layover/report/journey.py
+@@ -9,7 +9,7 @@ from layover.plan.leg import Journey
+ from layover.report.render import Report
+ from layover.times import format_duration, format_short
+ 
+-__all__ = ["itinerary_report", "journeys_report"]
++__all__ = ["arrive_by_report", "itinerary_report", "journeys_report"]
+ 
+ 
+ def itinerary_report(
+@@ -77,6 +77,37 @@ def journeys_report(journeys: Iterable[Journey], network=None) -> Report:
+     )
+ 
+ 
++def arrive_by_report(journeys: Iterable[Journey], network=None, by: Optional[int] = None) -> Report:
++    """Journeys against a deadline, with the time each one leaves to spare.
++
++    The same rows :func:`journeys_report` writes, in the same order, with one
++    column added: how long after the journey arrives the deadline falls. A
++    passenger choosing between two ways of being somewhere on time reads that
++    column and nothing else.
++    """
++    rows = []
++    for journey in journeys:
++        rows.append(
++            (
++                format_short(journey.departure),
++                format_short(journey.arrival),
++                format_duration(journey.duration),
++                str(journey.transfers),
++                format_duration(by - journey.arrival) if by is not None else "",
++                " ".join(_route_name(network, route) for route in journey.routes()) or "walk",
++            )
++        )
++    notes = () if rows else ("No journey was found.",)
++    title = "Arriving by %s" % format_short(by) if by is not None else "Journeys"
++    return Report(
++        title,
++        ("Leaves", "Arrives", "Takes", "Changes", "Spare", "Using"),
++        tuple(rows),
++        notes,
++        right=(3,),
++    )
++
++
+ def _route_name(network, route_id) -> str:
+     if network is None or route_id is None:
+         return str(route_id or "")
+diff --git a/layover/session.py b/layover/session.py
+index f562fda..53e94d1 100644
+--- a/layover/session.py
++++ b/layover/session.py
+@@ -17,6 +17,7 @@ from layover.fares.price import FarePrice, Ride, price_rides
+ from layover.fares.zones import ZoneMap
+ from layover.feed.load import FeedContents, load_feed
+ from layover.feed.reader import read_directory
++from layover.plan.backward import BackwardSearch
+ from layover.plan.criteria import SearchOptions
+ from layover.plan.leg import Journey
+ from layover.plan.profile import plan_profile
+@@ -28,7 +29,7 @@ from layover.report.frequency import (
+     profile_report,
+     route_frequency_report,
+ )
+-from layover.report.journey import itinerary_report, journeys_report
++from layover.report.journey import arrive_by_report, itinerary_report, journeys_report
+ from layover.report.render import Report
+ from layover.report.summary import (
+     calendar_report,
+@@ -57,6 +58,7 @@ class Session:
+         self.options = options or SearchOptions()
+         self.timetable = Timetable(contents.network, contents.services, days_back)
+         self._search = JourneySearch(self.timetable, self.options)
++        self._backward = BackwardSearch(self.timetable, self.options)
+         self._zones: Optional[ZoneMap] = None
+ 
+     @property
+@@ -126,6 +128,22 @@ class Session:
+         """Every journey worth catching inside a window."""
+         return plan_profile(self.timetable, origin, destination, day, window, self.options, limit)
+ 
++    def plan_arriving_by(
++        self, origin: str, destination: str, day: date, by: int
++    ) -> tuple[Journey, ...]:
++        """Journeys from one stop to another arriving at or before a time."""
++        return self._backward.plan(origin, destination, day, by)
++
++    def latest_departure(
++        self, origin: str, destination: str, day: date, by: int
++    ) -> Optional[int]:
++        """The last moment a passenger may leave and still arrive in time."""
++        return self._backward.latest_departure(origin, destination, day, by)
++
++    def reaching(self, destination: str, day: date, by: int) -> dict:
++        """The latest every stop may be left to reach one stop in time."""
++        return self._backward.reaching(destination, day, by)
++
+     def reachable(self, origin: str, day: date, after: int = 0) -> dict:
+         """The earliest arrival at every stop reachable from one."""
+         return self._search.reachable(origin, day, after)
+@@ -149,6 +167,10 @@ class Session:
+         """Several journeys as a list of options."""
+         return journeys_report(journeys, self.network)
+ 
++    def arrive_by_report(self, journeys: Iterable[Journey], by: int) -> Report:
++        """Several journeys against a deadline, with the spare time on each."""
++        return arrive_by_report(journeys, self.network, by)
++
+     def pattern_timetable(
+         self, pattern_id: str, day: date, window: Optional[TimeWindow] = None
+     ) -> Report:
+diff --git a/tools/bench.py b/tools/bench.py
+index cc06538..798b7d9 100644
+--- a/tools/bench.py
++++ b/tools/bench.py
+@@ -1,8 +1,9 @@
+ """Time the parts of layover that could get slow, on a network big enough to tell.
+ 
+ Run it with ``python3 tools/bench.py``. It builds a grid city, then times
+-building, indexing, boards, searches and the whole day's reachability. Numbers
+-are from one machine on one day and are only worth comparing against each other.
++building, indexing, boards, searches forward and backward, and the whole day's
++reachability from either end. Numbers are from one machine on one day and are
++only worth comparing against each other.
+ """
+ 
+ from __future__ import annotations
+@@ -17,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ 
+ from layover.dates import DateRange
+ from layover.network import NetworkBuilder
+-from layover.plan import JourneySearch, SearchOptions
++from layover.plan import BackwardSearch, JourneySearch, SearchOptions
+ from layover.services import ServiceCalendar, ServiceRegistry
+ from layover.timetable import Timetable
+ from layover.times import parse_clock
+@@ -91,6 +92,21 @@ def run(side):
+     timed("reach everywhere", lambda: JourneySearch(timetable, SearchOptions()).reachable(
+         corner, DAY, parse_clock("08:00")
+     ))
++    backward = BackwardSearch(timetable, SearchOptions(max_transfers=2))
++    deadline = parse_clock("12:00")
++    timed(
++        "latest departure corner to corner",
++        lambda: backward.latest_departure(corner, far, DAY, deadline),
++    )
++    timed(
++        "latest departure, 20 times",
++        lambda: backward.latest_departure(corner, far, DAY, deadline),
++        rounds=20,
++    )
++    timed("plan arriving by", lambda: backward.plan(corner, far, DAY, deadline))
++    timed("reach everything backward", lambda: BackwardSearch(timetable, SearchOptions()).reaching(
++        far, DAY, deadline
++    ))
+ 
+ 
+ def main(argv=None):

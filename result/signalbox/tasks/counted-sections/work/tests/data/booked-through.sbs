@@ -1,0 +1,13 @@
+# The same down train, but left to automatic route setting rather than being
+# signalled by hand.
+
+scenario "booked through the junction" {
+    step 2
+    until 500
+}
+
+at 0 train 1A05 on D1 at 60 length 80 speed 20
+at 0 book 1A05 "K1(M)" "K3(MA)" "K5(M)"
+
+expect train 1A05 gone
+expect section TA clear

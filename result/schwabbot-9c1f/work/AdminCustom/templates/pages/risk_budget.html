@@ -1,0 +1,86 @@
+{% extends 'admin_base.html' %}
+{% load static %}
+
+{% block content %}
+    <style>
+        .form-container {
+            max-width: 600px; /* Limit the maximum width of the form */
+            width: 100%; /* Ensure it takes up full width on smaller devices */
+        }
+    </style>
+    <div class="container">
+        <div>
+            <h2 class="text-center">Risk Budget Table</h2>
+        </div>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>User ID</th>
+                    <th>User Name</th>
+                    <th>Cap Type</th>
+                    <th>Daily Debit Cap</th>
+                    <th>Cap Percentage</th>
+                    <th>Max Lots Per Order</th>
+                    <th>Max Lots Per Day</th>
+                    <th></th>
+                    <th>Committed Today</th>
+                    <th>Remaining Today</th>
+                    <th></th>
+                    <th>Metered</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in risk_budget_records %}
+                    <tr>
+                        <td>{{record.user_id}}</td>
+                        <td>{{record.user_name}}</td>
+                        <td>
+                            <select class="form-control" id="cap-type-{{record.user_id}}">
+                                <option value="Fixed" {% if record.cap_type == 'Fixed' %} selected {% endif %}>Fixed</option>
+                                <option value="ByAccountBalance" {% if record.cap_type == 'ByAccountBalance' %} selected {% endif %}>By Account Balance</option>
+                            </select>
+                        </td>
+                        <td>
+                            <input class="form-control" type="number" step="0.01" min="0"
+                                id="daily-debit-cap-{{record.user_id}}" value="{{record.daily_debit_cap}}">
+                        </td>
+                        <td>
+                            <input class="form-control" type="number" step="0.01" min="0"
+                                id="cap-percentage-{{record.user_id}}" value="{{record.cap_percentage}}">
+                        </td>
+                        <td>
+                            <input class="form-control" type="number" min="0"
+                                id="max-lots-per-order-{{record.user_id}}" value="{{record.max_lots_per_order}}">
+                        </td>
+                        <td>
+                            <input class="form-control" type="number" min="0"
+                                id="max-lots-per-day-{{record.user_id}}" value="{{record.max_lots_per_day}}">
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-success"
+                                onclick="changeRiskBudget('{{record.user_id}}')">Apply</button>
+                        </td>
+                        <td>{{record.committed_debit}} ({{record.committed_lots}} lots)</td>
+                        <td>{{record.remaining_debit}}</td>
+                        <td>
+                            <button type="button" class="btn btn-warning"
+                                onclick="releaseRiskBudget('{{record.user_id}}')">Release Day</button>
+                        </td>
+                        <td>
+                            <input type="checkbox" id="metered-{{record.user_id}}" {% if record.enabled %} checked {% endif %}
+                                data-toggle="toggle" data-on="Metered" data-off="Unmetered">
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+
+{% endblock %}
+
+{% block script %}
+    {{ block.super }}
+    <script src="{% static 'js/config_3.13.js' %}"></script>
+    <script src="{% static 'js/admin_3.13.js' %}"></script>
+{% endblock %}

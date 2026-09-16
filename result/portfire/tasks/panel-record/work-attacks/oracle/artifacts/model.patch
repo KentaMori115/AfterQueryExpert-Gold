@@ -1,0 +1,1331 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 38d37e1..016fe22 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -30,6 +30,13 @@ schema is still moving and anything that parses it would have to move with it.
+ - runs worth chaining, with the fuse to cut and the pins it saves
+ - a second match on the cues that carry weight, and what that costs
+ 
++### the record
++
++- the dry run graded from the panel's own output log, on the panel's clock
++- the walk after the show read as what is still loaded, misfired or dead
++- clearance by position from the show's last light out, refires only onto
++  pins the walk read open, and the incident book
++
+ ### the output
+ 
+ - firing table in three address styles and three time styles
+diff --git a/README.md b/README.md
+index a9fa000..d4c7e7f 100644
+--- a/README.md
++++ b/README.md
+@@ -35,6 +35,20 @@ portfire pack  show.pf --catalog house.csv --rig autumn.rig --audience 200
+ 
+ A worked example lives in `examples/autumn`.
+ 
++## after the dry run, and after the show
++
++```
++portfire rehearse   show.pf --catalog house.csv --rig autumn.rig --log dryrun.csv
++portfire continuity show.pf --catalog house.csv --rig autumn.rig --walk walk.csv --after after.csv
++```
++
++The panel's own log says which outputs closed and when, and `rehearse --log`
++grades it against the table: what never closed, what closed that the table
++has nothing on, and what closed late. The walk taken after the show says
++which matches burnt, and `continuity --after` turns that into the list of
++what is still loaded, when each position may be approached, and what can be
++relit. Both are written up in `docs/panel-record.md`.
++
+ ## the commands
+ 
+ | command                        | what it answers                                |
+diff --git a/docs/panel-record.md b/docs/panel-record.md
+new file mode 100644
+index 0000000..ccbb853
+--- /dev/null
++++ b/docs/panel-record.md
+@@ -0,0 +1,74 @@
++# the panel's record
++
++Two moments in a show's life leave nothing behind but what the panel itself
++recorded. The dry run, where the table is run into a field of nothing and
++somebody watches lights. And the morning after, when the field has to be
++walked before anybody touches a mortar. Both used to be read by eye. This
++note is the contract for reading them with the tool.
++
++## the dry run log
++
++Every panel writes a log of the outputs it closed and when. `rehearse --log
++<csv>` reads that log against the compiled table.
++
++The file has a header row. The pin column is called `pin`, `address`, `cue`
++or `output`, the same spellings the continuity walk takes. The time column is
++called `time`, `fired`, `at` or `fired at`, and its values are written the
++way a cue time is: `12.4`, `1:23.450`, `250ms`, `4m30s`. A row whose pin or
++time does not read is reported and skipped, so one odd row does not stop the
++rest of the log being graded.
++
++Log times sit on the panel's own clock, which starts at the panel's first
++ignition. A show with a pre roll fires its opener before the show clock's
++zero, so every log time is the show time plus the pre roll, and the grade
++takes that off before comparing. A show compiled with `--absorb-preroll` has
++no pre roll left and the two clocks agree.
++
++Every show pin closes exactly once, so the row with the earliest logged
++time for a pin is that pin's firing. Every other row is extra: a repeat row for a show pin, or any
++row for a pin the show never fires. A show pin with no row at all is missed.
++Each firing carries its offset from the table's time, positive when late.
++Past the tolerance, one frame of the show's format unless `--tolerance <ms>`
++says otherwise, a firing is late or early.
++
++Missed and extra outputs are errors, and so is a row that would not read;
++the command exits with the show problem code on any of them. Late and
++early outputs are warnings. The grade, the finding table
++and the summary line go to standard output, or to `--out`.
++
++## the walk after the show
++
++`continuity --after <csv>` reads the walk taken once the show is over. It
++takes the same file the pre-show walk takes.
++
++A match that fired has burnt its bridgewire and reads open. So a show pin
++that reads open fired, and one that still reads connected did not. With
++`--walk` also given, the pre-show walk splits the ones that did not fire: a
++pin that already read open before the show never had current and is dead,
++not misfired. Without it every connected show pin is a misfire. A show pin
++the after walk never reported is unknown and is treated as loaded, and a
++show pin reading short is listed as such and treated as loaded too. A pin
++outside the show that read connected before and open after is burnt: the
++panel fired something the table never held.
++
++Everything not fired gets the waiting period the misfire rules already give:
++half an hour for anything with a lift charge under it, five minutes for a
++ground piece. Every wait runs from the show's last light out, never from the
++cue or from the position's own last cue. Each position may be approached
++once the longest wait among its own unfired cues has run, and the field is
++clear when the last position is.
++
++A ground piece can be relit. Its refire goes onto a free pin at the same
++position, and after a show a free pin is one the after walk read open. A pin
++still reading connected has a lead on it, and a pin nobody walked is not
++known to be free. Shells are not refired; they are made safe.
++
++The command prints the clearance by position, the refire plan, the incident
++book and a summary line, and exits with the show problem code when anything
++did not fire or anything burnt.
++
++## worked example
++
++`examples/autumn/dryrun.csv` is a dry run log for the autumn show with one
++output skipped, three late and one extra. `examples/autumn/after.csv` is an
++after walk with two shells still in their tubes.
+diff --git a/examples/autumn/after.csv b/examples/autumn/after.csv
+new file mode 100644
+index 0000000..217f6a5
+--- /dev/null
++++ b/examples/autumn/after.csv
+@@ -0,0 +1,107 @@
++pin,state
++04.01,open
++02.01,open
++05.01,open
++02.02,open
++02.03,open
++02.04,open
++02.05,open
++02.06,open
++01.01,open
++01.02,open
++01.03,open
++01.04,open
++01.05,open
++01.06,open
++03.01,open
++03.02,open
++03.03,open
++03.04,open
++03.05,connected
++02.07,open
++03.06,open
++01.07,open
++03.07,open
++01.08,open
++03.08,open
++02.08,open
++01.09,open
++02.09,open
++03.09,open
++04.02,open
++01.10,open
++03.10,open
++02.10,open
++02.11,open
++02.12,open
++02.13,open
++02.14,open
++02.15,open
++02.16,open
++02.17,open
++05.02,open
++01.11,open
++01.12,open
++01.13,open
++01.14,open
++01.15,open
++01.16,open
++01.17,open
++01.18,open
++01.19,open
++01.20,open
++03.11,open
++03.12,open
++03.13,open
++03.14,open
++03.15,open
++03.16,open
++02.18,open
++03.17,open
++03.18,open
++03.19,open
++03.20,open
++04.03,open
++02.19,open
++02.20,open
++02.21,open
++02.22,open
++02.23,open
++02.24,open
++02.25,open
++02.26,open
++01.21,open
++02.27,open
++01.22,open
++01.23,open
++01.24,open
++01.25,open
++03.21,open
++01.26,open
++03.22,open
++05.03,open
++01.27,open
++03.23,open
++01.28,open
++03.24,open
++03.25,open
++03.26,open
++03.27,open
++03.28,open
++02.30,open
++02.31,open
++02.32,connected
++02.33,open
++02.34,open
++02.35,open
++04.04,open
++01.29,open
++01.31,open
++03.31,open
++02.28,open
++03.29,open
++01.30,open
++02.29,open
++03.30,open
++05.30,open
++05.31,open
+diff --git a/examples/autumn/dryrun.csv b/examples/autumn/dryrun.csv
+new file mode 100644
+index 0000000..10cd339
+--- /dev/null
++++ b/examples/autumn/dryrun.csv
+@@ -0,0 +1,105 @@
++pin,fired
++04.01,0:00.000
++02.01,0:08.790
++05.01,0:08.790
++02.02,0:10.350
++02.03,0:10.590
++02.04,0:10.790
++02.05,0:11.030
++02.06,0:11.270
++01.01,0:16.390
++01.02,0:16.790
++01.03,0:17.190
++01.04,0:17.590
++01.05,0:18.110
++01.06,0:18.510
++03.01,0:19.390
++03.02,0:19.790
++03.03,0:20.190
++03.04,0:20.590
++03.05,0:20.990
++02.07,0:21.310
++03.06,0:21.390
++01.07,0:26.670
++03.07,0:30.670
++01.08,0:34.790
++03.08,0:35.310
++02.08,0:36.790
++01.09,0:41.390
++02.09,0:41.710
++03.09,0:41.990
++04.02,0:41.990
++01.10,0:54.550
++03.10,0:54.550
++02.10,0:57.790
++02.11,1:01.590
++02.12,1:01.870
++02.13,1:02.150
++02.14,1:02.390
++02.15,1:02.670
++02.16,1:02.950
++02.17,1:03.190
++01.11,1:16.390
++01.12,1:16.670
++01.13,1:16.910
++01.14,1:17.190
++01.15,1:17.430
++01.16,1:17.710
++01.17,1:17.950
++01.18,1:18.230
++01.19,1:18.470
++01.20,1:18.750
++03.11,1:19.390
++03.12,1:19.670
++03.13,1:19.910
++03.14,1:20.190
++03.15,1:20.430
++03.16,1:20.710
++02.18,1:20.790
++03.17,1:20.950
++03.18,1:21.230
++03.19,1:21.470
++03.20,1:21.750
++04.03,1:21.990
++02.19,1:29.790
++02.20,1:29.950
++02.21,1:30.110
++02.22,1:30.270
++02.23,1:30.390
++02.24,1:30.550
++02.25,1:30.710
++02.26,1:30.870
++01.21,1:30.990
++02.27,1:30.990
++01.22,1:31.190
++01.23,1:31.350
++01.24,1:31.550
++01.25,1:31.710
++03.21,1:31.840
++01.26,1:31.910
++03.22,1:31.990
++05.03,1:31.990
++01.27,1:32.070
++03.23,1:32.150
++01.28,1:32.270
++03.24,1:32.350
++03.25,1:32.510
++03.26,1:32.710
++03.27,1:32.870
++03.28,1:33.070
++02.30,1:33.390
++02.31,1:33.710
++02.32,1:34.030
++02.33,1:34.350
++02.34,1:34.670
++02.35,1:34.990
++04.04,1:34.990
++01.29,1:35.190
++01.31,1:35.190
++03.31,1:35.190
++02.28,1:35.430
++03.29,1:35.670
++01.30,1:35.910
++02.29,1:36.150
++03.30,1:36.390
++05.30,1:00.000
+diff --git a/src/cli/commands/continuity.ts b/src/cli/commands/continuity.ts
+index c508565..3135be3 100644
+--- a/src/cli/commands/continuity.ts
++++ b/src/cli/commands/continuity.ts
+@@ -1,18 +1,34 @@
+ import { SHOW_FLAGS, runShow } from "./common.js";
+ import type { Command } from "../command.js";
+ import { EXIT_BAD_USAGE, EXIT_OK, EXIT_SHOW_PROBLEM } from "../command.js";
++import type { CliEnv } from "../env.js";
+ import { formatBag } from "../../core/diagnostic.js";
++import type { DiagnosticBag } from "../../core/diagnostic.js";
+ import { plural } from "../../core/text.js";
+ import { ohms } from "../../core/units.js";
+ import {
++  checkAfterWalk,
+   checkReconciliation,
+   checkResistances,
++  openPins,
+   parseContinuity,
+   reconcile,
++  reconcileAfter,
++  unfiredPins,
+   unwalkedPins,
+ } from "../../rig/continuity.js";
++import type { ContinuityReport } from "../../rig/continuity.js";
+ import { leadResistance } from "../../rig/circuit.js";
+ import { formatPin } from "../../rig/pin.js";
++import {
++  checkMisfires,
++  clearancePlan,
++  describeClearance,
++  describeRefires,
++  incidentLines,
++  misfiresIn,
++  planRefires,
++} from "../../timeline/misfire.js";
+ 
+ /**
+  * Reading the panel's own walk against the show.
+@@ -20,6 +36,12 @@ import { formatPin } from "../../rig/pin.js";
+  * This is run on the field, twice, once when the wiring is finished and once
+  * after the last person has been out among the mortars. The second run is the
+  * one that matters, and it is the one people skip.
++ *
++ * There is a third walk, the morning after, and it answers a different
++ * question. A match that fired reads open, so a show pin that still reads
++ * connected is a shell that never left its tube, and `--after` turns that
++ * walk into the list of what is still loaded, when each position may be
++ * approached, and what can be relit.
+  */
+ export const continuityCommand: Command = {
+   name: "continuity",
+@@ -28,6 +50,11 @@ export const continuityCommand: Command = {
+   flags: [
+     ...SHOW_FLAGS,
+     { name: "walk", kind: "value", help: "the panel's continuity dump" },
++    {
++      name: "after",
++      kind: "value",
++      help: "the walk taken after the show, to find what did not fire",
++    },
+     {
+       name: "resistance",
+       kind: "switch",
+@@ -41,15 +68,23 @@ export const continuityCommand: Command = {
+   ],
+   run(args, env) {
+     const walkPath = args.values.get("walk");
+-    if (walkPath === undefined) {
++    const afterPath = args.values.get("after");
++    if (walkPath === undefined && afterPath === undefined) {
+       env.err("continuity needs --walk, the panel's dump");
+       return EXIT_BAD_USAGE;
+     }
+-    const walkText = env.readFile(walkPath);
+-    if (walkText === undefined) {
++    const walkText =
++      walkPath === undefined ? undefined : env.readFile(walkPath);
++    if (walkPath !== undefined && walkText === undefined) {
+       env.err(`cannot read the walk at ${walkPath}`);
+       return EXIT_BAD_USAGE;
+     }
++    const afterText =
++      afterPath === undefined ? undefined : env.readFile(afterPath);
++    if (afterPath !== undefined && afterText === undefined) {
++      env.err(`cannot read the walk at ${afterPath}`);
++      return EXIT_BAD_USAGE;
++    }
+     const outcome = runShow(args, env, { quiet: true });
+     if (outcome === undefined) {
+       return EXIT_BAD_USAGE;
+@@ -62,17 +97,64 @@ export const continuityCommand: Command = {
+       return EXIT_SHOW_PROBLEM;
+     }
+ 
+-    const walk = parseContinuity(walkText, walkPath);
+-    if (walk.diagnostics.size > 0) {
+-      env.err(formatBag(walk.diagnostics));
+-    }
+-    if (walk.diagnostics.hasErrors()) {
++    const walk =
++      walkText === undefined || walkPath === undefined
++        ? undefined
++        : parseContinuity(walkText, walkPath);
++    if (walk !== undefined && !reportParse(walk, env)) {
+       return EXIT_SHOW_PROBLEM;
+     }
+-
+     const expected = outcome.result.schedule.events.map(
+       (event) => event.address,
+     );
++
++    if (afterText !== undefined && afterPath !== undefined) {
++      const after = parseContinuity(afterText, afterPath);
++      if (!reportParse(after, env)) {
++        return EXIT_SHOW_PROBLEM;
++      }
++      const schedule = outcome.result.schedule;
++      const result = reconcileAfter(expected, walk?.rows, after.rows);
++      const misfires = misfiresIn(schedule, unfiredPins(result));
++      const diagnostics = checkAfterWalk(result);
++      diagnostics.addAll(checkMisfires(schedule, misfires).all());
++      if (diagnostics.size > 0) {
++        env.err(formatBag(diagnostics));
++      }
++
++      const plans = planRefires(
++        schedule,
++        misfires,
++        outcome.inputs.workspace.rig,
++        { usable: openPins(after.rows) },
++      );
++      env.out(describeClearance(clearancePlan(schedule, misfires)));
++      if (misfires.length > 0) {
++        env.out("");
++        env.out(describeRefires(plans));
++        env.out("");
++        for (const line of incidentLines(misfires)) {
++          env.out(line);
++        }
++      }
++      env.out("");
++      env.out(
++        [
++          `${plural(after.rows.length, "pin")} walked after the show`,
++          `${plural(expected.length, "cue")} in the show`,
++          `${result.fired.length} fired`,
++          plural(misfires.length, "unfired cue"),
++          plural(result.burnt.length, "burnt stray"),
++        ].join(", "),
++      );
++      return misfires.length > 0 || result.burnt.length > 0
++        ? EXIT_SHOW_PROBLEM
++        : EXIT_OK;
++    }
++
++    if (walk === undefined) {
++      return EXIT_BAD_USAGE;
++    }
+     const result = reconcile(expected, walk.rows);
+     const diagnostics = checkReconciliation(result);
+ 
+@@ -112,6 +194,15 @@ export const continuityCommand: Command = {
+   },
+ };
+ 
++/** Print a walk's own problems and say whether it can be used at all. */
++function reportParse(report: ContinuityReport, env: CliEnv): boolean {
++  const bag: DiagnosticBag = report.diagnostics;
++  if (bag.size > 0) {
++    env.err(formatBag(bag));
++  }
++  return !bag.hasErrors();
++}
++
+ /** The lead resistance the settings imply, for a caller other than the CLI. */
+ export function settingsLeadResistance(metresOfLead: number) {
+   return metresOfLead <= 0 ? ohms(0) : leadResistance(metresOfLead);
+diff --git a/src/cli/commands/rehearse.ts b/src/cli/commands/rehearse.ts
+index 0510755..03fac14 100644
+--- a/src/cli/commands/rehearse.ts
++++ b/src/cli/commands/rehearse.ts
+@@ -4,6 +4,14 @@ import type { Command } from "../command.js";
+ import { EXIT_BAD_USAGE, EXIT_OK, EXIT_SHOW_PROBLEM } from "../command.js";
+ import { formatBag } from "../../core/diagnostic.js";
+ import { plural } from "../../core/text.js";
++import { ms } from "../../core/units.js";
++import {
++  checkLog,
++  describeLogGrade,
++  gradeLog,
++  logFindingLines,
++  parsePanelLog,
++} from "../../timeline/panelLog.js";
+ import {
+   checkRehearsal,
+   describeRehearsal,
+@@ -11,11 +19,16 @@ import {
+ } from "../../timeline/rehearsal.js";
+ 
+ /**
+- * The dry run, written down.
++ * The dry run, written down, and then read back.
+  *
+  * A rehearsal with no plan is a crew standing in a field agreeing that
+  * something happened. This prints what each watcher should see, so a light
+  * that does not appear is a finding rather than a maybe.
++ *
++ * Afterwards the panel's own log says what it actually did, and `--log`
++ * grades that against the table: every output that never closed, every one
++ * that closed when the table had nothing on it, and every one that closed
++ * later than a frame from its time.
+  */
+ export const rehearseCommand: Command = {
+   name: "rehearse",
+@@ -29,9 +42,25 @@ export const rehearseCommand: Command = {
+       help: "milliseconds within which lights read as one event",
+       fallback: "250",
+     },
++    {
++      name: "log",
++      kind: "value",
++      help: "the panel's output log from the dry run, to grade it",
++    },
++    {
++      name: "tolerance",
++      kind: "value",
++      help: "milliseconds an output may sit from its time, one frame if unset",
++    },
+     OUT_FLAG,
+   ],
+   run(args, env) {
++    const logPath = args.values.get("log");
++    const logText = logPath === undefined ? undefined : env.readFile(logPath);
++    if (logPath !== undefined && logText === undefined) {
++      env.err(`cannot read the panel log at ${logPath}`);
++      return EXIT_BAD_USAGE;
++    }
+     const outcome = runShow(args, env, { quiet: true });
+     if (outcome === undefined) {
+       return EXIT_BAD_USAGE;
+@@ -41,6 +70,38 @@ export const rehearseCommand: Command = {
+       env.err("the show does not compile, so there is nothing to rehearse");
+       return EXIT_SHOW_PROBLEM;
+     }
++
++    if (logText !== undefined && logPath !== undefined) {
++      let tolerance: number | undefined;
++      if (args.values.has("tolerance")) {
++        const check = requireNumber(args, "tolerance", { min: 0 });
++        if (!check.ok) {
++          env.err(check.reason);
++          return EXIT_BAD_USAGE;
++        }
++        tolerance = check.value;
++      }
++      // A row that will not read is reported and the rest is graded anyway,
++      // because one odd row out of four hundred says nothing about the other
++      // three hundred and ninety nine, and the exit code carries the error.
++      const parsed = parsePanelLog(logText, logPath);
++      const grade = gradeLog(outcome.result.schedule, parsed.rows, {
++        ...(tolerance === undefined ? {} : { tolerance: ms(tolerance) }),
++      });
++      const text = [describeLogGrade(grade), "", logFindingLines(grade)].join(
++        "\n",
++      );
++      const wrote = emit(text, args, env, "the dry run grade");
++      if (wrote !== EXIT_OK) {
++        return wrote;
++      }
++      const diagnostics = parsed.diagnostics.addAll(checkLog(grade).all());
++      if (diagnostics.size > 0) {
++        env.err(formatBag(diagnostics));
++      }
++      return diagnostics.hasErrors() ? EXIT_SHOW_PROBLEM : outcomeCode(outcome);
++    }
++
+     const window = requireNumber(args, "window", { min: 0 });
+     if (!window.ok) {
+       env.err(window.reason);
+diff --git a/src/core/codes.ts b/src/core/codes.ts
+index ef5c6dc..ab944b6 100644
+--- a/src/core/codes.ts
++++ b/src/core/codes.ts
+@@ -84,6 +84,14 @@ export function codeArea(code: string): string {
+  * help line does not need a second explanation here.
+  */
+ export const CODE_NOTES: ReadonlyMap<string, string> = new Map([
++  [
++    "PF1416",
++    "a show pin read open before the show and still reads connected after it, so the cue never had current and the mortar was loaded the whole time",
++  ],
++  [
++    "PF1417",
++    "a pin outside the show read connected before and open after, so the panel fired something the table never held",
++  ],
+   [
+     "PF1500",
+     "the lead is too long for the match to fire over at this voltage, which is the failure that only shows up on the far rack",
+@@ -108,6 +116,18 @@ export const CODE_NOTES: ReadonlyMap<string, string> = new Map([
+     "PF3201",
+     "nothing is lit for long enough that an audience reads it as a misfire",
+   ],
++  [
++    "PF3400",
++    "cues the walk after the show found still loaded, with the moment nobody approaches before, counted from the show's last light out",
++  ],
++  [
++    "PF3410",
++    "an output the table holds never closed on the dry run, so the panel skipped it or is running a different table",
++  ],
++  [
++    "PF3411",
++    "an output closed that the table has nothing on, which on the night would fire whatever is wired there",
++  ],
+   [
+     "PF4100",
+     "a firing position is closer to the audience than the separation rule allows for what it fires",
+diff --git a/src/index.ts b/src/index.ts
+index 78da86f..e59df89 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -73,6 +73,7 @@ export * from "./timeline/density.js";
+ export * from "./timeline/diff.js";
+ export * from "./timeline/load.js";
+ export * from "./timeline/misfire.js";
++export * from "./timeline/panelLog.js";
+ export * from "./timeline/quantise.js";
+ export * from "./timeline/rehearsal.js";
+ export * from "./timeline/schedule.js";
+diff --git a/src/rig/continuity.ts b/src/rig/continuity.ts
+index aff2ece..d18f87c 100644
+--- a/src/rig/continuity.ts
++++ b/src/rig/continuity.ts
+@@ -242,3 +242,166 @@ export function unwalkedPins(
+   const seen = new Set(rows.map((row) => pinKey(row.address)));
+   return rig.allPins().filter((address) => !seen.has(pinKey(address)));
+ }
++
++/**
++ * The walk after the show.
++ *
++ * A fired match has burnt its bridgewire and reads open, so the second walk
++ * inverts the first: on the night before, an open show pin is a dead cue, and
++ * on the morning after, an open show pin is the normal case and a connected
++ * one is a shell still in its tube. Reading the after walk with the before
++ * rule would call every fired cue dead and every misfire fine, which is the
++ * wrong way round on the one occasion it matters.
++ *
++ * The first walk still earns its place, because it separates two things that
++ * look the same afterwards. A show pin that read open before the show never
++ * had current, so whatever is on it is a dead cue that was never repaired,
++ * not a match that was fired and did not take. Both are loaded mortars and
++ * both wait, but only one is a hangfire risk and only one goes in the book
++ * as a misfire.
++ */
++export interface AfterWalk {
++  /** Show pins that read open after, so the match burnt and the cue went. */
++  readonly fired: readonly PinAddress[];
++  /** Show pins still connected after, that read connected (or unwalked) before. */
++  readonly misfired: readonly PinAddress[];
++  /** Show pins still connected after, that already read open before the show. */
++  readonly dead: readonly PinAddress[];
++  /** Show pins the after walk never reported, which nobody can call fired. */
++  readonly unknown: readonly PinAddress[];
++  /** Show pins reading short after. */
++  readonly shorted: readonly PinAddress[];
++  /** Pins outside the show that read connected before and open after. */
++  readonly burnt: readonly PinAddress[];
++}
++
++export function reconcileAfter(
++  expected: Iterable<PinAddress>,
++  before: readonly ContinuityRow[] | undefined,
++  after: readonly ContinuityRow[],
++): AfterWalk {
++  const wanted = new Map(
++    [...expected].map((address) => [pinKey(address), address]),
++  );
++  const beforeReadings = new Map<string, PinReading>();
++  for (const row of before ?? []) {
++    beforeReadings.set(pinKey(row.address), row.reading);
++  }
++  const afterReadings = new Map<string, ContinuityRow>();
++  for (const row of after) {
++    // A pin walked twice keeps its first reading, the same as before the show.
++    const key = pinKey(row.address);
++    if (!afterReadings.has(key)) {
++      afterReadings.set(key, row);
++    }
++  }
++
++  const fired: PinAddress[] = [];
++  const misfired: PinAddress[] = [];
++  const dead: PinAddress[] = [];
++  const unknown: PinAddress[] = [];
++  const shorted: PinAddress[] = [];
++  const burnt: PinAddress[] = [];
++
++  for (const [key, address] of wanted) {
++    const row = afterReadings.get(key);
++    if (row === undefined) {
++      unknown.push(address);
++      continue;
++    }
++    switch (row.reading) {
++      case "open":
++        fired.push(address);
++        break;
++      case "short":
++        shorted.push(address);
++        break;
++      case "connected":
++        if (before !== undefined && beforeReadings.get(key) === "open") {
++          dead.push(address);
++        } else {
++          misfired.push(address);
++        }
++        break;
++    }
++  }
++
++  if (before !== undefined) {
++    for (const [key, row] of afterReadings) {
++      if (
++        !wanted.has(key) &&
++        row.reading === "open" &&
++        beforeReadings.get(key) === "connected"
++      ) {
++        burnt.push(row.address);
++      }
++    }
++  }
++
++  return {
++    fired: fired.sort(comparePins),
++    misfired: misfired.sort(comparePins),
++    dead: dead.sort(comparePins),
++    unknown: unknown.sort(comparePins),
++    shorted: shorted.sort(comparePins),
++    burnt: burnt.sort(comparePins),
++  };
++}
++
++/**
++ * Every show pin that cannot be called fired, which is the list the waiting
++ * periods apply to. A pin nobody walked is on it, because the one thing worse
++ * than waiting half an hour for a mortar that is empty is not waiting for one
++ * that is not.
++ */
++export function unfiredPins(walk: AfterWalk): PinAddress[] {
++  return [
++    ...walk.misfired,
++    ...walk.dead,
++    ...walk.unknown,
++    ...walk.shorted,
++  ].sort(comparePins);
++}
++
++export function checkAfterWalk(walk: AfterWalk): DiagnosticBag {
++  const diagnostics = new DiagnosticBag();
++  for (const address of walk.unknown) {
++    diagnostics.warning({
++      code: "PF1415",
++      message: `${formatPin(address)} is fired by the show and the walk after it never reported it`,
++      help: "until it is walked it is treated as loaded",
++    });
++  }
++  for (const address of walk.dead) {
++    diagnostics.error({
++      code: "PF1416",
++      message: `${formatPin(address)} read open before the show and is still connected after it`,
++      help: "this cue never had current, the mortar is loaded and was never fixed",
++    });
++  }
++  for (const address of walk.burnt) {
++    diagnostics.error({
++      code: "PF1417",
++      message: `${formatPin(address)} is not in the show, read connected before it and open after it`,
++      help: "something fired on an output the table never held, find out what",
++    });
++  }
++  return diagnostics;
++}
++
++/** The pins an after walk read open, which are the only ones a refire may use. */
++export function openPins(rows: readonly ContinuityRow[]): PinAddress[] {
++  const open: PinAddress[] = [];
++  const seen = new Set<string>();
++  for (const row of rows) {
++    const key = pinKey(row.address);
++    if (seen.has(key)) {
++      continue;
++    }
++    seen.add(key);
++    if (row.reading === "open") {
++      open.push(row.address);
++    }
++  }
++  return open;
++}
+diff --git a/src/timeline/misfire.ts b/src/timeline/misfire.ts
+index 80b722a..9832036 100644
+--- a/src/timeline/misfire.ts
++++ b/src/timeline/misfire.ts
+@@ -3,6 +3,7 @@ import type { FiringEvent, Schedule } from "./schedule.js";
+ import { isGround } from "../catalog/effect.js";
+ import { DiagnosticBag } from "../core/diagnostic.js";
+ import { compareIds } from "../core/ids.js";
++import { renderTable } from "../core/text.js";
+ import { formatShowTime } from "../core/timecode.js";
+ import type { Milliseconds } from "../core/units.js";
+ import { ms, raw } from "../core/units.js";
+@@ -91,12 +92,46 @@ export interface RefirePlan {
+  * not go is normally not refired at all, so this exists for the rehearsal
+  * case and for ground pieces, which are routinely relit.
+  */
++export interface RefireOptions {
++  /**
++   * Whether a pin may carry a refire at all. After a show the answer comes
++   * from the walk: a pin that read open is free, one that still reads
++   * connected has a lead on it, and one nobody walked is unknown. Without
++   * this every pin the show did not use is taken to be free, which is right
++   * for a rehearsal and wrong on the night.
++   */
++  readonly usable?: Iterable<PinAddress>;
++}
++
++function spareAt(
++  position: string,
++  rig: Rig,
++  taken: ReadonlySet<string>,
++  usable: ReadonlySet<string> | undefined,
++): PinAddress | undefined {
++  for (const unit of rig.modulesAt(position)) {
++    for (let pin = 1; pin <= unit.model.pins; pin += 1) {
++      const address = { module: unit.number, pin };
++      const key = pinKey(address);
++      if (!taken.has(key) && (usable === undefined || usable.has(key))) {
++        return address;
++      }
++    }
++  }
++  return undefined;
++}
++
+ export function planRefires(
+   schedule: Schedule | QuantisedSchedule,
+   misfires: readonly Misfire[],
+   rig: Rig,
++  options: RefireOptions = {},
+ ): RefirePlan[] {
+   const taken = new Set(schedule.events.map((event) => pinKey(event.address)));
++  const usable =
++    options.usable === undefined
++      ? undefined
++      : new Set([...options.usable].map(pinKey));
+   const plans: RefirePlan[] = [];
+   for (const misfire of misfires) {
+     if (!isGround(misfire.event.effect)) {
+@@ -106,7 +141,7 @@ export function planRefires(
+       });
+       continue;
+     }
+-    const spare = rig.nextFreePinAt(misfire.event.position, taken);
++    const spare = spareAt(misfire.event.position, rig, taken, usable);
+     if (spare === undefined) {
+       plans.push({
+         misfire,
+@@ -120,6 +155,104 @@ export function planRefires(
+   return plans;
+ }
+ 
++/**
++ * When each position may be approached.
++ *
++ * The field is cleared once, but it is cleared position by position, and a
++ * crew standing at the far bank waiting on a gerb does not need to wait the
++ * half hour that a shell on the near bank demands. Every wait still runs from
++ * the show's last light out rather than from the position's own last cue,
++ * because a mortar with a shell in it does not become safer for having been
++ * skipped early.
++ */
++export interface PositionClearance {
++  readonly position: string;
++  /** The position's own cues that did not fire. */
++  readonly misfires: readonly Misfire[];
++  /** The longest wait any of them demands. */
++  readonly wait: Milliseconds;
++  /** Show clock moment the position may be approached. */
++  readonly clearAt: Milliseconds;
++}
++
++export interface ClearancePlan {
++  /** Positions with something unfired, soonest approachable first. */
++  readonly positions: readonly PositionClearance[];
++  /** When the whole field is clear, which is the last of them. */
++  readonly fieldClearAt: Milliseconds;
++}
++
++function showEnd(schedule: Schedule | QuantisedSchedule): number {
++  let latest = 0;
++  for (const event of schedule.events) {
++    latest = Math.max(latest, raw(event.occupancy.end));
++  }
++  return latest;
++}
++
++export function clearancePlan(
++  schedule: Schedule | QuantisedSchedule,
++  misfires: readonly Misfire[],
++): ClearancePlan {
++  const end = showEnd(schedule);
++  const byPosition = new Map<string, { held: Misfire[]; wait: number }>();
++  for (const misfire of misfires) {
++    const position = misfire.event.position;
++    const found = byPosition.get(position) ?? { held: [], wait: 0 };
++    found.held.push(misfire);
++    found.wait = Math.max(found.wait, raw(waitFor(misfire)));
++    byPosition.set(position, found);
++  }
++  const positions: PositionClearance[] = [...byPosition.entries()]
++    .map(([position, found]) => ({
++      position,
++      misfires: found.held,
++      wait: ms(found.wait),
++      clearAt: ms(end + found.wait),
++    }))
++    .sort(
++      (a, b) =>
++        raw(a.clearAt) - raw(b.clearAt) || compareIds(a.position, b.position),
++    );
++  return { positions, fieldClearAt: clearAt(schedule, misfires) };
++}
++
++export function describeClearance(plan: ClearancePlan): string {
++  if (plan.positions.length === 0) {
++    return "nothing is loaded, the field is clear";
++  }
++  const table = renderTable(
++    [
++      { header: "position" },
++      { header: "unfired", align: "right" },
++      { header: "wait", align: "right" },
++      { header: "approach after", align: "right" },
++    ],
++    plan.positions.map((entry) => [
++      entry.position,
++      String(entry.misfires.length),
++      `${(raw(entry.wait) / 60000).toFixed(0)} min`,
++      formatShowTime(entry.clearAt),
++    ]),
++  );
++  return `${table}
++field clear at ${formatShowTime(plan.fieldClearAt)} on the show clock`;
++}
++
++export function describeRefires(plans: readonly RefirePlan[]): string {
++  if (plans.length === 0) {
++    return "nothing to refire";
++  }
++  return plans
++    .map((plan) => {
++      const where = `${formatPin(plan.misfire.address)} ${plan.misfire.event.effectId}`;
++      return plan.spare === undefined
++        ? `${where}: ${plan.reason ?? "no plan"}`
++        : `${where}: relight from ${formatPin(plan.spare)}`;
++    })
++    .join("\n");
++}
++
+ export function checkMisfires(
+   schedule: Schedule | QuantisedSchedule,
+   misfires: readonly Misfire[],
+diff --git a/src/timeline/panelLog.ts b/src/timeline/panelLog.ts
+new file mode 100644
+index 0000000..62d5de2
+--- /dev/null
++++ b/src/timeline/panelLog.ts
+@@ -0,0 +1,304 @@
++import type { QuantisedEvent, QuantisedSchedule } from "./quantise.js";
++import { readTable } from "../core/csv.js";
++import { DiagnosticBag } from "../core/diagnostic.js";
++import { renderTable } from "../core/text.js";
++import {
++  formatShowTime,
++  frameDuration,
++  parseShowTime,
++} from "../core/timecode.js";
++import type { Milliseconds } from "../core/units.js";
++import { ms, raw } from "../core/units.js";
++import type { PinAddress } from "../rig/pin.js";
++import { comparePins, formatPin, parsePin, pinKey } from "../rig/pin.js";
++
++/**
++ * What the panel says it did.
++ *
++ * Every panel keeps a log of the outputs it closed and when, and after a dry
++ * run that log is the only evidence that the panel understood the table. A
++ * crew watching lights sees that something blinked. The log says which output
++ * and at what time, and read against the table it answers the three questions
++ * a dry run exists to ask: did every cue go, did anything go that should not
++ * have, and did anything go late.
++ *
++ * The clock is the trap. A panel starts its own clock at its first ignition,
++ * which for a show with a pre roll is before the show clock's zero, so a log
++ * time is the show time plus the pre roll. Comparing the two raw would report
++ * an opener that fired exactly on time as late by the whole pre roll and
++ * everything after it the same, and a crew would spend an evening chasing a
++ * fault the panel does not have.
++ */
++
++export interface PanelLogRow {
++  readonly address: PinAddress;
++  /** When the panel closed the output, on the panel's own clock. */
++  readonly at: Milliseconds;
++  /** One based line in the source, for a diagnostic that points at a row. */
++  readonly line: number;
++}
++
++export interface PanelLogReport {
++  readonly rows: readonly PanelLogRow[];
++  readonly diagnostics: DiagnosticBag;
++}
++
++const PIN_COLUMNS = ["pin", "address", "cue", "output"];
++const TIME_COLUMNS = ["time", "fired", "at", "fired_at"];
++
++/**
++ * Read a panel's output log. Column names differ between makers exactly as
++ * they do on a continuity dump, so the same spellings of the pin column are
++ * taken, and the time column is whichever of the usual names is present.
++ * Times are written the way a cue time is, so `12.4`, `1:23.450` and `250ms`
++ * all read, and a row that will not read is reported and skipped rather than
++ * stopping the whole log, since one bad row out of four hundred is a panel
++ * firmware quirk rather than a reason to grade nothing.
++ */
++export function parsePanelLog(text: string, source: string): PanelLogReport {
++  const diagnostics = new DiagnosticBag();
++  const table = readTable(text);
++  const rows: PanelLogRow[] = [];
++
++  const pinColumn = PIN_COLUMNS.find((name) => table.headers.includes(name));
++  const timeColumn = TIME_COLUMNS.find((name) => table.headers.includes(name));
++  if (pinColumn === undefined || timeColumn === undefined) {
++    diagnostics.error({
++      code: "PF1420",
++      message: `${source} does not have a pin column and a time column`,
++      help: "the pin column may be pin, address, cue or output, the time column time, fired, at or fired_at",
++    });
++    return { rows, diagnostics };
++  }
++
++  for (const record of table.records) {
++    const where = `${source} line ${record.line}`;
++    const address = parsePin(record.values.get(pinColumn) ?? "");
++    if (address === undefined) {
++      diagnostics.error({
++        code: "PF1421",
++        message: `${where} has no readable pin address`,
++      });
++      continue;
++    }
++    const text = (record.values.get(timeColumn) ?? "").trim();
++    const at = parseShowTime(text);
++    if (at === undefined) {
++      diagnostics.error({
++        code: "PF1422",
++        message: `${where} has a time of ${text || "(blank)"} that does not read`,
++        help: "write it as 12.4, 1:23.450, 250ms or 4m30s",
++      });
++      continue;
++    }
++    rows.push({ address, at, line: record.line });
++  }
++  return { rows, diagnostics };
++}
++
++export interface LogMatch {
++  readonly event: QuantisedEvent;
++  readonly row: PanelLogRow;
++  /** How far from the table's time the output closed, positive meaning late. */
++  readonly offset: Milliseconds;
++}
++
++export interface LogGrade {
++  /** Every show pin the log accounts for, in the table's firing order. */
++  readonly fired: readonly LogMatch[];
++  /** Show pins the log never mentions, in the table's firing order. */
++  readonly missed: readonly QuantisedEvent[];
++  /** Rows for pins the show does not fire, and any repeat row for a show pin. */
++  readonly extra: readonly PanelLogRow[];
++  /** Matches that closed later than the tolerance allows. */
++  readonly late: readonly LogMatch[];
++  /** Matches that closed earlier than the tolerance allows. */
++  readonly early: readonly LogMatch[];
++  /** How far an output may sit from the table before it counts. */
++  readonly tolerance: Milliseconds;
++  /** The match furthest from its time, either way. */
++  readonly worst?: LogMatch;
++}
++
++export interface LogGradeOptions {
++  /** Offsets inside this are on time. One frame of the show's format if unset. */
++  readonly tolerance?: Milliseconds;
++}
++
++/**
++ * Read a log against the table.
++ *
++ * Every show pin closes once, so the earliest row for a pin is its firing and
++ * any later row for the same pin is something the panel did that the table
++ * never asked for. A pin the show does not fire at all is the same finding
++ * whatever its time, and it is the finding that matters most, because an
++ * output nothing was wired to on the dry run is an output something will be
++ * wired to on the night.
++ */
++export function gradeLog(
++  schedule: QuantisedSchedule,
++  rows: readonly PanelLogRow[],
++  options: LogGradeOptions = {},
++): LogGrade {
++  const tolerance = options.tolerance ?? frameDuration(schedule.format);
++  const preRoll = raw(schedule.preRoll);
++  const byPin = new Map(
++    schedule.events.map((event) => [pinKey(event.address), event]),
++  );
++  const matched = new Map<string, LogMatch>();
++  const extra: PanelLogRow[] = [];
++
++  const ordered = [...rows].sort(
++    (a, b) => raw(a.at) - raw(b.at) || a.line - b.line,
++  );
++  for (const row of ordered) {
++    const key = pinKey(row.address);
++    const event = byPin.get(key);
++    if (event === undefined || matched.has(key)) {
++      extra.push(row);
++      continue;
++    }
++    const expected = raw(event.ignitionAt) + preRoll;
++    matched.set(key, { event, row, offset: ms(raw(row.at) - expected) });
++  }
++
++  const fired: LogMatch[] = [];
++  const missed: QuantisedEvent[] = [];
++  for (const event of schedule.events) {
++    const match = matched.get(pinKey(event.address));
++    if (match === undefined) {
++      missed.push(event);
++    } else {
++      fired.push(match);
++    }
++  }
++  const limit = raw(tolerance);
++  const late = fired.filter((match) => raw(match.offset) > limit);
++  const early = fired.filter((match) => raw(match.offset) < -limit);
++  let worst: LogMatch | undefined;
++  for (const match of fired) {
++    if (
++      worst === undefined ||
++      Math.abs(raw(match.offset)) > Math.abs(raw(worst.offset))
++    ) {
++      worst = match;
++    }
++  }
++  return {
++    fired,
++    missed,
++    extra: extra.sort(
++      (a, b) => comparePins(a.address, b.address) || raw(a.at) - raw(b.at),
++    ),
++    late,
++    early,
++    tolerance,
++    ...(worst === undefined ? {} : { worst }),
++  };
++}
++
++function offsetText(offset: Milliseconds): string {
++  const value = Math.round(raw(offset));
++  return `${value > 0 ? "+" : ""}${value}ms`;
++}
++
++export function checkLog(grade: LogGrade): DiagnosticBag {
++  const diagnostics = new DiagnosticBag();
++  for (const event of grade.missed) {
++    diagnostics.error({
++      code: "PF3410",
++      message: `${formatPin(event.address)} ${event.effectId} at ${event.position} never closed, the table has it at ${formatShowTime(event.ignitionAt)}`,
++      help: "the panel skipped this output, check the table it loaded is this one",
++    });
++  }
++  for (const row of grade.extra) {
++    diagnostics.error({
++      code: "PF3411",
++      message: `${formatPin(row.address)} closed at ${formatShowTime(row.at)} and the table has nothing on it then`,
++      help: "an output the table does not hold fired, so the panel is not running this table",
++    });
++  }
++  for (const match of [...grade.late, ...grade.early]) {
++    diagnostics.warning({
++      code: "PF3412",
++      message: `${formatPin(match.event.address)} ${match.event.effectId} closed ${offsetText(match.offset)} from its time`,
++      help:
++        raw(match.offset) > 0
++          ? "a late output on a busy module is usually the module past its simultaneous limit"
++          : "an early output means the panel's clock is running ahead of the table",
++    });
++  }
++  return diagnostics;
++}
++
++/** Whether the panel did exactly what the table said, within tolerance. */
++export function logClean(grade: LogGrade): boolean {
++  return (
++    grade.missed.length === 0 &&
++    grade.extra.length === 0 &&
++    grade.late.length === 0 &&
++    grade.early.length === 0
++  );
++}
++
++export function describeLogGrade(grade: LogGrade): string {
++  const total = grade.fired.length + grade.missed.length;
++  const parts = [
++    `${grade.fired.length} of ${total} outputs closed`,
++    `${grade.late.length} late`,
++    `${grade.early.length} early`,
++    `${grade.missed.length} missed`,
++    `${grade.extra.length} extra`,
++  ];
++  if (grade.worst !== undefined) {
++    parts.push(`worst ${offsetText(grade.worst.offset)}`);
++  }
++  return parts.join(", ");
++}
++
++/** The findings as a table, one row per output that is worth a look. */
++export function logFindingLines(grade: LogGrade): string {
++  const rows: string[][] = [];
++  for (const event of grade.missed) {
++    rows.push([
++      formatPin(event.address),
++      "missed",
++      formatShowTime(event.ignitionAt),
++      "",
++      event.effectId,
++    ]);
++  }
++  for (const row of grade.extra) {
++    rows.push([
++      formatPin(row.address),
++      "extra",
++      "",
++      formatShowTime(row.at),
++      "",
++    ]);
++  }
++  for (const match of [...grade.late, ...grade.early].sort(
++    (a, b) => raw(a.event.ignitionAt) - raw(b.event.ignitionAt),
++  )) {
++    rows.push([
++      formatPin(match.event.address),
++      raw(match.offset) > 0 ? "late" : "early",
++      formatShowTime(match.event.ignitionAt),
++      offsetText(match.offset),
++      match.event.effectId,
++    ]);
++  }
++  if (rows.length === 0) {
++    return "the panel did what the table said";
++  }
++  return renderTable(
++    [
++      { header: "pin" },
++      { header: "finding" },
++      { header: "table", align: "right" },
++      { header: "panel", align: "right" },
++      { header: "effect" },
++    ],
++    rows,
++  );
++}

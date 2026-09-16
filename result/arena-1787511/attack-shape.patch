@@ -1,0 +1,758 @@
+diff --git a/docs/api.md b/docs/api.md
+index f23dd97..3e83640 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -53,12 +53,35 @@ in epoch milliseconds.
+ { "winnerId": "plr_a", "loserId": "plr_b", "at": 1700000000007 }
+ ```
+ 
++`POST /matches/:id/void`
++
++```json
++{ "at": 1700000000008, "reason": "server fault" }
++```
++
++Answers with the voided match. The reason is required, the tournament has to
++be active, and a match that is already voided answers 409.
++
+ ## Rankings
+ 
+ `GET /leaderboards/:id`
+ 
+ `GET /rankings/:playerId`
+ 
++`POST /leaderboards/:id/publish` `{ "at": 1700000000009 }`
++
++Answers with the published board, its timestamp, and the tournament it
++belongs to. Later boards report movement against it.
++
++`GET /leaderboards/:id/published`
++
++The last published board, or 404 when nothing has been published.
++
++`GET /tournaments/:id/voids`
++
++Every void the tournament has taken, oldest first, each with its reason and
++one entry per player whose total moved.
++
+ ## Rewards
+ 
+ `POST /rewards/distribute` `{ "tournamentId": "tnm_cup", "at": 1700000000008 }`
+diff --git a/docs/cli.md b/docs/cli.md
+index 0dd3b17..0387e3b 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -10,8 +10,12 @@ arenaflow tournament:register --id tnm_cup --player plr_a --at 1700000000002
+ arenaflow tournament:start --id tnm_cup --at 1700000000003
+ arenaflow match:create --id mch_1 --tournament tnm_cup --players plr_a,plr_b --at 1700000000004
+ arenaflow match:result --id mch_1 --winner plr_a --loser plr_b --at 1700000000005
++arenaflow match:void --id mch_1 --reason "server fault" --at 1700000000006
+ arenaflow leaderboard --id tnm_cup
+-arenaflow rewards:distribute --id tnm_cup --at 1700000000006
++arenaflow leaderboard:publish --id tnm_cup --at 1700000000007
++arenaflow leaderboard:published --id tnm_cup
++arenaflow tournament:voids --id tnm_cup
++arenaflow rewards:distribute --id tnm_cup --at 1700000000008
+ ```
+ 
+ Each invocation currently uses an isolated in-memory arena, which keeps
+diff --git a/docs/cookbook.md b/docs/cookbook.md
+index 98d8a28..8e4176d 100644
+--- a/docs/cookbook.md
++++ b/docs/cookbook.md
+@@ -151,6 +151,30 @@ await router.handle("POST", "/players", { id: "plr_a", displayName: "Ann", creat
+ 
+ This is how the integration tests work. No listen socket is required.
+ 
++## Withdrawing a result that should not have counted
++
++```ts
++const { service } = createArena();
++service.publishLeaderboard("tnm_cup", 1_720_000_000_000);
++service.voidMatch({
++  matchId: "mch_7",
++  at: 1_720_000_000_500,
++  reason: "opponent disconnected before the first round",
++});
++service.leaderboard("tnm_cup");
++service.voidHistory("tnm_cup");
++```
++
++Publish before you void. The board handed back afterwards measures movement
++against the published one, so an operator reading it sees where players moved
++relative to the standings they were shown, not relative to an intermediate
++board the void has already thrown away.
++
++The rebuild is not a subtraction. Awards are decided again from the results
++that remain, so a streak bonus a later win only reached because of the voided
++one comes back out, and a player left with nothing at all gets a fresh record
++stamped at the moment of the void.
++
+ ## Explainability dump
+ 
+ Every `ScoreRecord.explanations` and `RankingEntry.explanation` can be
+@@ -165,3 +189,5 @@ game client; display the engine's message.
+ - Do not distribute rewards twice without revoking.
+ - Do not complete a pending match.
+ - Do not register after start.
++- Do not void a match once the tournament has ended.
++- Do not adjust a total by hand after a void; rebuild it.
+diff --git a/docs/handbook.md b/docs/handbook.md
+index 913676f..be0ebed 100644
+--- a/docs/handbook.md
++++ b/docs/handbook.md
+@@ -152,6 +152,29 @@ Warning findings:
+ 
+ Warnings never abort a `TournamentService` submission. Blocks do.
+ 
++## 11a. Voided results
++
++A result that should never have counted is withdrawn by voiding its match
++while the tournament is still active. The match stops counting, the reason is
++kept, and the standings are rebuilt from the results that remain, so an award
++a later win only reached because of the voided one is not paid twice over.
++Nothing is subtracted: awards are decided again from an empty record, which is
++the only way the streak, the best streak and the counts stay honest.
++
++A void that leaves a player with nothing gives back an empty record stamped at
++the moment of the void. `tournament:voids` reads the ledger, one line per
++player whose total moved, and says how many points came back.
++
++The event carries the rebuilt records, so replaying the journal reaches the
++same standings the live arena is showing.
++
++## 11b. Published boards
++
++`publishLeaderboard` freezes the board an operator stands behind. Every board
++handed out afterwards measures movement against that one, so a void in between
++cannot invent movement out of a board nobody ever saw. Before the first
++publication a rank is new: no previous rank, no movement.
++
+ ## 12. Seasons
+ 
+ Open an upcoming season at or after `startsAt`. Close an active season
+diff --git a/docs/reference.md b/docs/reference.md
+index ae3d8f3..465a7c0 100644
+--- a/docs/reference.md
++++ b/docs/reference.md
+@@ -153,7 +153,13 @@ Stream `player:{id}`. Payload: code, severity, optional tournamentId.
+ - createMatch
+ - startMatch
+ - submitPairResult
++- voidMatch
++- voidHistory
++- voidsForPlayer
+ - leaderboard
++- publishLeaderboard
++- publishedLeaderboard
++- publicationHistory
+ - rankingsFor
+ - distributeRewards
+ - claimReward
+diff --git a/docs/sdk.md b/docs/sdk.md
+index 9594c58..63c54a5 100644
+--- a/docs/sdk.md
++++ b/docs/sdk.md
+@@ -19,9 +19,9 @@ await sdk.tournaments.create({
+ ## Surfaces
+ 
+ - `sdk.players` – create, profile, history
+-- `sdk.tournaments` – create, open, register, start, end
+-- `sdk.matches` – create, start, submitResult
+-- `sdk.rankings` – leaderboard, forPlayer
++- `sdk.tournaments` – create, open, register, start, end, voids
++- `sdk.matches` – create, start, submitResult, voidMatch
++- `sdk.rankings` – leaderboard, forPlayer, publish, published
+ - `sdk.rewards` – distribute, forPlayer
+ 
+ Failed requests throw `ArenaFlowRequestError` with `status` and `body`.
+diff --git a/src/api/routes/matches.ts b/src/api/routes/matches.ts
+index 6f6d010..52ac2a5 100644
+--- a/src/api/routes/matches.ts
++++ b/src/api/routes/matches.ts
+@@ -19,6 +19,18 @@ export function registerMatchRoutes(router: Router, service: TournamentService):
+     return json(200, service.startMatch(request.params.id!, Number(body.at)));
+   });
+ 
++  router.add("POST", "/matches/:id/void", (request) => {
++    const body = asRecord(request.body);
++    return json(
++      200,
++      service.voidMatch({
++        matchId: request.params.id!,
++        at: Number(body.at),
++        reason: String(body.reason ?? ""),
++      }),
++    );
++  });
++
+   router.add("POST", "/matches/:id/result", (request) => {
+     const body = asRecord(request.body);
+     return json(
+diff --git a/src/api/routes/rankings.ts b/src/api/routes/rankings.ts
+index 8d2052f..2d44b59 100644
+--- a/src/api/routes/rankings.ts
++++ b/src/api/routes/rankings.ts
+@@ -4,5 +4,12 @@ import type { Router } from "../router.js";
+ 
+ export function registerRankingRoutes(router: Router, service: TournamentService): void {
+   router.add("GET", "/leaderboards/:id", (request) => json(200, service.leaderboard(request.params.id!)));
++  router.add("POST", "/leaderboards/:id/publish", (request) => {
++    const body = typeof request.body === "object" && request.body !== null ? (request.body as Record<string, unknown>) : {};
++    return json(200, service.publishLeaderboard(request.params.id!, Number(body.at)));
++  });
++  router.add("GET", "/leaderboards/:id/published", (request) =>
++    json(200, service.publishedLeaderboard(request.params.id!)),
++  );
+   router.add("GET", "/rankings/:playerId", (request) => json(200, service.rankingsFor(request.params.playerId!)));
+ }
+diff --git a/src/api/routes/tournaments.ts b/src/api/routes/tournaments.ts
+index 338ee0f..bbfa22c 100644
+--- a/src/api/routes/tournaments.ts
++++ b/src/api/routes/tournaments.ts
+@@ -36,6 +36,10 @@ export function registerTournamentRoutes(router: Router, service: TournamentServ
+     return json(200, service.start(request.params.id!, Number(body.at)));
+   });
+ 
++  router.add("GET", "/tournaments/:id/voids", (request) =>
++    json(200, service.voidHistory(request.params.id!)),
++  );
++
+   router.add("POST", "/tournaments/:id/end", (request) => {
+     const body = asRecord(request.body);
+     return json(200, service.end(request.params.id!, Number(body.at)));
+diff --git a/src/cli/commands/index.ts b/src/cli/commands/index.ts
+index 1240f99..9e19753 100644
+--- a/src/cli/commands/index.ts
++++ b/src/cli/commands/index.ts
+@@ -53,6 +53,18 @@ export async function runCommand(
+         loserId: requiredFlag(flags, "loser"),
+         at: Number(requiredFlag(flags, "at")),
+       });
++    case "match:void":
++      return service.voidMatch({
++        matchId: requiredFlag(flags, "id"),
++        at: Number(requiredFlag(flags, "at")),
++        reason: requiredFlag(flags, "reason"),
++      });
++    case "leaderboard:publish":
++      return service.publishLeaderboard(requiredFlag(flags, "id"), Number(requiredFlag(flags, "at")));
++    case "tournament:voids":
++      return service.voidHistory(requiredFlag(flags, "id"));
++    case "leaderboard:published":
++      return service.publishedLeaderboard(requiredFlag(flags, "id"));
+     case "leaderboard":
+       return service.leaderboard(requiredFlag(flags, "id"));
+     case "rewards:distribute":
+@@ -72,10 +84,14 @@ export function availableCommands(): string[] {
+     "tournament:register",
+     "tournament:start",
+     "tournament:end",
++    "tournament:voids",
+     "match:create",
+     "match:start",
+     "match:result",
++    "match:void",
+     "leaderboard",
++    "leaderboard:publish",
++    "leaderboard:published",
+     "rewards:distribute",
+   ];
+ }
+diff --git a/src/cli/commands/match.ts b/src/cli/commands/match.ts
+index b6f1fb5..98dfe68 100644
+--- a/src/cli/commands/match.ts
++++ b/src/cli/commands/match.ts
+@@ -1 +1 @@
+-export const MATCH_COMMANDS = ["match:create", "match:start", "match:result"] as const;
++export const MATCH_COMMANDS = ["match:create", "match:start", "match:result", "match:void"] as const;
+diff --git a/src/cli/index.ts b/src/cli/index.ts
+index d0b5e9c..6d9961a 100644
+--- a/src/cli/index.ts
++++ b/src/cli/index.ts
+@@ -21,9 +21,13 @@ Commands:
+   tournament:register
+   tournament:start
+   tournament:end
++  tournament:voids
+   match:create
+   match:result
++  match:void
+   leaderboard
++  leaderboard:publish
++  leaderboard:published
+   rewards:distribute
+ `);
+     return 0;
+diff --git a/src/engine/audit/index.ts b/src/engine/audit/index.ts
+index 140a933..ffdd0d4 100644
+--- a/src/engine/audit/index.ts
++++ b/src/engine/audit/index.ts
+@@ -1 +1,2 @@
+ export * from "./audit-log.js";
++export * from "./voids.js";
+diff --git a/src/engine/audit/voids.ts b/src/engine/audit/voids.ts
+new file mode 100644
+index 0000000..546afcf
+--- /dev/null
++++ b/src/engine/audit/voids.ts
+@@ -0,0 +1,18 @@
++import type { DecisionExplanation } from "../../explain.js";
++
++export interface VoidedScoreChange {
++  readonly playerId: string;
++  readonly before: number;
++  readonly after: number;
++  readonly delta: number;
++}
++
++export interface VoidEntry {
++  readonly matchId: string;
++  readonly tournamentId: string;
++  readonly reason: string;
++  readonly at: number;
++  readonly previousStatus: string;
++  readonly changes: readonly VoidedScoreChange[];
++  readonly explanation: DecisionExplanation;
++}
+diff --git a/src/engine/catalog/codes.ts b/src/engine/catalog/codes.ts
+index c72f5ef..e86742d 100644
+--- a/src/engine/catalog/codes.ts
++++ b/src/engine/catalog/codes.ts
+@@ -15,6 +15,9 @@ export const EXPLANATION_CODES = {
+   PENALTY_ANTI_CHEAT: "penalty.anti_cheat",
+   MATCHMAKING_PAIR: "matchmaking.pair",
+   SEASON_CLOSED: "season.closed",
++  MATCH_VOIDED: "match.voided",
++  SCORE_REBUILT: "score.rebuilt",
++  RANK_PUBLISHED: "rank.published",
+   ANTICHEAT_IMPOSSIBLE: "anticheat.impossible_score_change",
+   ANTICHEAT_DUPLICATE: "anticheat.duplicate_submission",
+   ANTICHEAT_SEQUENCE: "anticheat.invalid_match_sequence",
+diff --git a/src/engine/ranking/index.ts b/src/engine/ranking/index.ts
+index 0fc0345..654c29b 100644
+--- a/src/engine/ranking/index.ts
++++ b/src/engine/ranking/index.ts
+@@ -1,3 +1,4 @@
+ export * from "./ranking-engine.js";
+ export * from "./tie-breaking.js";
+ export * from "./history.js";
++export * from "./published.js";
+diff --git a/src/engine/ranking/published.ts b/src/engine/ranking/published.ts
+new file mode 100644
+index 0000000..01a7cac
+--- /dev/null
++++ b/src/engine/ranking/published.ts
+@@ -0,0 +1,9 @@
++import type { Leaderboard } from "../../domain/rankings/leaderboard.js";
++import type { DecisionExplanation } from "../../explain.js";
++
++export interface PublishedBoard {
++  readonly tournamentId: string;
++  readonly at: number;
++  readonly board: Leaderboard;
++  readonly explanation: DecisionExplanation;
++}
+diff --git a/src/engine/reporting/report.ts b/src/engine/reporting/report.ts
+index bf17298..f85d404 100644
+--- a/src/engine/reporting/report.ts
++++ b/src/engine/reporting/report.ts
+@@ -1,4 +1,5 @@
+ import type { RankingEntry, RewardRecord, ScoreRecord, TournamentRecord } from "../../types.js";
++import type { VoidEntry } from "../audit/voids.js";
+ import { movementLabel } from "../../domain/rankings/ranking.js";
+ import { guideFor } from "../tournament/formats/handbook.js";
+ 
+@@ -11,9 +12,18 @@ export interface TournamentReport {
+   readonly registered: number;
+   readonly standings: readonly ReportStanding[];
+   readonly rewards: readonly ReportReward[];
++  readonly voids: readonly ReportVoid[];
+   readonly narrative: string;
+ }
+ 
++export interface ReportVoid {
++  readonly matchId: string;
++  readonly reason: string;
++  readonly at: number;
++  readonly affected: number;
++  readonly withdrawn: number;
++}
++
+ export interface ReportStanding {
+   readonly rank: number;
+   readonly playerId: string;
+@@ -48,11 +58,22 @@ export function buildRewards(rewards: readonly RewardRecord[]): ReportReward[] {
+   }));
+ }
+ 
++export function buildVoids(entries: readonly VoidEntry[]): ReportVoid[] {
++  return entries.map((entry) => ({
++    matchId: entry.matchId,
++    reason: entry.reason,
++    at: entry.at,
++    affected: entry.changes.length,
++    withdrawn: entry.changes.reduce((total, change) => total - Math.min(0, change.delta), 0),
++  }));
++}
++
+ export function buildTournamentReport(
+   tournament: TournamentRecord,
+   entries: readonly RankingEntry[],
+   rewards: readonly RewardRecord[],
+   scores: readonly ScoreRecord[] = [],
++  voids: readonly VoidEntry[] = [],
+ ): TournamentReport {
+   const standings = buildStandings(entries);
+   const leader = standings[0];
+@@ -69,6 +90,7 @@ export function buildTournamentReport(
+     registered: tournament.registeredPlayerIds.length,
+     standings,
+     rewards: buildRewards(rewards),
++    voids: buildVoids(voids),
+     narrative,
+   };
+ }
+@@ -87,6 +109,9 @@ export function renderReport(report: TournamentReport): string {
+     "",
+     "## Rewards",
+     ...report.rewards.map((row) => `${row.playerId} ${row.tier} ${row.amount} ${row.status}`),
++    "",
++    "## Voided",
++    ...report.voids.map((row) => `${row.matchId} ${row.reason} (${row.affected} affected, ${row.withdrawn} withdrawn)`),
+   ];
+   return lines.join("\n");
+ }
+diff --git a/src/engine/scoring/index.ts b/src/engine/scoring/index.ts
+index 0df28d2..0d6896b 100644
+--- a/src/engine/scoring/index.ts
++++ b/src/engine/scoring/index.ts
+@@ -2,3 +2,4 @@ export * from "./scoring-engine.js";
+ export * from "./bonuses.js";
+ export * from "./penalties.js";
+ export * from "./presets.js";
++export * from "./rebuild.js";
+diff --git a/src/engine/scoring/rebuild.ts b/src/engine/scoring/rebuild.ts
+new file mode 100644
+index 0000000..2b943cd
+--- /dev/null
++++ b/src/engine/scoring/rebuild.ts
+@@ -0,0 +1,7 @@
++export interface SurvivingResult {
++  readonly matchId: string;
++  readonly playerId: string;
++  readonly outcome: "win" | "loss" | "draw" | "forfeit";
++  readonly rawScore: number;
++  readonly at: number;
++}
+diff --git a/src/engine/tournament/tournament-service.ts b/src/engine/tournament/tournament-service.ts
+index f6b2436..b351341 100644
+--- a/src/engine/tournament/tournament-service.ts
++++ b/src/engine/tournament/tournament-service.ts
+@@ -1,6 +1,7 @@
+-import { IllegalStateError, InvalidArgumentError, NotFoundError } from "../../errors.js";
++import { ConflictError, IllegalStateError, InvalidArgumentError, NotFoundError } from "../../errors.js";
+ import type { EpochMillis } from "../../clock.js";
+ import { eventExplanation, type AppendEventInput } from "../../events/journal/journal.js";
++import { explain } from "../../explain.js";
+ import type { DomainEventType } from "../../events/types.js";
+ import { scoreKey } from "../../events/replay/state.js";
+ import type { MemoryPersistence } from "../../persistence/memory/memory-store.js";
+@@ -10,6 +11,7 @@ import {
+   DEFAULT_RULES,
+   DEFAULT_SCORING,
+   type MatchOutcome,
++  type MatchRecord,
+   type PlayerId,
+   type PlayerRecord,
+   type RewardRecord,
+@@ -27,11 +29,16 @@ import {
+   startTournament,
+   type CreateTournamentInput,
+ } from "../../domain/tournaments/index.js";
+-import { completeMatch, createMatch, startMatch } from "../../domain/matches/match.js";
++import { completeMatch, createMatch, startMatch, voidMatch } from "../../domain/matches/match.js";
+ import { pairResult } from "../../domain/matches/result.js";
+ import { playerStateEngine } from "../player-state/player-state.js";
+ import { scoringEngine } from "../scoring/scoring-engine.js";
+ import { rankingEngine } from "../ranking/ranking-engine.js";
++import type { PublishedBoard } from "../ranking/published.js";
++import { emptyScore } from "../../domain/scores/score.js";
++import type { ScoreRecord, MatchResultRecord } from "../../types.js";
++import type { VoidEntry, VoidedScoreChange } from "../audit/voids.js";
++import { toLeaderboard, type Leaderboard } from "../../domain/rankings/leaderboard.js";
+ import { ruleEngine } from "../rules/rule-engine.js";
+ import { rewardEngine } from "../rewards/reward-engine.js";
+ import { antiCheatEngine } from "../anti-cheat/anti-cheat-engine.js";
+@@ -40,6 +47,8 @@ export type ArenaStore = PersistenceAdapter & Partial<Pick<MemoryPersistence, "c
+ 
+ export class TournamentService {
+   private readonly seenKeys = new Set<string>();
++  private readonly boards = new Map<string, PublishedBoard[]>();
++  private readonly ledger: VoidEntry[] = [];
+ 
+   constructor(private readonly store: ArenaStore) {}
+ 
+@@ -228,13 +237,110 @@ export class TournamentService {
+     return completed;
+   }
+ 
+-  leaderboard(tournamentId: TournamentId) {
+-    return rankingEngine.leaderboard(tournamentId, this.store.listScores(tournamentId));
++  voidMatch(input: { matchId: string; at: EpochMillis; reason: string }): MatchRecord {
++    const reason = input.reason?.trim() ?? "";
++    if (!reason) {
++      throw new InvalidArgumentError("a void needs a reason", { matchId: input.matchId });
++    }
++    const match = this.requireMatch(input.matchId);
++    const tournament = this.requireTournament(match.tournamentId);
++    if (tournament.status !== "active") {
++      throw new IllegalStateError("matches can only be voided while their tournament is active", {
++        tournamentId: tournament.id,
++        status: tournament.status,
++      });
++    }
++    if (match.status === "voided") {
++      throw new ConflictError("match is already voided", { matchId: match.id });
++    }
++    const before = this.store.listScores(tournament.id);
++    const voided = voidMatch(match, input.at);
++    this.store.saveMatch(voided);
++    this.rebuildScores(tournament, input.at);
++    this.record({
++      type: "MatchVoided",
++      at: input.at,
++      streamId: `match:${match.id}`,
++      payload: {
++        matchId: match.id,
++        tournamentId: tournament.id,
++        reason,
++        scores: this.store.listScores(tournament.id),
++      },
++      explanation: explain("match.voided", reason, {
++        matchId: match.id,
++        tournamentId: tournament.id,
++        previousStatus: match.status,
++      }),
++    });
++    this.pushEntry({
++      matchId: match.id,
++      tournamentId: tournament.id,
++      reason,
++      at: input.at,
++      previousStatus: match.status,
++      changes: this.diff(before, this.store.listScores(tournament.id)),
++    });
++    return voided;
++  }
++
++  voidHistory(tournamentId: TournamentId): VoidEntry[] {
++    this.requireTournament(tournamentId);
++    return this.ledger.filter((entry) => entry.tournamentId === tournamentId);
++  }
++
++  voidsForPlayer(playerId: PlayerId): VoidEntry[] {
++    this.requirePlayer(playerId);
++    return this.ledger.filter((entry) => entry.changes.some((c) => c.playerId === playerId));
++  }
++
++  private pushEntry(input: { matchId: string; tournamentId: string; reason: string; at: EpochMillis; previousStatus: string; changes: readonly VoidedScoreChange[] }): void {
++    this.ledger.push({ ...input, changes: [...input.changes], explanation: explain("match.voided", input.reason, { matchId: input.matchId }) });
++  }
++
++  private diff(before: readonly ScoreRecord[], after: readonly ScoreRecord[]): VoidedScoreChange[] {
++    const out: VoidedScoreChange[] = [];
++    for (const score of [...after].sort((a, b) => (a.playerId < b.playerId ? -1 : 1))) {
++      const was = before.find((item) => item.playerId === score.playerId);
++      if (was && was.total === score.total) {
++        continue;
++      }
++      out.push({ playerId: score.playerId, before: was?.total ?? 0, after: score.total, delta: score.total - (was?.total ?? 0) });
++    }
++    return out;
++  }
++
++  publishLeaderboard(tournamentId: TournamentId, at: EpochMillis): PublishedBoard {
++    const tournament = this.requireTournament(tournamentId);
++    const entries = this.ranks(tournament.id).entries;
++    const board = toLeaderboard(tournament.id, entries);
++    const record: PublishedBoard = { tournamentId: tournament.id, at, board, explanation: explain("rank.published", `published ${board.size} ranks`, { at }) };
++    this.boards.set(tournament.id, [...(this.boards.get(tournament.id) ?? []), record]);
++    return record;
++  }
++
++  publishedLeaderboard(tournamentId: TournamentId): PublishedBoard {
++    const all = this.boards.get(tournamentId) ?? [];
++    const published = all[all.length - 1];
++    if (!published) {
++      throw new NotFoundError("published leaderboard", tournamentId);
++    }
++    return published;
++  }
++
++  publicationHistory(tournamentId: TournamentId): PublishedBoard[] {
++    this.requireTournament(tournamentId);
++    return [...(this.boards.get(tournamentId) ?? [])];
++  }
++
++  leaderboard(tournamentId: TournamentId): Leaderboard {
++    return toLeaderboard(tournamentId, this.ranks(tournamentId).entries);
+   }
+ 
+   rankingsFor(playerId: PlayerId) {
+     const scores = [...this.currentScores()].filter((score) => score.playerId === playerId);
+-    return scores.map((score) => rankingEngine.compute(score.tournamentId, this.store.listScores(score.tournamentId)))
++    return scores
++      .map((score) => this.ranks(score.tournamentId))
+       .flatMap((computation) => computation.entries.filter((entry) => entry.playerId === playerId));
+   }
+ 
+@@ -308,6 +414,44 @@ export class TournamentService {
+     return ["leaderboard", "round_robin", "elimination", "team", "time_challenge"];
+   }
+ 
++  private ranks(tournamentId: TournamentId) {
++    return rankingEngine.recomputePublished(
++      tournamentId,
++      this.store.listScores(tournamentId),
++      (this.boards.get(tournamentId) ?? []).slice(-1)[0]?.board.entries,
++    );
++  }
++
++  private rebuildScores(tournament: TournamentRecord, at: EpochMillis): void {
++    const live = this.store
++      .listMatches(tournament.id)
++      .filter((match) => match.status === "completed")
++      .sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
++    for (const current of this.store.listScores(tournament.id)) {
++      const player = this.requirePlayer(current.playerId);
++      const mine: Array<{ result: MatchResultRecord; at: EpochMillis }> = [];
++      for (const match of live) {
++        for (const result of match.results) {
++          if (result.playerId === player.id) {
++            mine.push({ result, at: match.completedAt ?? match.createdAt });
++          }
++        }
++      }
++      let record = emptyScore(player.id, tournament.id, mine.length > 0 ? mine[0]!.at : at);
++      for (const item of mine) {
++        record = scoringEngine.decide({
++          player,
++          tournament,
++          current: record,
++          outcome: item.result.outcome,
++          rawScore: item.result.rawScore,
++          at: item.at,
++        }).next;
++      }
++      this.store.saveScore(record);
++    }
++  }
++
+   private applyScore(
+     tournament: TournamentRecord,
+     matchId: string,
+diff --git a/src/events/replay/projector.ts b/src/events/replay/projector.ts
+index d7022b0..1ccb36c 100644
+--- a/src/events/replay/projector.ts
++++ b/src/events/replay/projector.ts
+@@ -134,6 +134,9 @@ export function projectEvent(state: ArenaState, event: DomainEvent): ArenaState
+     case "MatchVoided": {
+       const current = requireMatch(maps.matches, event.payload.matchId);
+       maps.matches.set(current.id, voidMatch(current, event.at));
++      for (const score of event.payload.scores) {
++        maps.scores.set(scoreKey(score.tournamentId, score.playerId), score);
++      }
+       break;
+     }
+     case "PenaltyApplied": {
+diff --git a/src/events/types.ts b/src/events/types.ts
+index 05fed76..20533f6 100644
+--- a/src/events/types.ts
++++ b/src/events/types.ts
+@@ -6,6 +6,7 @@ import type {
+   MatchOutcome,
+   PlayerId,
+   RewardId,
++  ScoreRecord,
+   SeasonId,
+   TournamentFormat,
+   TournamentId,
+@@ -99,9 +100,20 @@ export type MatchCompletedEvent = DomainEventBase<
+   { matchId: MatchId; tournamentId: TournamentId }
+ >;
+ 
++/**
++ * A withdrawn result. The rebuilt score records travel with the event
++ * because the standings after a withdrawal are not a delta anyone can fold:
++ * they are decided again from the results that survive, and a replay has to
++ * land on the same numbers as the live arena.
++ */
+ export type MatchVoidedEvent = DomainEventBase<
+   "MatchVoided",
+-  { matchId: MatchId; tournamentId: TournamentId; reason: string }
++  {
++    matchId: MatchId;
++    tournamentId: TournamentId;
++    reason: string;
++    scores: readonly ScoreRecord[];
++  }
+ >;
+ 
+ export type PenaltyAppliedEvent = DomainEventBase<
+diff --git a/src/sdk/matches.ts b/src/sdk/matches.ts
+index 1f7a43b..6297b1d 100644
+--- a/src/sdk/matches.ts
++++ b/src/sdk/matches.ts
+@@ -15,4 +15,8 @@ export class MatchApi {
+   submitResult(id: string, body: Record<string, unknown>): Promise<MatchRecord> {
+     return this.client.request("POST", `/matches/${id}/result`, body);
+   }
++
++  voidMatch(id: string, at: number, reason: string): Promise<MatchRecord> {
++    return this.client.request("POST", `/matches/${id}/void`, { at, reason });
++  }
+ }
+diff --git a/src/sdk/rankings.ts b/src/sdk/rankings.ts
+index 5f13051..3fd7cfc 100644
+--- a/src/sdk/rankings.ts
++++ b/src/sdk/rankings.ts
+@@ -1,4 +1,5 @@
+ import type { Leaderboard } from "../domain/rankings/leaderboard.js";
++import type { PublishedBoard } from "../engine/ranking/published.js";
+ import type { RankingEntry } from "../types.js";
+ import type { ArenaFlowClient } from "./client.js";
+ 
+@@ -9,6 +10,14 @@ export class RankingApi {
+     return this.client.request("GET", `/leaderboards/${tournamentId}`);
+   }
+ 
++  publish(tournamentId: string, at: number): Promise<PublishedBoard> {
++    return this.client.request("POST", `/leaderboards/${tournamentId}/publish`, { at });
++  }
++
++  published(tournamentId: string): Promise<PublishedBoard> {
++    return this.client.request("GET", `/leaderboards/${tournamentId}/published`);
++  }
++
+   forPlayer(playerId: string): Promise<RankingEntry[]> {
+     return this.client.request("GET", `/rankings/${playerId}`);
+   }
+diff --git a/src/sdk/tournaments.ts b/src/sdk/tournaments.ts
+index 5cf3849..73c8c96 100644
+--- a/src/sdk/tournaments.ts
++++ b/src/sdk/tournaments.ts
+@@ -1,3 +1,4 @@
++import type { VoidEntry } from "../engine/audit/voids.js";
+ import type { TournamentRecord } from "../types.js";
+ import type { ArenaFlowClient } from "./client.js";
+ 
+@@ -27,4 +28,8 @@ export class TournamentApi {
+   end(id: string, at: number): Promise<TournamentRecord> {
+     return this.client.request("POST", `/tournaments/${id}/end`, { at });
+   }
++
++  voids(id: string): Promise<VoidEntry[]> {
++    return this.client.request("GET", `/tournaments/${id}/voids`);
++  }
+ }

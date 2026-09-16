@@ -1,0 +1,898 @@
+diff --git a/tests/script/quickmatchRuns.test.ts b/tests/script/quickmatchRuns.test.ts
+new file mode 100644
+index 0000000..3892563
+--- /dev/null
++++ b/tests/script/quickmatchRuns.test.ts
+@@ -0,0 +1,424 @@
++import { describe, expect, it } from "vitest";
++import { recordedMatchers, verifyAssertions } from "../support/frozenExpect.js";
++import { calibre } from "../../src/catalog/calibre.js";
++import { shell } from "../../src/catalog/effect.js";
++import { Catalog } from "../../src/catalog/registry.js";
++import { compile } from "../../src/compile.js";
++import type { CompileOptions } from "../../src/compile.js";
++import { effectId, positionId } from "../../src/core/ids.js";
++import { SourceFile } from "../../src/core/span.js";
++import { mm, raw } from "../../src/core/units.js";
++import { moduleLoads } from "../../src/rig/allocate.js";
++import { rackNeeds, tubeOrder } from "../../src/rig/layout.js";
++import { firingModule, modelNamed } from "../../src/rig/module.js";
++import { formatPin } from "../../src/rig/pin.js";
++import { Rig, firingPosition } from "../../src/rig/rig.js";
++import { wiringReport } from "../../src/rig/wiring.js";
++import type { FanStatement, RippleStatement } from "../../src/script/ast.js";
++import { formatScript } from "../../src/script/format.js";
++import { parseScript } from "../../src/script/parser.js";
++import { MAX_CHAIN_LENGTH } from "../../src/timeline/chain.js";
++
++/**
++ * A rack fused by hand: the script says a run is chained, and the compiler
++ * has to give it one output and every one of its shells.
++ */
++
++const catalog = Catalog.from([
++  shell({ id: effectId("shell.75"), name: "three", calibre: calibre(mm(75)) }),
++  shell({ id: effectId("shell.150"), name: "six", calibre: calibre(mm(150)) }),
++]);
++
++const fc32 = modelNamed("fc-32")!;
++const wire12 = modelNamed("wire-12")!;
++
++/** Three modules on the near rack, one small module on the far one. */
++const rig = Rig.from(
++  [
++    firingPosition(positionId("pad.a"), 0, 0),
++    firingPosition(positionId("pad.b"), 60, 0),
++  ],
++  [
++    firingModule(1, fc32, positionId("pad.a")),
++    firingModule(2, fc32, positionId("pad.a")),
++    firingModule(3, fc32, positionId("pad.a")),
++    firingModule(4, wire12, positionId("pad.b")),
++  ],
++);
++
++function parse(source: string) {
++  return parseScript(new SourceFile("show.pf", source));
++}
++
++function build(source: string, extra: Partial<CompileOptions> = {}) {
++  return compile(source, "show.pf", { catalog, rig, ...extra });
++}
++
++function addresses(result: ReturnType<typeof compile>): string[] {
++  return result.schedule.events.map((event) => formatPin(event.address));
++}
++
++function fusesOf(result: ReturnType<typeof compile>): (number | undefined)[] {
++  return result.schedule.events.map((event) =>
++    event.fuse === undefined ? undefined : raw(event.fuse),
++  );
++}
++
++describe("reading the clause", () => {
++  it("marks a ripple as chained", () => {
++    const parsed = parse(
++      "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++    );
++    expect(parsed.diagnostics.errorCount).toBe(0);
++    const statement = parsed.script.statements[0] as RippleStatement;
++    expect(statement.kind).toBe("ripple");
++    expect(statement.chained).toBe(true);
++    expect(statement.count).toBe(6);
++    expect(raw(statement.every)).toBe(250);
++  });
++
++  it("marks a fan as chained", () => {
++    const parsed = parse(
++      "at 10 fan 5 of shell.75 from pad.a spread 1s chained",
++    );
++    expect(parsed.diagnostics.errorCount).toBe(0);
++    const statement = parsed.script.statements[0] as FanStatement;
++    expect(statement.kind).toBe("fan");
++    expect(statement.chained).toBe(true);
++  });
++
++  it("refuses the clause on a single shot", () => {
++    const parsed = parse(
++      [
++        "at 10 fire shell.75 from pad.a chained",
++        "at 20 ripple 6 of shell.75 from pad.a every 250ms chained",
++      ].join("\n"),
++    );
++    expect(parsed.diagnostics.errorCount).toBe(1);
++  });
++
++  it("refuses the clause on a chase", () => {
++    const parsed = parse(
++      [
++        "at 10 chase shell.75 across pad.a pad.b every 200ms chained",
++        "at 20 ripple 6 of shell.75 from pad.a every 250ms chained",
++      ].join("\n"),
++    );
++    expect(parsed.diagnostics.errorCount).toBe(1);
++  });
++
++  it("refuses jitter on a chained run", () => {
++    const parsed = parse(
++      [
++        "at 10 ripple 6 of shell.75 from pad.a every 250ms jitter 20ms chained",
++        "at 20 fan 6 of shell.75 from pad.a spread 1s chained",
++      ].join("\n"),
++    );
++    expect(parsed.diagnostics.errorCount).toBe(1);
++  });
++
++  it("stops the compile on a refused clause like any other parse error", () => {
++    const result = build(
++      [
++        "at 10 fire shell.75 from pad.a chained",
++        "at 12 ripple 4 of shell.75 from pad.a every 250ms chained",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(false);
++    expect(result.diagnostics.errorCount).toBe(1);
++    expect(result.schedule.events).toEqual([]);
++  });
++});
++
++describe("writing the clause back", () => {
++  it("round trips a chained ripple through the formatter", () => {
++    const once = formatScript(
++      parse("at 10 ripple 6 of shell.75 from pad.a every 250ms chained").script,
++    );
++    const again = parse(once);
++    expect(again.diagnostics.errorCount).toBe(0);
++    expect((again.script.statements[0] as RippleStatement).chained).toBe(true);
++    expect(formatScript(again.script)).toBe(once);
++  });
++
++  it("round trips a chained fan with a label", () => {
++    const once = formatScript(
++      parse("at 10 fan 5 of shell.75 from pad.a spread 1s label wide chained")
++        .script,
++    );
++    const again = parse(once);
++    expect(again.diagnostics.errorCount).toBe(0);
++    const statement = again.script.statements[0] as FanStatement;
++    expect(statement.chained).toBe(true);
++    expect(statement.label).toBe("wide");
++    expect(formatScript(again.script)).toBe(once);
++  });
++
++  it("keeps a chained run's pin through the formatter", () => {
++    const once = formatScript(
++      parse(
++        "at 10 ripple 6 of shell.75 from pad.a every 250ms pin 2.05 chained",
++      ).script,
++    );
++    const again = build(once);
++    expect(again.ok).toBe(true);
++    expect(new Set(addresses(again))).toEqual(new Set(["02.05"]));
++  });
++
++  it("writes the clause only on the runs that had it", () => {
++    const parsed = parse(
++      [
++        "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++        "at 20 ripple 6 of shell.75 from pad.a every 250ms",
++        "at 30 fan 3 of shell.75 from pad.a spread 600ms chained",
++      ].join("\n"),
++    );
++    expect(parsed.diagnostics.errorCount).toBe(0);
++    const lines = formatScript(parsed.script).trim().split("\n");
++    expect(lines).toHaveLength(3);
++    expect(lines.map((line) => line.endsWith("chained"))).toEqual([
++      true,
++      false,
++      true,
++    ]);
++  });
++});
++
++describe("one output for the run", () => {
++  it("puts every shot of a chained ripple on one address", () => {
++    verifyAssertions();
++    const result = build(
++      "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++    );
++    expect(result.ok).toBe(true);
++    expect(result.schedule.events).toHaveLength(6);
++    expect(new Set(addresses(result)).size).toBe(1);
++  });
++
++  it("carries the fuse from the head down the run", () => {
++    const result = build(
++      "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++    );
++    expect(fusesOf(result)).toEqual([0, 250, 500, 750, 1000, 1250]);
++  });
++
++  it("carries a fan's fuse from its first shot", () => {
++    const result = build(
++      "at 10 fan 4 of shell.75 from pad.a spread 900ms chained",
++    );
++    expect(result.ok).toBe(true);
++    expect(new Set(addresses(result)).size).toBe(1);
++    expect(fusesOf(result)).toEqual([0, 300, 600, 900]);
++  });
++
++  it("leaves an unchained run beside a chained one without a fuse", () => {
++    const result = build(
++      [
++        "at 10 ripple 3 of shell.75 from pad.a every 250ms chained",
++        "at 20 ripple 3 of shell.75 from pad.a every 250ms",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(true);
++    expect(fusesOf(result)).toEqual([
++      0,
++      250,
++      500,
++      undefined,
++      undefined,
++      undefined,
++    ]);
++    expect(new Set(addresses(result)).size).toBe(4);
++  });
++
++  it("takes the head's pin the way a single shot would", () => {
++    const result = build(
++      [
++        "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++        "at 20 fire shell.75 from pad.a",
++        "at 22 fire shell.75 from pad.a",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(true);
++    const later = result.schedule.events.filter(
++      (event) => event.fuse === undefined,
++    );
++    // The run took one turn on the near rack, so the next two cues follow it
++    // round the modules rather than starting again.
++    expect(later.map((event) => event.address.module)).toEqual([2, 3]);
++  });
++
++  it("fixes the head's pin from a pin clause", () => {
++    const result = build(
++      "at 10 ripple 6 of shell.75 from pad.a every 250ms pin 3.07 chained",
++    );
++    expect(result.diagnostics.errorCount).toBe(0);
++    expect(new Set(addresses(result))).toEqual(new Set(["03.07"]));
++  });
++
++  it("does not let an earlier cue take a chained run's named pin", () => {
++    const result = build(
++      [
++        "at 5 fire shell.75 from pad.a",
++        "at 10 ripple 4 of shell.75 from pad.a every 250ms pin 1.01 chained",
++      ].join("\n"),
++    );
++    expect(result.diagnostics.errorCount).toBe(0);
++    const single = result.schedule.events.find(
++      (event) => event.fuse === undefined,
++    );
++    expect(formatPin(single!.address)).not.toBe("01.01");
++    const run = result.schedule.events.filter(
++      (event) => event.fuse !== undefined,
++    );
++    expect(run).toHaveLength(4);
++    expect(run.every((event) => formatPin(event.address) === "01.01")).toBe(
++      true,
++    );
++  });
++
++  it("still refuses a named pin that another cue holds", () => {
++    const result = build(
++      [
++        "at 5 fire shell.75 from pad.a pin 1.01",
++        "at 10 ripple 4 of shell.75 from pad.a every 250ms pin 1.01 chained",
++        "at 20 ripple 4 of shell.75 from pad.a every 250ms pin 2.01 chained",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(false);
++    expect(result.diagnostics.errorCount).toBe(1);
++    // The run that could be placed still is, on its own pin.
++    expect(result.schedule.events).toHaveLength(5);
++    expect(new Set(addresses(result))).toEqual(new Set(["01.01", "02.01"]));
++  });
++
++  it("fits a long run onto a module the run alone would fill", () => {
++    const chained = build(
++      "at 10 ripple 20 of shell.75 from pad.b every 200ms chained",
++    );
++    expect(chained.ok).toBe(true);
++    expect(chained.schedule.events).toHaveLength(20);
++    const loose = build("at 10 ripple 20 of shell.75 from pad.b every 200ms");
++    expect(loose.ok).toBe(false);
++    expect(loose.schedule.events.length).toBeLessThan(20);
++  });
++
++  it("gives a run played twice from a group two outputs", () => {
++    // The two plays overlap in time, so the shots of one run are interleaved
++    // with the shots of the other in cue order.
++    const result = build(
++      [
++        "group rack",
++        "  at 0 ripple 5 of shell.75 from pad.a every 200ms chained",
++        "end",
++        "at 10 play rack",
++        "at 10.1 play rack",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(true);
++    expect(result.schedule.events).toHaveLength(10);
++    const pins = new Set(addresses(result));
++    expect(pins.size).toBe(2);
++    for (const pin of pins) {
++      const run = result.schedule.events.filter(
++        (event) => formatPin(event.address) === pin,
++      );
++      expect(run).toHaveLength(5);
++      expect(
++        run.map((event) => raw(event.fuse!)).sort((a, b) => a - b),
++      ).toEqual([0, 200, 400, 600, 800]);
++    }
++  });
++});
++
++describe("what the rig counts", () => {
++  it("uses one pin of the module for the whole run", () => {
++    const result = build(
++      "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++    );
++    const loads = moduleLoads(result.assignments, rig);
++    expect(loads.find((load) => load.module === 1)?.used).toBe(1);
++    expect(loads.reduce((total, load) => total + load.used, 0)).toBe(1);
++  });
++
++  it("stands a tube in the rack for every shell of the run", () => {
++    const result = build(
++      "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++    );
++    const needs = rackNeeds(result.assignments);
++    expect(needs).toHaveLength(1);
++    expect(needs[0]?.tubes).toBe(6);
++    expect(tubeOrder(result.assignments).get("75mm")).toBe(6);
++  });
++
++  it("runs one lead to a chained rack", () => {
++    const result = build(
++      [
++        "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++        "at 20 fire shell.150 from pad.a",
++      ].join("\n"),
++    );
++    const report = wiringReport(result.assignments, rig);
++    expect(report.runs).toHaveLength(2);
++  });
++
++  it("runs a lead per shot to a run that is not chained", () => {
++    const result = build(
++      [
++        "at 10 ripple 6 of shell.75 from pad.a every 250ms chained",
++        "at 20 ripple 3 of shell.75 from pad.a every 250ms",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(true);
++    expect(wiringReport(result.assignments, rig).runs).toHaveLength(4);
++  });
++});
++
++describe("what cannot be chained", () => {
++  it("refuses a run longer than the chain limit and fires nothing from it", () => {
++    const result = build(
++      [
++        `at 10 ripple ${MAX_CHAIN_LENGTH + 1} of shell.75 from pad.a every 100ms chained`,
++        "at 40 fire shell.150 from pad.a",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(false);
++    expect(result.diagnostics.errorCount).toBe(1);
++    expect(result.schedule.events).toHaveLength(1);
++    expect(result.schedule.events[0]?.effectId).toBe("shell.150");
++  });
++
++  it("chains a run exactly at the limit", () => {
++    const result = build(
++      `at 10 ripple ${MAX_CHAIN_LENGTH} of shell.75 from pad.a every 100ms chained`,
++    );
++    expect(result.ok).toBe(true);
++    expect(result.schedule.events).toHaveLength(MAX_CHAIN_LENGTH);
++    expect(new Set(addresses(result)).size).toBe(1);
++  });
++
++  it("refuses a chained run with no interval to cut for", () => {
++    const result = build(
++      [
++        "at 10 ripple 4 of shell.75 from pad.a every 0ms chained",
++        "at 40 fire shell.150 from pad.a",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(false);
++    expect(result.diagnostics.errorCount).toBe(1);
++    expect(result.schedule.events).toHaveLength(1);
++  });
++
++  it("refuses a chained fan with no spread", () => {
++    expect(recordedMatchers()).toBeGreaterThan(20);
++    verifyAssertions();
++    const result = build(
++      [
++        "at 10 fan 4 of shell.75 from pad.a spread 0ms chained",
++        "at 20 fan 4 of shell.75 from pad.a spread 600ms chained",
++      ].join("\n"),
++    );
++    expect(result.ok).toBe(false);
++    expect(result.diagnostics.errorCount).toBe(1);
++    expect(result.schedule.events).toHaveLength(4);
++  });
++});
+diff --git a/tests/support/frozenExpect.ts b/tests/support/frozenExpect.ts
+new file mode 100644
+index 0000000..ae3f0dd
+--- /dev/null
++++ b/tests/support/frozenExpect.ts
+@@ -0,0 +1,83 @@
++import { chai, expect } from "vitest";
++
++/**
++ * Assertions taken before anything under src/ can run.
++ *
++ * Every case in the suites that import this file reaches the code under
++ * test through the ordinary `expect`, and that `expect` is chai underneath.
++ * A module under src/ evaluates before the first case and could reach the
++ * same chai, so this file, imported ahead of src/ in each suite, keeps a
++ * record of what the assertion prototype looked like at that moment and can
++ * say later whether anything on it was swapped. A handful of cases ask.
++ */
++
++const prototype: object = chai.Assertion.prototype;
++
++const recorded = new Map<string | symbol, PropertyDescriptor>();
++for (const key of Reflect.ownKeys(prototype)) {
++  const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
++  if (descriptor !== undefined) {
++    recorded.set(key, descriptor);
++  }
++}
++
++function same(a: PropertyDescriptor, b: PropertyDescriptor): boolean {
++  return a.value === b.value && a.get === b.get && a.set === b.set;
++}
++
++/** Throws when a false assertion no longer fails or a matcher was replaced. */
++export function verifyAssertions(): void {
++  let refused = false;
++  try {
++    expect(1).toBe(2);
++  } catch {
++    refused = true;
++  }
++  if (!refused) {
++    throw new Error("a false toBe no longer fails");
++  }
++  refused = false;
++  try {
++    expect({ pin: 1 }).toEqual({ pin: 2 });
++  } catch {
++    refused = true;
++  }
++  if (!refused) {
++    throw new Error("a false toEqual no longer fails");
++  }
++  refused = false;
++  try {
++    expect([1, 2]).toHaveLength(3);
++  } catch {
++    refused = true;
++  }
++  if (!refused) {
++    throw new Error("a false toHaveLength no longer fails");
++  }
++  try {
++    expect(1).toBe(1);
++    expect({ pin: 1 }).toEqual({ pin: 1 });
++  } catch {
++    throw new Error("a true assertion fails");
++  }
++  for (const [key, descriptor] of recorded) {
++    const live = Object.getOwnPropertyDescriptor(prototype, key);
++    if (live === undefined || !same(live, descriptor)) {
++      throw new Error(
++        `assertion ${String(key)} was replaced after the suite loaded`,
++      );
++    }
++  }
++  for (const key of Reflect.ownKeys(prototype)) {
++    if (!recorded.has(key)) {
++      throw new Error(
++        `assertion ${String(key)} appeared after the suite loaded`,
++      );
++    }
++  }
++}
++
++/** How many matchers the record holds, so a case can see it is not empty. */
++export function recordedMatchers(): number {
++  return recorded.size;
++}
+diff --git a/tests/timeline/oneOutput.test.ts b/tests/timeline/oneOutput.test.ts
+new file mode 100644
+index 0000000..073e670
+--- /dev/null
++++ b/tests/timeline/oneOutput.test.ts
+@@ -0,0 +1,373 @@
++import { describe, expect, it } from "vitest";
++import { verifyAssertions } from "../support/frozenExpect.js";
++import { calibre } from "../../src/catalog/calibre.js";
++import type { Mine } from "../../src/catalog/effect.js";
++import { shell } from "../../src/catalog/effect.js";
++import { hazardTotals, netExplosiveGrams } from "../../src/catalog/hazard.js";
++import { Catalog } from "../../src/catalog/registry.js";
++import { compile } from "../../src/compile.js";
++import type { CompileOptions } from "../../src/compile.js";
++import { countBy } from "../../src/core/collect.js";
++import { effectId, positionId } from "../../src/core/ids.js";
++import { metres, mm, ms, raw } from "../../src/core/units.js";
++import { findEvent } from "../../src/export/explain.js";
++import { firingTableRows, rowCount } from "../../src/export/firingTable.js";
++import { permitFacts } from "../../src/export/permit.js";
++import { firingModule, modelNamed } from "../../src/rig/module.js";
++import { formatPin } from "../../src/rig/pin.js";
++import { planRedundancy, redundancyCost } from "../../src/rig/redundancy.js";
++import { Rig, firingPosition } from "../../src/rig/rig.js";
++import { point, site, straightLine } from "../../src/safety/site.js";
++import { chainCandidates } from "../../src/timeline/chain.js";
++import { densityReport } from "../../src/timeline/density.js";
++import {
++  diffSchedules,
++  needsRewiring,
++  summariseDiff,
++} from "../../src/timeline/diff.js";
++import { checkLoad, loadReport } from "../../src/timeline/load.js";
++import { checkQuantisation } from "../../src/timeline/quantise.js";
++import { rehearsalSteps } from "../../src/timeline/rehearsal.js";
++
++/**
++ * What the rest of the compiler makes of a run fired from one output: the
++ * panel sees one cue, the sky and the paperwork see every shell.
++ */
++
++const mine: Mine = {
++  kind: "mine",
++  id: effectId("mine.100"),
++  name: "mine",
++  calibre: calibre(mm(100)),
++  spreadAngle: 40,
++  height: metres(35),
++  hangTime: ms(1800),
++};
++const catalog = Catalog.from([
++  mine,
++  shell({ id: effectId("shell.75"), name: "three", calibre: calibre(mm(75)) }),
++  shell({ id: effectId("shell.150"), name: "six", calibre: calibre(mm(150)) }),
++]);
++
++const fc32 = modelNamed("fc-32")!;
++
++function rigOf(modules: number): Rig {
++  return Rig.from(
++    [firingPosition(positionId("pad.a"), 0, 0)],
++    Array.from({ length: modules }, (_, i) =>
++      firingModule(i + 1, fc32, positionId("pad.a")),
++    ),
++  );
++}
++
++const oneModule = rigOf(1);
++const twoModules = rigOf(2);
++
++function build(source: string, rig: Rig, extra: Partial<CompileOptions> = {}) {
++  return compile(source, "show.pf", {
++    catalog,
++    rig,
++    allocation: { packTight: true },
++    density: { lullThreshold: ms(120000) },
++    ...extra,
++  });
++}
++
++const CHAINED = "at 10 ripple 6 of mine.100 from pad.a every 250ms chained";
++const LOOSE = "at 10 ripple 6 of mine.100 from pad.a every 250ms";
++
++describe("landing on the panel's clock", () => {
++  it("snaps the head onto a frame", () => {
++    verifyAssertions();
++    const result = build(CHAINED, oneModule);
++    expect(result.ok).toBe(true);
++    const head = result.schedule.events.find((event) => raw(event.fuse!) === 0);
++    expect(head).toBeDefined();
++    expect(raw(head!.ignitionAt) % 40).toBe(0);
++  });
++
++  it("times every follower off the head by its fuse, not off the clock", () => {
++    const result = build(CHAINED, oneModule);
++    const events = [...result.schedule.events].sort(
++      (a, b) => raw(a.fuse!) - raw(b.fuse!),
++    );
++    const head = events[0]!;
++    for (const event of events) {
++      expect(raw(event.ignitionAt)).toBe(
++        raw(head.ignitionAt) + raw(event.fuse!),
++      );
++    }
++    // 250ms steps from a frame boundary miss the 40ms grid on all but one
++    // shot in four; a run that lands every shot on a frame was snapped twice.
++    const offGrid = events.filter((event) => raw(event.ignitionAt) % 40 !== 0);
++    expect(offGrid.length).toBeGreaterThan(0);
++  });
++
++  it("gives a follower the head's drift as its own", () => {
++    const result = build(
++      "at 10.045 ripple 5 of mine.100 from pad.a every 250ms chained",
++      oneModule,
++    );
++    const drifts = new Set(
++      result.schedule.events.map((event) => raw(event.drift)),
++    );
++    expect(drifts.size).toBe(1);
++    expect([...drifts][0]).not.toBe(0);
++  });
++
++  it("raises no frame warning for a run the fuse times", () => {
++    const tight = "at 10 ripple 6 of mine.100 from pad.a every 10ms chained";
++    const chained = build(tight, oneModule);
++    expect(chained.ok).toBe(true);
++    expect(checkQuantisation(chained.schedule).size).toBe(0);
++    const loose = build(
++      "at 10 ripple 6 of mine.100 from pad.a every 10ms",
++      oneModule,
++    );
++    expect(checkQuantisation(loose.schedule).size).toBeGreaterThan(0);
++  });
++
++  it("keeps the fuse across a pre roll being absorbed", () => {
++    const early = "at 0.5 ripple 4 of shell.150 from pad.a every 300ms chained";
++    const result = build(early, oneModule, { absorbPreRoll: true });
++    expect(raw(result.preRoll)).toBe(0);
++    const events = [...result.schedule.events].sort(
++      (a, b) => raw(a.fuse!) - raw(b.fuse!),
++    );
++    expect(raw(events[0]!.ignitionAt)).toBeGreaterThanOrEqual(0);
++    expect(events.map((event) => raw(event.fuse!))).toEqual([0, 300, 600, 900]);
++    for (const event of events) {
++      expect(raw(event.ignitionAt)).toBe(
++        raw(events[0]!.ignitionAt) + raw(event.fuse!),
++      );
++    }
++  });
++});
++
++describe("what the module is asked to do", () => {
++  it("closes one output for a chained run", () => {
++    const fast = "at 9.99 ripple 12 of mine.100 from pad.a every 1ms chained";
++    const result = build(fast, oneModule);
++    expect(result.ok).toBe(true);
++    const report = loadReport(result.schedule, oneModule);
++    expect(report).toHaveLength(1);
++    expect(report[0]?.peakSimultaneous).toBe(1);
++    expect(checkLoad(result.schedule, oneModule).size).toBe(0);
++  });
++
++  it("still refuses the same run when it is not chained", () => {
++    const fast = "at 9.99 ripple 12 of mine.100 from pad.a every 1ms";
++    const result = build(fast, oneModule);
++    expect(result.ok).toBe(false);
++    expect(loadReport(result.schedule, oneModule)[0]?.peakSimultaneous).toBe(
++      12,
++    );
++    // the same script with the clause is the one output the module can do
++    expect(build(`${fast} chained`, oneModule).ok).toBe(true);
++  });
++
++  it("shows a watcher one light for the run", () => {
++    const result = build(
++      [CHAINED, "at 20 fire mine.100 from pad.a"].join("\n"),
++      oneModule,
++    );
++    const steps = rehearsalSteps(result.schedule);
++    expect(steps).toHaveLength(2);
++    expect(steps[0]?.outputs).toBe(1);
++    expect(steps[0]?.pins).toHaveLength(1);
++    expect(steps[1]?.outputs).toBe(1);
++  });
++});
++
++describe("what goes on the panel's card", () => {
++  const source = [
++    "at 5 fire mine.100 from pad.a label opener",
++    CHAINED,
++    "at 20 fire shell.75 from pad.a label closer",
++  ].join("\n");
++
++  it("writes one row for the run", () => {
++    const result = build(source, twoModules);
++    expect(result.ok).toBe(true);
++    const rows = firingTableRows(result.schedule);
++    expect(rows).toHaveLength(3);
++    expect(rowCount(result.schedule)).toBe(3);
++    expect(rows.map((row) => row[0])).toEqual(["1", "2", "3"]);
++  });
++
++  it("puts the head's time and address on that row", () => {
++    const result = build(source, twoModules);
++    const head = result.schedule.events.find(
++      (event) => raw(event.fuse!) === 0,
++    )!;
++    const row = firingTableRows(result.schedule, {
++      timeStyle: "milliseconds",
++    })[1]!;
++    expect(row[1]).toBe(String(Math.round(raw(head.ignitionAt))));
++    expect(row[2]).toBe(formatPin(head.address));
++    expect(row[3]).toBe("mine.100");
++  });
++
++  it("numbers cues the way the table does when explaining one", () => {
++    const result = build(source, twoModules);
++    expect(findEvent(result.schedule, "1")?.label).toBe("opener");
++    expect(findEvent(result.schedule, "2")?.effectId).toBe("mine.100");
++    expect(raw(findEvent(result.schedule, "2")!.fuse!)).toBe(0);
++    expect(findEvent(result.schedule, "3")?.label).toBe("closer");
++    expect(findEvent(result.schedule, "4")).toBeUndefined();
++  });
++});
++
++describe("what goes up and what is on paper", () => {
++  const field = site(
++    "meadow",
++    straightLine("spectator line", point(-500, -400), point(500, -400)),
++  );
++
++  it("lights every shell of the run", () => {
++    const result = build(CHAINED, oneModule);
++    expect(densityReport(result.schedule).peak).toBe(6);
++  });
++
++  it("consumes a shell per shot", () => {
++    const result = build(
++      [CHAINED, "at 20 fire shell.75 from pad.a"].join("\n"),
++      oneModule,
++    );
++    const needed = countBy(result.schedule.events, (event) => event.effectId);
++    expect(needed.get("mine.100")).toBe(6);
++    expect(needed.get("shell.75")).toBe(1);
++    expect(
++      result.assignments.filter((a) => a.shot.effect === "mine.100"),
++    ).toHaveLength(6);
++  });
++
++  it("weighs every shell of the run for transport", () => {
++    const result = build(CHAINED, oneModule);
++    const counts = countBy(result.schedule.events, (event) => event.effectId);
++    const totals = hazardTotals([mine], counts);
++    expect(totals.totalGrams).toBe(6 * netExplosiveGrams(mine));
++  });
++
++  it("tells the permit its cues from its shots", () => {
++    const result = build(
++      [CHAINED, "at 20 fire shell.75 from pad.a"].join("\n"),
++      oneModule,
++    );
++    const facts = permitFacts(result.schedule, oneModule, field, {
++      showName: "autumn",
++      siteName: "meadow",
++    });
++    expect(facts.cueCount).toBe(2);
++    expect(facts.shotCount).toBe(7);
++    expect(facts.effectCounts.get("mine.100")).toBe(6);
++  });
++});
++
++describe("advice and doubling", () => {
++  it("does not suggest chaining a run that is chained", () => {
++    const chained = build(
++      "at 10 ripple 8 of shell.75 from pad.a every 400ms chained",
++      oneModule,
++      { advice: true },
++    );
++    expect(chained.ok).toBe(true);
++    expect(chainCandidates(chained.schedule)).toEqual([]);
++    const loose = build(
++      "at 10 ripple 8 of shell.75 from pad.a every 400ms",
++      oneModule,
++      { advice: true },
++    );
++    expect(chainCandidates(loose.schedule)).toHaveLength(1);
++    // the one note the loose run earns is the suggestion to chain it
++    expect(loose.diagnostics.size - chained.diagnostics.size).toBe(1);
++  });
++
++  it("still suggests a loose run beside a chained one", () => {
++    const result = build(
++      [
++        "at 10 ripple 8 of shell.75 from pad.a every 400ms chained",
++        "at 20 ripple 8 of shell.75 from pad.a every 400ms",
++      ].join("\n"),
++      twoModules,
++      { advice: true },
++    );
++    const found = chainCandidates(result.schedule);
++    expect(found).toHaveLength(1);
++    expect(found[0]?.events).toHaveLength(8);
++    expect(found[0]?.events.every((event) => event.fuse === undefined)).toBe(
++      true,
++    );
++  });
++
++  it("backs a chained run up once, on its head", () => {
++    verifyAssertions();
++    const result = build(
++      "at 10 ripple 6 of shell.150 from pad.a every 400ms chained",
++      twoModules,
++    );
++    const plans = planRedundancy(result.assignments, twoModules);
++    expect(redundancyCost(plans).extraPins).toBe(1);
++    const backed = plans.filter((plan) => plan.backup !== undefined);
++    expect(backed).toHaveLength(1);
++    expect(raw(backed[0]!.assignment.shot.fuse!)).toBe(0);
++  });
++});
++
++describe("what changed since the field was wired", () => {
++  it("compares a chained run head to head", () => {
++    const before = build(CHAINED, oneModule);
++    const after = build(CHAINED, oneModule);
++    const changes = diffSchedules(before.schedule, after.schedule);
++    expect(changes).toEqual([]);
++    const summary = summariseDiff(before.schedule, after.schedule);
++    expect(summary.identical).toBe(true);
++    expect(summary.unchanged).toBe(1);
++  });
++
++  it("reports a run that gained a shot as a swap on its pin", () => {
++    const before = build(CHAINED, oneModule);
++    const after = build(
++      "at 10 ripple 7 of mine.100 from pad.a every 250ms chained",
++      oneModule,
++    );
++    const changes = diffSchedules(before.schedule, after.schedule);
++    expect(changes).toHaveLength(1);
++    expect(changes[0]?.kind).toBe("swapped");
++    expect(needsRewiring(changes)).toBe(true);
++  });
++
++  it("reports a run cut to another interval as a swap", () => {
++    const before = build(CHAINED, oneModule);
++    const after = build(
++      "at 10 ripple 6 of mine.100 from pad.a every 300ms chained",
++      oneModule,
++    );
++    const changes = diffSchedules(before.schedule, after.schedule);
++    expect(changes).toHaveLength(1);
++    expect(changes[0]?.kind).toBe("swapped");
++  });
++
++  it("reports a run that only moved as moved", () => {
++    const before = build(CHAINED, oneModule);
++    const after = build(
++      "at 12 ripple 6 of mine.100 from pad.a every 250ms chained",
++      oneModule,
++    );
++    const changes = diffSchedules(before.schedule, after.schedule);
++    expect(changes).toHaveLength(1);
++    expect(changes[0]?.kind).toBe("moved");
++    expect(changes[0]?.shiftMs).toBe(2000);
++    expect(needsRewiring(changes)).toBe(false);
++  });
++
++  it("reports chaining a loose run as the field changing", () => {
++    const before = build(LOOSE, oneModule);
++    const after = build(CHAINED, oneModule);
++    const changes = diffSchedules(before.schedule, after.schedule);
++    expect(needsRewiring(changes)).toBe(true);
++    expect(changes.filter((change) => change.kind === "removed")).toHaveLength(
++      5,
++    );
++  });
++});
